@@ -365,14 +365,14 @@ class Updater:
       # dp logic
       if x is not None:
         name = x.group('branch_name')
-
-        # Check for version X.Y.Z at the start (ignores trailing suffixes like -pre-build)
+        # 使用正規表達式精準捕捉 DP-版本號-cluster（例如 DP-0.10.3-cluster、DP-0.11.1-cluster）
+        dp_cluster_m = re.match(r'^DP-(\d+)\.(\d+)\.(\d+)-cluster$', name)
         m = re.match(r'^(\d+)\.(\d+)\.(\d+)', name)
 
-        # Logic:
-        # 1. Allow exactly 'pre-build'
-        # 2. OR Allow if it parses as a version AND that version is >= 0.9.8
-        if (name.startswith('DP-') and name.endswith('-cluster')) or (m and tuple(map(int, m.groups())) >= (0, 9, 8)):
+        # 判斷是否符合 DP-版本號-cluster 且版本 >= 0.9.8，或是符合一般版本號 >= 0.9.8
+        if (dp_cluster_m and tuple(map(int, dp_cluster_m.groups())) >= (0, 9, 8)) or (
+            m and tuple(map(int, m.groups())) >= (0, 9, 8)
+        ):
           self.branches[name] = x.group('commit_sha')
 
     cur_branch = self.get_branch(OVERLAY_MERGED)
