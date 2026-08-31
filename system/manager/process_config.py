@@ -134,6 +134,10 @@ procs = [
   PythonProcess("gpsd", "dragonpilot.dashy.gpsd", and_(dashy, only_onroad)),
   PythonProcess("maad", "dragonpilot.dashy.maa.maad", and_(dashy, only_onroad)),
   # PythonProcess("maa_controld", "dragonpilot.dashy.maa.maa_controld", and_(dashy, only_onroad)),
+
+    #TURZX
+  PythonProcess("cluster_d", "selfdrive.dp.cluster_autorun", always_run, restart_if_crash=True),
+  PythonProcess("soundd", "selfdrive.ui.soundd", driverview, enabled=not LITE),
 ]
 
 managed_processes = {p.name: p for p in procs}
