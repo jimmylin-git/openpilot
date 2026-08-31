@@ -372,7 +372,7 @@ class Updater:
         # Logic:
         # 1. Allow exactly 'pre-build'
         # 2. OR Allow if it parses as a version AND that version is >= 0.9.8
-        if name in ('testing', 'pre-build') or (m and tuple(map(int, m.groups())) >= (0, 9, 8)):
+        if (name.startswith('DP-') and name.endswith('-cluster')) or (m and tuple(map(int, m.groups())) >= (0, 9, 8)):
           self.branches[name] = x.group('commit_sha')
 
     cur_branch = self.get_branch(OVERLAY_MERGED)
