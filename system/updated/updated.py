@@ -341,7 +341,7 @@ class Updater:
         remaining = max(HOURS_NO_CONNECTIVITY_MAX - dt_uptime_onroad, 1)
         set_offroad_alert("Offroad_ConnectivityNeededPrompt", True, extra_text=f"{remaining} hour{'' if remaining == 1 else 's'}.")
 
-  def check_for_update(self) -> None:
+def check_for_update(self) -> None:
     cloudlog.info("checking for updates")
 
     excluded_branches = ('release2', 'release2-staging')
@@ -359,18 +359,16 @@ class Updater:
     for line in output.split('\n'):
       ls_remotes_re = r'(?P<commit_sha>\b[0-9a-f]{5,40}\b)(\s+)(refs\/heads\/)(?P<branch_name>.*$)'
       x = re.fullmatch(ls_remotes_re, line.strip())
-      # if x is not None and x.group('branch_name') not in excluded_branches:
-      #   self.branches[x.group('branch_name')] = x.group('commit_sha')
 
-      # dp logic
+      # sp/dp cluster logic
       if x is not None:
         name = x.group('branch_name')
-        # 使用正規表達式精準捕捉 DP-版本號-cluster（例如 DP-0.10.3-cluster、DP-0.11.1-cluster）
-        dp_cluster_m = re.match(r'^DP-(\d+)\.(\d+)\.(\d+)-cluster$', name)
+        # 同時精準捕捉 SP-版本號-cluster 或 DP-版本號-cluster
+        cluster_m = re.match(r'^(?:SP|DP)-(\d+)\.(\d+)\.(\d+)-cluster$', name)
         m = re.match(r'^(\d+)\.(\d+)\.(\d+)', name)
 
-        # 判斷是否符合 DP-版本號-cluster 且版本 >= 0.9.8，或是符合一般版本號 >= 0.9.8
-        if (dp_cluster_m and tuple(map(int, dp_cluster_m.groups())) >= (0, 9, 8)) or (
+        # 判斷是否符合 SP/DP-版本號-cluster 且版本 >= 0.9.8，或是符合一般版本號 >= 0.9.8
+        if (cluster_m and tuple(map(int, cluster_m.groups())) >= (0, 9, 8)) or (
             m and tuple(map(int, m.groups())) >= (0, 9, 8)
         ):
           self.branches[name] = x.group('commit_sha')
