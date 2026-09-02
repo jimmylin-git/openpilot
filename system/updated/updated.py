@@ -341,7 +341,7 @@ class Updater:
         remaining = max(HOURS_NO_CONNECTIVITY_MAX - dt_uptime_onroad, 1)
         set_offroad_alert("Offroad_ConnectivityNeededPrompt", True, extra_text=f"{remaining} hour{'' if remaining == 1 else 's'}.")
 
-def check_for_update(self) -> None:
+  def check_for_update(self) -> None:
     cloudlog.info("checking for updates")
 
     excluded_branches = ('release2', 'release2-staging')
