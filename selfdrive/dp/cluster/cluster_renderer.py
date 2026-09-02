@@ -2895,7 +2895,7 @@ class ClusterUiRenderer:
 
         theme = self._current_theme()
         color = self._git_status_color(status, theme)
-        text = status.branch if not status.detail else f"{status.branch} ({status.detail})"
+        text = status.branch # if not status.detail else f"{status.branch} ({status.detail})"
         text_size = 20
         text = self._ellipsize_text(text, text_size, GIT_STATUS_MAX_TEXT_W)
         spacing = max(1.0, text_size * 0.02)
