@@ -71,7 +71,7 @@ OPENPILOT_FONT_DIR = SELFDRIVE_DIR / "assets" / "fonts"
 OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
-VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "cybertruck" / "cybertruck_cluster.obj"
+VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "hatchback" / "hatchback.obj"
 FOLLOW_VEHICLE_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "car.png"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "wheel.png"
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
@@ -91,7 +91,7 @@ GEAR_STATUS_OUTLINE_WIDTH = 2.0 * DRIVE_STATUS_SCALE
 FOLLOW_STATUS_CENTER_X = GEAR_STATUS_CENTER_X + 132
 FOLLOW_STATUS_W = 160
 FOLLOW_STATUS_H = 42.0 * DRIVE_STATUS_SCALE
-FOLLOW_STATUS_GAP_BARS = 4
+FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_ACTIVE = (187, 61, 145, 255)
 FOLLOW_GAP_INACTIVE = (118, 122, 128, 150)
 FOLLOW_GAP_BAR_W = 5.4
@@ -1396,7 +1396,13 @@ class ClusterUiRenderer:
                 continue
             tag = parts[0]
             if tag == "v" and len(parts) >= 4:
-                vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
+                #vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
+                scale = 0.05  # 視模型實際過大的程度調整（例如 0.1 或 0.05）
+                vertices.append((
+                    float(parts[1]) * scale,
+                    float(parts[2]) * scale,
+                    float(parts[3]) * scale
+                ))
             elif tag == "vn" and len(parts) >= 4:
                 normals.append((float(parts[1]), float(parts[2]), float(parts[3])))
             elif tag == "usemtl" and len(parts) >= 2:
@@ -3018,14 +3024,14 @@ class ClusterUiRenderer:
         x = FOLLOW_STATUS_CENTER_X - FOLLOW_STATUS_W * 0.5
 
         gap_count = 0 if state.cruise_gap is None else int(clamp(float(state.cruise_gap), 1.0, float(FOLLOW_STATUS_GAP_BARS)))
-        bar_w = FOLLOW_GAP_BAR_W * FOLLOW_GAP_BAR_SCALE * 1.2
+        bar_w = FOLLOW_GAP_BAR_W * FOLLOW_GAP_BAR_SCALE * 0.8
         bar_h = FOLLOW_GAP_BAR_H * FOLLOW_GAP_BAR_SCALE * 2.5
         bar_r = FOLLOW_GAP_BAR_R * FOLLOW_GAP_BAR_SCALE
         bar_step = FOLLOW_GAP_BAR_STEP_X * FOLLOW_GAP_BAR_SCALE
         bars_total_w = bar_w + bar_step * (FOLLOW_STATUS_GAP_BARS - 1)
         icon_x = x + FOLLOW_STATUS_W - FOLLOW_GAP_ICON_W
         icon_y = bottom_y - FOLLOW_GAP_ICON_H
-        bar_x = icon_x - bars_total_w - 10.0
+        bar_x = icon_x - bars_total_w - 13.0
         bar_y = bottom_y - bar_h
         for index in range(FOLLOW_STATUS_GAP_BARS):
             active = index >= FOLLOW_STATUS_GAP_BARS - gap_count
