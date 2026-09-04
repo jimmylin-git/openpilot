@@ -71,7 +71,7 @@ OPENPILOT_FONT_DIR = SELFDRIVE_DIR / "assets" / "fonts"
 OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
-VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "hatchback" / "hatchback.obj"
+VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "hatchback" / "car.obj"
 FOLLOW_VEHICLE_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "car.png"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "wheel.png"
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
@@ -1396,13 +1396,7 @@ class ClusterUiRenderer:
                 continue
             tag = parts[0]
             if tag == "v" and len(parts) >= 4:
-                #vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
-                scale = 0.05  # 視模型實際過大的程度調整（例如 0.1 或 0.05）
-                vertices.append((
-                    float(parts[1]) * scale,
-                    float(parts[2]) * scale,
-                    float(parts[3]) * scale
-                ))
+                vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
             elif tag == "vn" and len(parts) >= 4:
                 normals.append((float(parts[1]), float(parts[2]), float(parts[3])))
             elif tag == "usemtl" and len(parts) >= 2:
