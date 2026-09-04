@@ -9,6 +9,9 @@ import time
 import base64
 import hashlib
 import struct
+import base64
+import hashlib
+import struct
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
@@ -39,8 +42,7 @@ class StreamState:
         self.event.clear()
 
 
-_CTRL_HTML = '<!DOCTYPE html><html><head>\n<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,maximum-scale=1">\n<title>openpilot remote</title>\n<style>\n*{margin:0;padding:0;box-sizing:border-box;user-select:none;-webkit-user-select:none;touch-action:none}\nhtml,body{background:#000;height:100%;width:100%;overflow:hidden}\n#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}\n#badge{position:absolute;top:8px;right:8px;z-index:9;background:rgba(0,0,0,0.55);color:#0f0;font:600 13px/1.4 -apple-system,sans-serif;padding:5px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.25);pointer-events:none}\n#toggle{position:absolute;bottom:10px;right:10px;z-index:9;background:rgba(0,0,0,0.6);color:#fff;font:600 13px -apple-system,sans-serif;padding:8px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.35)}\n#toggle.off{color:#888}\n</style></head><body>\n<img id="cam" src="/stream" draggable="false">\n<div id="badge">CTRL: OFF</div>\n<div id="toggle" ontouchstart="event.stopPropagation()" onclick="toggleCtrl(event)">ENABLE TOUCH</div>\n<script>\nlet ws=null, enabled=false, active={};\nfunction toggleCtrl(e){e.stopPropagation();enabled=!enabled;document.getElementById(\'toggle\').textContent=enabled?\'DISABLE TOUCH\':\'ENABLE TOUCH\';document.getElementById(\'toggle\').className=enabled?\'\':\'off\';document.getElementById(\'badge\').textContent=\'CTRL: \'+(enabled?\'ON\':\'OFF\');connect();}\nfunction connect(){\n  if(ws) try{ws.close()}catch(e){}\n  if(!enabled) return;\n  ws=new WebSocket((location.protocol===\'https:\'?\'wss://\':\'ws://\')+location.host+\'/ws\');\n  ws.onopen=()=>{document.getElementById(\'badge\').style.color=\'#0f0\'};\n  ws.onclose=()=>{document.getElementById(\'badge\').style.color=\'#f44\';if(enabled)setTimeout(connect,1000)};\n  ws.onerror=()=>{try{ws.close()}catch(e){}};\n}\nfunction norm(e){\n  const img=document.getElementById(\'cam\'), r=img.getBoundingClientRect();\n  const nw=img.naturalWidth, nh=img.naturalHeight;\n  if(!nw||!nh) return null;\n  let dw=r.width, dh=r.height, ox=0, oy=0;\n  if(dw/dh > nw/nh){ const h=dh; dw=dh*(nw/nh); ox=(r.width-dw)/2; }\n  else { const w=dw; dh=dw/(nw/nh); oy=(r.height-dh)/2; }\n  const x=(e.clientX-r.left-ox)/dw, y=(e.clientY-r.top-oy)/dh;\n  if(x<-0.02||x>1.02||y<-0.02||y>1.02) return null;\n  return {x:Math.min(1,Math.max(0,x)), y:Math.min(1,Math.max(0,y))};\n}\nfunction slotFor(id){ if(active[id]!==undefined) return active[id];\n  const used=Object.values(active); let slot=used.indexOf(0)<0?0:(used.indexOf(1)<0?1:0); active[id]=slot; return slot; }\nfunction send(t,e){ if(!ws||ws.readyState!==1) return; const n=norm(e); if(!n) return;\n  const slot=slotFor(e.pointerId!==undefined?e.pointerId:0);\n  ws.send(JSON.stringify({t:t,x:n.x,y:n.y,i:slot})); }\ndocument.addEventListener(\'pointerdown\',e=>{ if(!enabled) return; if(e.target.id===\'toggle\') return;\n  try{e.target.setPointerCapture&&e.target.setPointerCapture(e.pointerId)}catch(_){}\n  send(\'down\',e); });\ndocument.addEventListener(\'pointermove\',e=>{ if(!enabled) return; send(\'move\',e); });\nfunction end(e){ if(!enabled) return; send(\'up\',e); if(active[e.pointerId]!==undefined) delete active[e.pointerId]; }\ndocument.addEventListener(\'pointerup\',end);\ndocument.addEventListener(\'pointercancel\',end);\ndocument.addEventListener(\'contextmenu\',e=>e.preventDefault());\n</script></body></html>'
-
+_CTRL_HTML = '<!DOCTYPE html><html><head>\n<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,maximum-scale=1">\n<title>openpilot remote</title>\n<style>\n*{margin:0;padding:0;box-sizing:border-box;user-select:none;-webkit-user-select:none;touch-action:none}\nhtml,body{background:#000;height:100%;width:100%;overflow:hidden}\n#cam{position:fixed;inset:0;width:100vw;height:100vh;background:#000}\n#badge{position:fixed;top:8px;right:8px;z-index:9;background:rgba(0,0,0,0.55);color:#0f0;font:600 12px/1.4 -apple-system,sans-serif;padding:4px 9px;border-radius:8px;border:1px solid rgba(255,255,255,0.25);pointer-events:none}\n#cfg{position:fixed;top:8px;left:8px;z-index:9;background:rgba(0,0,0,0.55);color:#aaa;font:11px -apple-system,sans-serif;padding:4px 9px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);pointer-events:none}\n#toggle{position:fixed;bottom:12px;right:12px;z-index:9;background:rgba(0,0,0,0.6);color:#fff;font:600 13px -apple-system,sans-serif;padding:8px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.35)}\n#toggle.off{color:#888}\n</style></head><body>\n<canvas id="cam"></canvas>\n<div id="badge">CTRL: OFF</div>\n<div id="cfg">q45 f20 s0.5</div>\n<div id="toggle" ontouchstart="event.stopPropagation()" onclick="toggleCtrl(event)">ENABLE TOUCH</div>\n<script>\nlet ws=null, enabled=false, active={}, vws=null, aspect=null, frames=0, t0=performance.now(), cfgQ=45, cfgF=20, cfgS=0.5;\nconst cv=document.getElementById(\'cam\'), ctx=cv.getContext(\'2d\',{desynchronized:true});\nfunction fit(){cv.width=innerWidth;cv.height=innerHeight;}\naddEventListener(\'resize\',fit); fit();\nfunction draw(bmp){\n  aspect=bmp.width/bmp.height;\n  const r=cv.getBoundingClientRect();\n  let dw=r.width,dh=r.height,ox=0,oy=0;\n  if(dw/dh>aspect){const hh=dh;dw=dh*aspect;ox=(r.width-dw)/2;}else{const ww=dw;dh=dw/aspect;oy=(r.height-dh)/2;}\n  ctx.fillStyle=\'#000\';ctx.fillRect(0,0,r.width,r.height);\n  ctx.drawImage(bmp,ox,oy,dw,dh);\n}\nfunction connectVideo(){\n  if(vws)try{vws.close()}catch(e){}\n  vws=new WebSocket((location.protocol===\'https:\'?\'wss://\':\'ws://\')+location.host+\'/wsstream\');\n  vws.binaryType=\'blob\';\n  vws.onmessage=async ev=>{try{const bmp=await createImageBitmap(ev.data);draw(bmp);bmp.close();frames++;const dt=(performance.now()-t0)/1000;if(dt>2){document.getElementById(\'cfg\').textContent=\'q\'+cfgQ+\' f\'+cfgF+\' s\'+cfgS+\' | \'+Math.round(frames/dt)+\'fps\';frames=0;t0=performance.now();}}catch(e){}};\n  vws.onclose=()=>{setTimeout(connectVideo,500)};\n  vws.onerror=()=>{try{vws.close()}catch(e){}};\n}\nfunction applyCfg(){fetch(\'/config?fps=\'+cfgF+\'&quality=\'+cfgQ+\'&scale=\'+cfgS).catch(()=>{});document.getElementById(\'cfg\').textContent=\'q\'+cfgQ+\' f\'+cfgF+\' s\'+cfgS;}\nfunction toggleCtrl(e){e.stopPropagation();enabled=!enabled;document.getElementById(\'toggle\').textContent=enabled?\'DISABLE TOUCH\':\'ENABLE TOUCH\';document.getElementById(\'toggle\').className=enabled?\'\':\'off\';document.getElementById(\'badge\').textContent=\'CTRL: \'+(enabled?\'ON\':\'OFF\');connect();}\nfunction connect(){if(ws)try{ws.close()}catch(e){};if(!enabled)return;\n  ws=new WebSocket((location.protocol===\'https:\'?\'wss://\':\'ws://\')+location.host+\'/ws\');\n  ws.onopen=()=>{document.getElementById(\'badge\').style.color=\'#0f0\'};\n  ws.onclose=()=>{document.getElementById(\'badge\').style.color=\'#f44\';if(enabled)setTimeout(connect,1000)};\n  ws.onerror=()=>{try{ws.close()}catch(e){}};}\nfunction norm(e){const r=cv.getBoundingClientRect();if(!aspect)return null;\n  let dw=r.width,dh=r.height,ox=0,oy=0;\n  if(dw/dh>aspect){const hh=dh;dw=dh*aspect;ox=(r.width-dw)/2;}else{const ww=dw;dh=dw/aspect;oy=(r.height-dh)/2;}\n  const x=(e.clientX-r.left-ox)/dw, y=(e.clientY-r.top-oy)/dh;\n  if(x<-0.02||x>1.02||y<-0.02||y>1.02)return null;\n  return {x:Math.min(1,Math.max(0,x)),y:Math.min(1,Math.max(0,y))};}\nfunction slotFor(id){if(active[id]!==undefined)return active[id];\n  const used=Object.values(active);let slot=used.indexOf(0)<0?0:(used.indexOf(1)<0?1:0);active[id]=slot;return slot;}\nfunction send(t,e){if(!ws||ws.readyState!==1)return;const n=norm(e);if(!n)return;\n  const slot=slotFor(e.pointerId!==undefined?e.pointerId:0);\n  ws.send(JSON.stringify({t:t,x:n.x,y:n.y,i:slot}));}\ndocument.addEventListener(\'pointerdown\',e=>{if(!enabled)return;if(e.target.id===\'toggle\')return;\n  try{e.target.setPointerCapture&&e.target.setPointerCapture(e.pointerId)}catch(_){}\n  send(\'down\',e);});\ndocument.addEventListener(\'pointermove\',e=>{if(!enabled)return;send(\'move\',e);});\nfunction end(e){if(!enabled)return;send(\'up\',e);if(active[e.pointerId]!==undefined)delete active[e.pointerId];}\ndocument.addEventListener(\'pointerup\',end);\ndocument.addEventListener(\'pointercancel\',end);\ndocument.addEventListener(\'contextmenu\',e=>e.preventDefault());\nconnectVideo(); applyCfg();\n</script></body></html>'
 _OVERLAY_HTML = """<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>openpilot live</title>
@@ -231,6 +233,10 @@ class StreamHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(_CTRL_HTML)))
             self.end_headers()
             self.wfile.write(_CTRL_HTML.encode())
+        elif self.path == "/wsstream":
+            _handle_ws_stream(self)
+        elif self.path.startswith("/config"):
+            self._handle_config()
         elif self.path == "/stream":
             self.send_response(200)
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=--frame")
@@ -285,6 +291,26 @@ class StreamHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def _handle_config(self):
+      try:
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        if qs.get("fps"):
+          _cfg["fps"] = max(1, min(60, int(qs["fps"][0])))
+        if qs.get("quality"):
+          _cfg["quality"] = max(1, min(95, int(qs["quality"][0])))
+        if qs.get("scale"):
+          _cfg["scale"] = max(0.1, min(1.0, float(qs["scale"][0])))
+        body = json.dumps(_cfg).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+      except Exception:
+        self.send_response(500)
+        self.end_headers()
+
     def log_message(self, *a):
         pass
 
@@ -295,10 +321,19 @@ _counter = 0
 _state = None
 _counter = 0
 _last_tel = 0.0
-_enc_queue = None
 _app = None
 _slot_pressed = [False, False]
 _inject_logged = False
+_pending = None
+_pending_lock = threading.Lock()
+_pending_evt = threading.Event()
+_ws_clients = []
+_ws_clients_lock = threading.Lock()
+_cfg = {
+  "fps": int(os.getenv("STREAM_FPS", "20")),
+  "quality": int(os.getenv("STREAM_QUALITY", "45")),
+  "scale": float(os.getenv("STREAM_SCALE", "0.5")),
+}
 
 
 
@@ -415,32 +450,88 @@ def _handle_ws(handler):
   except Exception:
     pass
 
+def _broadcast_frame(jpeg):
+  dead = []
+  with _ws_clients_lock:
+    clients = list(_ws_clients)
+  for c in clients:
+    try:
+      _ws_send_frame(c, 0x2, jpeg)
+    except Exception:
+      dead.append(c)
+  if dead:
+    with _ws_clients_lock:
+      for c in dead:
+        if c in _ws_clients:
+          _ws_clients.remove(c)
+
+
 def _encode_worker():
   while True:
-    item = _enc_queue.get()
+    _pending_evt.wait()
+    _pending_evt.clear()
+    with _pending_lock:
+      item = _pending
     if item is None:
-      break
-    raw, w, h, quality = item
+      continue
+    raw, w, h = item
     try:
+      scale = float(_cfg.get("scale", 0.5))
+      q = int(_cfg.get("quality", 45))
+      tw = max(1, int(round(w * scale)))
+      th = max(1, int(round(h * scale)))
       img = Image.frombytes("RGBA", (w, h), raw).transpose(Image.FLIP_TOP_BOTTOM).convert("RGB")
+      if (tw, th) != (w, h):
+        img = img.resize((tw, th), Image.BILINEAR)
       buf = io.BytesIO()
-      img.save(buf, "JPEG", quality=quality)
+      img.save(buf, "JPEG", quality=q)
+      jpeg = buf.getvalue()
       if _state is not None:
-        _state.update(buf.getvalue())
+        _state.update(jpeg)
+      _broadcast_frame(jpeg)
     except Exception:
       pass
 
 
 def start(port=8082):
-  """Start the MJPEG HTTP server + JPEG encode worker in background threads."""
-  global _state, _enc_queue
+  """Start the HTTP server + JPEG encode worker in background threads."""
+  global _state
   _state = StreamState()
-  _enc_queue = queue.Queue(maxsize=3)
   threading.Thread(target=_encode_worker, daemon=True).start()
   srv = ThreadingHTTPServer(("0.0.0.0", port), StreamHandler)
   srv._state = _state
   threading.Thread(target=srv.serve_forever, daemon=True).start()
   return _state
+
+
+def _handle_ws_stream(handler):
+  try:
+    key = handler.headers.get("Sec-WebSocket-Key", "")
+    if not key:
+      return
+    handler.send_response(101, "Switching Protocols")
+    handler.send_header("Upgrade", "websocket")
+    handler.send_header("Connection", "Upgrade")
+    handler.send_header("Sec-WebSocket-Accept", _ws_accept(key))
+    handler.end_headers()
+    handler.wfile.flush()
+    with _ws_clients_lock:
+      _ws_clients.append(handler.wfile)
+    try:
+      while True:
+        opcode, payload = _ws_read_frame(handler.rfile)
+        if opcode is None:
+          break
+        if opcode == 0x8:
+          break
+        if opcode == 0x9:
+          _ws_send_frame(handler.wfile, 0xA, payload)
+    finally:
+      with _ws_clients_lock:
+        if handler.wfile in _ws_clients:
+          _ws_clients.remove(handler.wfile)
+  except Exception:
+    pass
 
 
 def _write_telemetry():
@@ -498,15 +589,15 @@ def _write_telemetry():
 
 
 def capture_frame(app, quality=50, target_fps=10):
-  global _app
+  """Render loop hook: snapshot newest frame for the encode worker."""
+  global _app, _counter, _pending
   if _app is None:
     _app = app
-  """Call from the render loop: snapshot texture, queue raw for async JPEG encode."""
-  global _counter
   if _state is None or app._render_texture is None:
     return
   _counter += 1
-  skip = max(1, int(getattr(app, "_target_fps", 60)) // max(1, int(target_fps)))
+  fps = int(_cfg.get("fps", 20))
+  skip = max(1, int(getattr(app, "_target_fps", 60)) // max(1, fps))
   if _counter % skip != 0:
     return
   _write_telemetry()
@@ -515,10 +606,8 @@ def capture_frame(app, quality=50, target_fps=10):
     w, h = si.width, si.height
     raw = bytes(rl.ffi.buffer(si.data, w * h * 4))
     rl.unload_image(si)
-    if _enc_queue is not None:
-      try:
-        _enc_queue.put_nowait((raw, w, h, int(quality)))
-      except Exception:
-        pass
+    with _pending_lock:
+      _pending = (raw, w, h)
+    _pending_evt.set()
   except Exception:
     pass
