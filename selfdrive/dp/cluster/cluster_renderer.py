@@ -3018,14 +3018,14 @@ class ClusterUiRenderer:
         x = FOLLOW_STATUS_CENTER_X - FOLLOW_STATUS_W * 0.5
 
         gap_count = 0 if state.cruise_gap is None else int(clamp(float(state.cruise_gap), 1.0, float(FOLLOW_STATUS_GAP_BARS)))
-        bar_w = FOLLOW_GAP_BAR_W * FOLLOW_GAP_BAR_SCALE
-        bar_h = FOLLOW_GAP_BAR_H * FOLLOW_GAP_BAR_SCALE * 2
+        bar_w = FOLLOW_GAP_BAR_W * FOLLOW_GAP_BAR_SCALE * 1.2
+        bar_h = FOLLOW_GAP_BAR_H * FOLLOW_GAP_BAR_SCALE * 2.5
         bar_r = FOLLOW_GAP_BAR_R * FOLLOW_GAP_BAR_SCALE
         bar_step = FOLLOW_GAP_BAR_STEP_X * FOLLOW_GAP_BAR_SCALE
         bars_total_w = bar_w + bar_step * (FOLLOW_STATUS_GAP_BARS - 1)
         icon_x = x + FOLLOW_STATUS_W - FOLLOW_GAP_ICON_W
         icon_y = bottom_y - FOLLOW_GAP_ICON_H
-        bar_x = icon_x - bars_total_w - 3.0
+        bar_x = icon_x - bars_total_w - 10.0
         bar_y = bottom_y - bar_h
         for index in range(FOLLOW_STATUS_GAP_BARS):
             active = index >= FOLLOW_STATUS_GAP_BARS - gap_count
