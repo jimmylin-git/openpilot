@@ -39,8 +39,8 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/tire.png
-map_Bump -bm 0.300000 openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/TireNormalmap.png
+map_Kd C:/Users/J/Desktop/git/openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/tire.png
+map_Bump -bm 0.300000 C:/Users/J/Desktop/git/openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/TireNormalmap.png
 
 newmtl ayna
 Ns 250.000000
@@ -80,7 +80,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 3
-map_Kd openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/Grill1.png
+map_Kd C:/Users/J/Desktop/git/openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/Grill1.png
 
 newmtl interior
 Ns 250.000000
@@ -120,7 +120,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 3
-map_Kd openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/wwrearlight.png
+map_Kd C:/Users/J/Desktop/git/openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/wwrearlight.png
 
 newmtl sinyal
 Ns 250.000000
@@ -130,7 +130,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/lights_mr2.png
+map_Kd C:/Users/J/Desktop/git/openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/lights_mr2.png
 
 newmtl ÖNFARCAM
 Ns 937.375977
@@ -150,4 +150,4 @@ Ke 0.123553 0.123553 0.123553
 Ni 1.450000
 d 1.000000
 illum 2
-map_Kd openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/wwfrontlight.png
+map_Kd C:/Users/J/Desktop/git/openpilot/selfdrive/dp/cluster/assets/models/hatchback/C:/Users/kdrkn/Desktop/ArabaVeModifiye/car texture/wwfrontlight.png
