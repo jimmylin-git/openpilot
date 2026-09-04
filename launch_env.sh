@@ -20,3 +20,9 @@ if [ -z "$AGNOS_VERSION" ]; then
 fi
 
 export STAGING_ROOT="/data/safe_staging"
+
+# Comma4-UI-Streamer (MJPEG UI stream) - set STREAM=0 to disable
+export STREAM=1
+export STREAM_PORT=8082
+export STREAM_QUALITY=50
+export STREAM_FPS=10

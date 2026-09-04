@@ -244,6 +244,7 @@ class GuiApplication(GuiApplicationExt):
     self._ffmpeg_stop_event: threading.Event | None = None
     self._textures: dict[str, rl.Texture] = {}
     self._target_fps: int = _DEFAULT_FPS
+    self._ui_stream = None
     self._last_fps_log_time: float = time.monotonic()
     self._frame = 0
     self._window_close_requested = False
@@ -347,6 +348,18 @@ class GuiApplication(GuiApplicationExt):
       rl.set_target_fps(0 if OFFSCREEN or vblank_control else fps)
 
       self._target_fps = fps
+      if os.getenv("STREAM") == "1":
+        try:
+          from openpilot.system.ui.lib import ui_stream
+          self._ui_stream = ui_stream
+          if self._render_texture is None:
+            self._render_texture = rl.load_render_texture(self._scaled_width, self._scaled_height)
+            rl.set_texture_filter(self._render_texture.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+          ui_stream.start(int(os.getenv("STREAM_PORT", "8082")))
+          cloudlog.warning("MJPEG UI stream on :" + str(os.getenv("STREAM_PORT", "8082")))
+        except Exception as e:
+          cloudlog.error("UI stream init failed: " + str(e))
+          self._ui_stream = None
       self._load_fonts()
       self._patch_text_functions()
       self._patch_scissor_mode()
@@ -695,6 +708,9 @@ class GuiApplication(GuiApplicationExt):
           self._ffmpeg_queue.put(data)  # Async write via background thread
           rl.unload_image(image)
 
+
+        if self._ui_stream is not None and self._render_texture is not None:
+          self._ui_stream.capture_frame(self, int(os.getenv("STREAM_QUALITY", "50")), int(os.getenv("STREAM_FPS", "10")))
         self._monitor_fps()
         self._frame += 1
 
