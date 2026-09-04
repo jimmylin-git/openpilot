@@ -6,6 +6,9 @@ import os
 import json
 import queue
 import time
+import base64
+import hashlib
+import struct
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
@@ -35,6 +38,8 @@ class StreamState:
         self.event.wait(t)
         self.event.clear()
 
+
+_CTRL_HTML = '<!DOCTYPE html><html><head>\n<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,maximum-scale=1">\n<title>openpilot remote</title>\n<style>\n*{margin:0;padding:0;box-sizing:border-box;user-select:none;-webkit-user-select:none;touch-action:none}\nhtml,body{background:#000;height:100%;width:100%;overflow:hidden}\n#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}\n#badge{position:absolute;top:8px;right:8px;z-index:9;background:rgba(0,0,0,0.55);color:#0f0;font:600 13px/1.4 -apple-system,sans-serif;padding:5px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.25);pointer-events:none}\n#toggle{position:absolute;bottom:10px;right:10px;z-index:9;background:rgba(0,0,0,0.6);color:#fff;font:600 13px -apple-system,sans-serif;padding:8px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.35)}\n#toggle.off{color:#888}\n</style></head><body>\n<img id="cam" src="/stream" draggable="false">\n<div id="badge">CTRL: OFF</div>\n<div id="toggle" ontouchstart="event.stopPropagation()" onclick="toggleCtrl(event)">ENABLE TOUCH</div>\n<script>\nlet ws=null, enabled=false, active={};\nfunction toggleCtrl(e){e.stopPropagation();enabled=!enabled;document.getElementById(\'toggle\').textContent=enabled?\'DISABLE TOUCH\':\'ENABLE TOUCH\';document.getElementById(\'toggle\').className=enabled?\'\':\'off\';document.getElementById(\'badge\').textContent=\'CTRL: \'+(enabled?\'ON\':\'OFF\');connect();}\nfunction connect(){\n  if(ws) try{ws.close()}catch(e){}\n  if(!enabled) return;\n  ws=new WebSocket((location.protocol===\'https:\'?\'wss://\':\'ws://\')+location.host+\'/ws\');\n  ws.onopen=()=>{document.getElementById(\'badge\').style.color=\'#0f0\'};\n  ws.onclose=()=>{document.getElementById(\'badge\').style.color=\'#f44\';if(enabled)setTimeout(connect,1000)};\n  ws.onerror=()=>{try{ws.close()}catch(e){}};\n}\nfunction norm(e){\n  const img=document.getElementById(\'cam\'), r=img.getBoundingClientRect();\n  const nw=img.naturalWidth, nh=img.naturalHeight;\n  if(!nw||!nh) return null;\n  let dw=r.width, dh=r.height, ox=0, oy=0;\n  if(dw/dh > nw/nh){ const h=dh; dw=dh*(nw/nh); ox=(r.width-dw)/2; }\n  else { const w=dw; dh=dw/(nw/nh); oy=(r.height-dh)/2; }\n  const x=(e.clientX-r.left-ox)/dw, y=(e.clientY-r.top-oy)/dh;\n  if(x<-0.02||x>1.02||y<-0.02||y>1.02) return null;\n  return {x:Math.min(1,Math.max(0,x)), y:Math.min(1,Math.max(0,y))};\n}\nfunction slotFor(id){ if(active[id]!==undefined) return active[id];\n  const used=Object.values(active); let slot=used.indexOf(0)<0?0:(used.indexOf(1)<0?1:0); active[id]=slot; return slot; }\nfunction send(t,e){ if(!ws||ws.readyState!==1) return; const n=norm(e); if(!n) return;\n  const slot=slotFor(e.pointerId!==undefined?e.pointerId:0);\n  ws.send(JSON.stringify({t:t,x:n.x,y:n.y,i:slot})); }\ndocument.addEventListener(\'pointerdown\',e=>{ if(!enabled) return; if(e.target.id===\'toggle\') return;\n  try{e.target.setPointerCapture&&e.target.setPointerCapture(e.pointerId)}catch(_){}\n  send(\'down\',e); });\ndocument.addEventListener(\'pointermove\',e=>{ if(!enabled) return; send(\'move\',e); });\nfunction end(e){ if(!enabled) return; send(\'up\',e); if(active[e.pointerId]!==undefined) delete active[e.pointerId]; }\ndocument.addEventListener(\'pointerup\',end);\ndocument.addEventListener(\'pointercancel\',end);\ndocument.addEventListener(\'contextmenu\',e=>e.preventDefault());\n</script></body></html>'
 
 _OVERLAY_HTML = """<!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
@@ -218,7 +223,15 @@ class StreamHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
-        if self.path == "/stream":
+        if self.path == "/ws":
+            _handle_ws(self)
+        elif self.path == "/ctrl":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(_CTRL_HTML)))
+            self.end_headers()
+            self.wfile.write(_CTRL_HTML.encode())
+        elif self.path == "/stream":
             self.send_response(200)
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=--frame")
             self.send_header("Cache-Control", "no-cache")
@@ -283,7 +296,124 @@ _state = None
 _counter = 0
 _last_tel = 0.0
 _enc_queue = None
+_app = None
+_slot_pressed = [False, False]
+_inject_logged = False
 
+
+
+def _ws_accept(key):
+  guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+  return base64.b64encode(hashlib.sha1((key + guid).encode()).digest()).decode()
+
+def _ws_read_frame(rfile):
+  hdr = rfile.read(2)
+  if len(hdr) < 2:
+    return None, None
+  b0, b1 = hdr[0], hdr[1]
+  opcode = b0 & 0x0F
+  ln = b1 & 0x7F
+  if ln == 126:
+    e = rfile.read(2)
+    if len(e) < 2: return None, None
+    ln = struct.unpack(">H", e)[0]
+  elif ln == 127:
+    e = rfile.read(8)
+    if len(e) < 8: return None, None
+    ln = struct.unpack(">Q", e)[0]
+  mask = rfile.read(4) if (b1 & 0x80) else b""
+  payload = rfile.read(ln) if ln else b""
+  if mask and len(mask) == 4:
+    payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+  return opcode, payload
+
+def _ws_send_frame(wfile, opcode, payload=b""):
+  hdr = bytes([0x80 | opcode])
+  ln = len(payload)
+  if ln < 126:
+    hdr += bytes([ln])
+  elif ln < 65536:
+    hdr += bytes([126]) + struct.pack(">H", ln)
+  else:
+    hdr += bytes([127]) + struct.pack(">Q", ln)
+  wfile.write(hdr + payload)
+  wfile.flush()
+
+def _inject_event(kind, x, y, slot):
+  global _app, _slot_pressed
+  app = _app
+  if app is None:
+    return
+  try:
+    from openpilot.system.ui.lib.application import MouseEvent, MousePos
+    mouse = app._mouse
+    w = float(app.width)
+    h = float(app.height)
+    px = max(0.0, min(w, float(x) * w))
+    py = max(0.0, min(h, float(y) * h))
+    now = time.monotonic()
+    slot = 0 if int(slot) % 2 == 0 else 1
+    pressed = _slot_pressed[slot]
+    if kind == "down":
+      if pressed: return
+      ev = MouseEvent(MousePos(px, py), slot, True, False, True, now)
+      _slot_pressed[slot] = True
+    elif kind == "move":
+      if not pressed: return
+      ev = MouseEvent(MousePos(px, py), slot, False, False, True, now)
+    elif kind == "up":
+      if not pressed: return
+      ev = MouseEvent(MousePos(px, py), slot, False, True, False, now)
+      _slot_pressed[slot] = False
+    else:
+      return
+    with mouse._lock:
+      mouse._events.append(ev)
+    global _inject_logged
+    if not _inject_logged:
+      _inject_logged = True
+      try:
+        from openpilot.common.swaglog import cloudlog
+        cloudlog.warning("remote UI input active (first event)")
+      except Exception:
+        pass
+  except Exception as e:
+    try:
+      from openpilot.common.swaglog import cloudlog
+      cloudlog.error("remote input error: " + str(e))
+    except Exception:
+      pass
+
+def _handle_ws(handler):
+  try:
+    key = handler.headers.get("Sec-WebSocket-Key", "")
+    if not key:
+      return
+    handler.send_response(101, "Switching Protocols")
+    handler.send_header("Upgrade", "websocket")
+    handler.send_header("Connection", "Upgrade")
+    handler.send_header("Sec-WebSocket-Accept", _ws_accept(key))
+    handler.end_headers()
+    handler.wfile.flush()
+    while True:
+      opcode, payload = _ws_read_frame(handler.rfile)
+      if opcode is None:
+        break
+      if opcode == 0x8:
+        break
+      if opcode == 0x9:
+        _ws_send_frame(handler.wfile, 0xA, payload)
+        continue
+      if opcode == 0x1:
+        try:
+          msg = json.loads(payload.decode("utf-8", "replace"))
+          t = msg.get("t")
+          if t in ("down", "move", "up"):
+            _inject_event(t, float(msg.get("x", 0.0)), float(msg.get("y", 0.0)), int(msg.get("i", 0)))
+        except Exception:
+          pass
+  except Exception:
+    pass
 
 def _encode_worker():
   while True:
@@ -368,6 +498,9 @@ def _write_telemetry():
 
 
 def capture_frame(app, quality=50, target_fps=10):
+  global _app
+  if _app is None:
+    _app = app
   """Call from the render loop: snapshot texture, queue raw for async JPEG encode."""
   global _counter
   if _state is None or app._render_texture is None:
