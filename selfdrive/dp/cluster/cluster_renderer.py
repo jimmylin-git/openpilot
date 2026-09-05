@@ -1595,35 +1595,27 @@ class ClusterUiRenderer:
     #     rl.draw_cube_v(marker_center, marker_size, rl_color(vehicle.body_color, alpha))
 
     def _draw_vehicle_marker(self, vehicle: VehicleBox) -> None:
-        # 1. 簡易的記憶體快取（如果沒有初始化過就直接用當前位置）
-        if not hasattr(self, '_smooth_cache'):
-            self._smooth_cache = {}
+        alpha = int(80 + 150 * clamp(vehicle.confidence, 0.0, 1.0))
 
-        # 用物件記憶體位置或簡單特徵當作 key
-        v_key = id(vehicle)
-        target_x, target_y = vehicle.center.x, vehicle.center.y
+        def with_alpha(color: tuple[int, int, int] | tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+            return color[0], color[1], color[2], alpha
 
-        if v_key not in self._smooth_cache:
-            self._smooth_cache[v_key] = {'x': target_x, 'y': target_y, 'alpha': 0.0}
+        marker_height_m = max(0.42, vehicle.height_m * 0.45)
+        marker_base_z = max(0.0, vehicle.center.z - vehicle.height_m * 0.5)
 
-        cache = self._smooth_cache[v_key]
-
-        # 2. 數值平滑與淡入淡出（Lerp 係數 0.3 可隨時調整快慢）
-        cache['x'] += (target_x - cache['x']) * 0.3
-        cache['y'] += (target_y - cache['y']) * 0.3
-
-        target_alpha = 80 + 150 * clamp(vehicle.confidence, 0.0, 1.0)
-        cache['alpha'] += (target_alpha - cache['alpha']) * 0.2
-
-        # 3. 代入平滑後的數值進行繪製
-        marker_center = rl.Vector3(cache['x'], cache['y'], vehicle.height_m * 0.32)
-        marker_size = rl.Vector3(
-            max(0.55, vehicle.width_m * 0.68),
-            max(1.05, vehicle.length_m * 0.64),
-            max(0.42, vehicle.height_m * 0.45),
+        marker_vehicle = replace(
+            vehicle,
+            center=Vec3(vehicle.center.x, vehicle.center.y, marker_base_z + marker_height_m * 0.5),
+            width_m=max(0.55, vehicle.width_m * 0.68),
+            length_m=max(1.05, vehicle.length_m * 0.64),
+            height_m=marker_height_m,
+            body_color=with_alpha(vehicle.body_color),
+            side_color=with_alpha(vehicle.side_color),
+            rear_color=with_alpha(vehicle.rear_color),
+            top_highlight=with_alpha(vehicle.top_highlight),
+            outline_color=with_alpha(vehicle.outline_color),
         )
-        rl.draw_cube_v(marker_center, marker_size, rl_color(vehicle.body_color, int(cache['alpha'])))
-
+        self._draw_vehicle_box(marker_vehicle)
 
     def _draw_radar_point(self, point: RadarPointMarker) -> None:
         side_m = max(0.16, point.radius_m * 1.75)
