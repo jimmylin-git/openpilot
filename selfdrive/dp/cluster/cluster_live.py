@@ -10,6 +10,7 @@ from typing import Any
 
 from cluster_config import BLUE, DEFAULT_LANE_WIDTH_M, SHOW_PLOT_MODE_PARAM
 from cluster_models import (
+    ClusterAlert,
     ClusterUiState,
     DebugPlotSnapshot,
     LaneMarking,
@@ -19,6 +20,8 @@ from cluster_models import (
     NaviGuidanceImage,
     NaviTrafficLightInfo,
 )
+from cluster_navi import fresh_carrot_navi, parse_carrot_navi, resolve_navi_speed_limit
+from cluster_navi_source import NaviIpcMediaSource
 from cluster_route_replay import RouteLogParser, finite_float, frame_to_state, safe_get, safe_optional_float
 from cluster_utils import clamp
 
@@ -40,6 +43,35 @@ if OPENPILOT_ROOT is not None:
 LIVE_NAV_ROUTE_MAX_POINTS = 4096
 LIVE_NAVI_IMAGE_BASE64_MAX_CHARS = 2 * 1024 * 1024
 LIVE_NAVI_IMAGE_MAX_DIMENSION = 2048
+ACCELERATION_DUE_TO_GRAVITY = 9.80665
+DEFAULT_MAX_LATERAL_ACCEL = 3.0
+SELFDRIVE_STATE_TIMEOUT_SECONDS = 5.0
+SELFDRIVE_UNRESPONSIVE_TIMEOUT_SECONDS = 10.0
+DECELERATION_SOURCE_LABELS = {
+    "cam": "cam:n",
+    "section": "section:n",
+    "bump": "bump:n",
+    "police": "police:n",
+    "waze": "waze:n",
+    "road": "road:n",
+    "atc": "turn:n",
+    "atc2": "turn:n",
+    "hda": "cam:v",
+    "route": "route:v",
+    "gas": "gas:v",
+    "vturn": "turn:c",
+    "model": "turn:c",
+    "turn": "turn:c",
+}
+
+
+def deceleration_source_display_label(source: str | None) -> str:
+    normalized = str(source or "").strip().lower()
+    if not normalized:
+        return "apply"
+    if normalized.endswith((":n", ":v", ":c")):
+        return normalized
+    return DECELERATION_SOURCE_LABELS.get(normalized, normalized[:8])
 
 
 def _limited_items(items: Any, max_items: int):
@@ -66,24 +98,30 @@ def _limited_items(items: Any, max_items: int):
 
 LIVE_SERVICES_BASE = (
     "carState",
+    "carParams",
     "modelV2",
     "radarState",
     "liveTracks",
     "longitudinalPlan",
-    #"lateralPlan",
+    "lateralPlan",
     "controlsState",
     "selfdriveState",
     "carControl",
+    "carOutput",
     "deviceState",
+    "liveGPS",
+    "roadCameraState",
     "cameraOdometry",
+    "liveCalibration",
+    "livePose",
     "drivingModelData",
     "liveDelay",
     "liveParameters",
     "liveTorqueParameters",
-    #"navInstruction",
-    #"navInstructionCarrot",
-    #"navRoute",
-    #"carrotMan",
+    "navInstruction",
+    "navInstructionCarrot",
+    "navRoute",
+    "carrotNavi",
     "wideRoadCameraState",
 )
 LIVE_CAN_SERVICES = ("can", "sendcan")
@@ -91,9 +129,9 @@ NAVI_TRAFFIC_LIGHT_HOLD_SECONDS = 10.0
 
 
 class OpenpilotLiveSource:
-    def __init__(self, include_can: bool = True, timeout_ms: int = 0) -> None:
+    def __init__(self, include_can: bool = False, timeout_ms: int = 0) -> None:
         try:
-            import cereal.messaging as messaging
+            import openpilot.cereal.messaging as messaging
         except Exception as exc:
             raise RuntimeError(
                 "Openpilot live input requires cereal.messaging. Run from an openpilot environment "
@@ -102,7 +140,7 @@ class OpenpilotLiveSource:
 
         self.messaging: Any = messaging
         try:
-            from cereal import log
+            from openpilot.cereal import log
 
             self.log: Any | None = log
         except Exception:
@@ -110,12 +148,15 @@ class OpenpilotLiveSource:
         self.services = list(LIVE_SERVICES_BASE + (LIVE_CAN_SERVICES if include_can else ()))
         self.sm = messaging.SubMaster(self.services)
         self.parser = RouteLogParser()
+        self.parser.trip_report_tracker.set_onroad(False)
         self.timeout_ms = max(0, int(timeout_ms))
         self.last_state: ClusterUiState | None = None
         self.start_t = time.monotonic()
         self.frames = 0
         self.params: Any | None = None
         self.params_memory: Any | None = None
+        self._energy_gauge_label = "fuel"
+        self._max_lateral_accel = DEFAULT_MAX_LATERAL_ACCEL
         self._next_debug_param_read_t = 0.0
         self._custom_steer_ratio: float | None = None
         self._steer_actuator_delay_param_s: float | None = None
@@ -129,9 +170,20 @@ class OpenpilotLiveSource:
         self._live_debug_enabled = False
         self._debug_plot_enabled = False
         self._navi_debug_enabled = False
+        self._alert_onroad = False
+        self._alert_onroad_started_t: float | None = None
+        self._selfdrive_seen_onroad = False
         self._nav_route_coords: tuple[tuple[float, float], ...] = ()
         self._nav_route_model_path: tuple[ModelPathPoint, ...] = ()
         self._nav_route_anchor: tuple[float, float, float] | None = None
+        self._carrot_navi = None
+        self._carrot_navi_generation = -1
+        self._carrot_navi_next_expiry_s = math.inf
+        try:
+            self._carrot_navi_media = NaviIpcMediaSource(messaging)
+        except Exception as exc:
+            print(f"Carrot navigation media IPC unavailable: {exc}", flush=True)
+            self._carrot_navi_media = None
         self._standby_state = standby_state()
         self.profile_enabled = False
         self._profile_samples: list[tuple[str, float]] = []
@@ -140,8 +192,72 @@ class OpenpilotLiveSource:
 
             self.params = Params()
             self.params_memory = Params("/dev/shm/params")
+            self._energy_gauge_label = self._resolve_energy_gauge_label()
+            self._max_lateral_accel = self._resolve_max_lateral_accel()
+            self._load_cached_car_params()
+            self._load_cached_calibration()
         except Exception:
             pass
+
+    def _load_cached_car_params(self) -> None:
+        if self.params is None:
+            return
+        try:
+            from openpilot.cereal import car
+
+            car_params_bytes = self.params.get("CarParams")
+            if car_params_bytes:
+                self.parser._update_car_params(self.messaging.log_from_bytes(car_params_bytes, car.CarParams))
+        except Exception:
+            pass
+
+    def _load_cached_calibration(self) -> None:
+        if self.params is None or self.log is None:
+            return
+        try:
+            calibration_bytes = self.params.get("CalibrationParams")
+            if calibration_bytes:
+                event = self.messaging.log_from_bytes(calibration_bytes, self.log.Event)
+                self.parser._update_live_calibration(
+                    event.liveCalibration,
+                    bool(safe_get(event, "valid", True)),
+                )
+        except Exception:
+            pass
+
+    def _resolve_energy_gauge_label(self) -> str:
+        if self.params is None:
+            return "fuel"
+        try:
+            from openpilot.cereal import car
+            from opendbc.car.hyundai.values import HyundaiFlags
+
+            car_params_bytes = self.params.get("CarParams")
+            if not car_params_bytes:
+                return "fuel"
+            car_params = self.messaging.log_from_bytes(car_params_bytes, car.CarParams)
+            if car_params.brand == "hyundai" and car_params.flags & HyundaiFlags.EV.value:
+                return "battery"
+        except Exception:
+            pass
+        return "fuel"
+
+    def _resolve_max_lateral_accel(self) -> float:
+        if self.params is None:
+            return DEFAULT_MAX_LATERAL_ACCEL
+        try:
+            from openpilot.cereal import car
+
+            car_params_bytes = self.params.get("CarParams")
+            if not car_params_bytes:
+                return DEFAULT_MAX_LATERAL_ACCEL
+            car_params = self.messaging.log_from_bytes(car_params_bytes, car.CarParams)
+            value = finite_float(car_params.maxLateralAccel)
+            if value is not None and value > 0.0:
+                return value
+        except Exception:
+            pass
+        return DEFAULT_MAX_LATERAL_ACCEL
 
     def set_profile_enabled(self, enabled: bool) -> None:
         self.profile_enabled = enabled
@@ -196,6 +312,9 @@ class OpenpilotLiveSource:
             self._apply_service_update(service, event_t)
         self._profile_add("source.live.apply_updates", profile_stage)
 
+        onroad_state = self.onroad_state()
+        if onroad_state is not None:
+            self.parser.trip_report_tracker.set_onroad(onroad_state)
         if self._service_alive("carState"):
             profile_stage = self._profile_start()
             event_t = self._service_time("carState")
@@ -206,7 +325,7 @@ class OpenpilotLiveSource:
             state = frame_to_state(frame)
             self._profile_add("source.live.frame_to_state", profile_stage)
 
-            self.last_state = self._with_debug_state(state)
+            self.last_state = self._with_live_hud_state(self._with_debug_state(state))
             self.frames += 1
             return self.last_state
 
@@ -214,8 +333,198 @@ class OpenpilotLiveSource:
         state = self._standby_state
         self._profile_add("source.live.standby_state", profile_stage)
 
-        self.last_state = self._with_debug_state(state)
+        self.last_state = self._with_live_hud_state(self._with_debug_state(state))
         return self.last_state
+
+    def _with_live_hud_state(self, state: ClusterUiState) -> ClusterUiState:
+        device_state = self._service_data("deviceState")
+        onroad = self._service_alive("deviceState") and bool(safe_get(device_state, "started", False))
+        car_state = self._service_data("carState")
+        fuel_gauge = safe_optional_float(car_state, "fuelGauge")
+        if fuel_gauge is None or not 0.0 < fuel_gauge <= 1.0:
+            fuel_gauge = None
+        energy_gauge_label = "battery" if bool(safe_get(car_state, "charging", False)) else self._energy_gauge_label
+        urea_gauge = safe_optional_float(car_state, "ureaGauge")
+        if urea_gauge is None or not 0.0 < urea_gauge <= 1.0:
+            urea_gauge = None
+
+        steering_output = None
+        steering_output_normalized = None
+        steering_output_kind = None
+        car_output = self._service_data("carOutput")
+        actuators_output = safe_get(car_output, "actuatorsOutput")
+        controls_state = self._service_data("controlsState")
+        lateral_state = safe_get(controls_state, "lateralControlState")
+        try:
+            lateral_kind = str(lateral_state.which()) if lateral_state is not None else ""
+        except Exception:
+            lateral_kind = ""
+        if lateral_kind == "angleState":
+            # Angle-control cars send a positive maximum-torque authority value,
+            # which normally stays pinned at its maximum. Estimate signed steering
+            # utilization like mici's TorqueBar instead so the gauge reflects demand.
+            car_control = self._service_data("carControl")
+            lat_active = bool(safe_get(car_control, "latActive", False))
+            if lat_active:
+                v_ego = max(0.0, safe_optional_float(car_state, "vEgo") or 0.0)
+                curvature = safe_optional_float(controls_state, "curvature") or 0.0
+                desired_curvature = safe_optional_float(controls_state, "desiredCurvature") or curvature
+                live_parameters = self._service_data("liveParameters")
+                roll = safe_optional_float(live_parameters, "roll") or 0.0
+                roll_weight = clamp((v_ego - 5.0) / 10.0, 0.0, 1.0)
+                desired_lateral_accel = desired_curvature * v_ego * v_ego
+                roll_compensation = roll * ACCELERATION_DUE_TO_GRAVITY * roll_weight
+                steering_output_normalized = clamp(
+                    (desired_lateral_accel - roll_compensation) / self._max_lateral_accel,
+                    -1.0,
+                    1.0,
+                )
+            else:
+                steering_output_normalized = 0.0
+            steering_output = steering_output_normalized * 100.0
+            steering_output_kind = "angle"
+        elif lateral_kind in ("torqueState", "pidState"):
+            actuator_torque = safe_optional_float(actuators_output, "torque")
+            if actuator_torque is not None:
+                steering_output_normalized = clamp(actuator_torque, -1.0, 1.0)
+            torque_output_can = safe_optional_float(actuators_output, "torqueOutputCan")
+            if torque_output_can is not None and abs(torque_output_can) <= 999.0:
+                steering_output = torque_output_can
+            elif steering_output_normalized is not None:
+                # Simulator and some non-CAN paths don't have a meaningful raw CAN
+                # torque value. Show normalized steering demand instead of sentinel
+                # values such as -4096.
+                steering_output = steering_output_normalized * 100.0
+            steering_output_kind = "torque"
+
+        navi_live = self._current_carrot_navi(time.monotonic())
+        navi_dashboard = (
+            self._carrot_navi_media.update(navi_live)
+            if self._carrot_navi_media is not None else None
+        )
+        navi_guidance_active = bool(
+            navi_live is not None
+            and (
+                navi_live.current is not None
+                or (navi_live.status is not None and navi_live.status.guidance_active)
+            )
+        )
+        external_nav_active = bool(self._nav_route_coords) or navi_guidance_active
+
+        speed_limit_kph, speed_limit_source = resolve_navi_speed_limit(
+            state.speed_limit_kph,
+            state.speed_limit_source,
+            navi_live,
+        )
+
+        cruise_override_kph = None
+        cruise_override_label = None
+        cruise_override_color_mode = 0
+        driving_mode = (
+            state.driving_mode
+            if state.driving_mode in (1, 2, 3, 4)
+            and self._service_alive("longitudinalPlan")
+            and self._service_valid("longitudinalPlan")
+            else None
+        )
+        if state.cruise_kph is not None and state.cruise_display_state != "off":
+            # Keep this priority and the thresholds in sync with mici's SetSpeedOverride.
+            longitudinal_plan = self._service_data("longitudinalPlan")
+            cruise_target = safe_optional_float(longitudinal_plan, "cruiseTarget")
+            if cruise_target is not None and cruise_target > state.cruise_kph + 0.5:
+                cruise_override_kph = cruise_target
+                cruise_override_label = "eco"
+                cruise_override_color_mode = 1
+            else:
+                desired_speed = safe_optional_float(carrot_man, "desiredSpeed")
+                desired_source = str(safe_get(carrot_man, "desiredSource", "") or "").strip()
+                if desired_speed is not None and 0.0 < desired_speed < 200.0 and desired_speed < state.cruise_kph:
+                    cruise_override_kph = desired_speed
+                    cruise_override_label = deceleration_source_display_label(desired_source)
+                    cruise_override_color_mode = 2
+
+        return replace(
+            state,
+            onroad=onroad,
+            alert=self._live_cluster_alert(state.alert, onroad),
+            external_nav_active=external_nav_active,
+            speed_limit_kph=speed_limit_kph,
+            speed_limit_source=speed_limit_source,
+            navi_live=navi_live,
+            navi_dashboard=navi_dashboard,
+            steering_output=steering_output,
+            steering_output_normalized=steering_output_normalized,
+            steering_output_kind=steering_output_kind,
+            fuel_gauge=fuel_gauge,
+            energy_gauge_label=energy_gauge_label,
+            urea_gauge=urea_gauge,
+            driving_mode=driving_mode,
+            cruise_override_kph=cruise_override_kph,
+            cruise_override_label=cruise_override_label,
+            cruise_override_color_mode=cruise_override_color_mode,
+        )
+
+    def _live_cluster_alert(self, current_alert: ClusterAlert | None, onroad: bool) -> ClusterAlert | None:
+        now = time.monotonic()
+        was_onroad = bool(getattr(self, "_alert_onroad", False))
+        if not onroad:
+            self._alert_onroad = False
+            self._alert_onroad_started_t = None
+            self._selfdrive_seen_onroad = False
+            return current_alert
+
+        if not was_onroad:
+            self._alert_onroad_started_t = now
+            self._selfdrive_seen_onroad = False
+        self._alert_onroad = True
+
+        started_t = getattr(self, "_alert_onroad_started_t", None)
+        if started_t is None:
+            started_t = now
+            self._alert_onroad_started_t = started_t
+
+        receive_t = self._service_receive_time("selfdriveState")
+        if self._service_updated("selfdriveState") or (receive_t is not None and receive_t >= started_t):
+            self._selfdrive_seen_onroad = True
+
+        if not getattr(self, "_selfdrive_seen_onroad", False):
+            if now - started_t > SELFDRIVE_STATE_TIMEOUT_SECONDS:
+                return ClusterAlert(
+                    text1="openpilot Unavailable",
+                    text2="Waiting to start",
+                    size=2,
+                    status=0,
+                    alert_type="clusterSelfdriveStartup",
+                )
+            return None
+
+        if receive_t is not None:
+            missing_s = max(0.0, now - receive_t)
+            if missing_s > SELFDRIVE_STATE_TIMEOUT_SECONDS:
+                selfdrive_state = self._service_data("selfdriveState")
+                enabled = bool(safe_get(selfdrive_state, "enabled", False))
+                if enabled and missing_s - SELFDRIVE_STATE_TIMEOUT_SECONDS < SELFDRIVE_UNRESPONSIVE_TIMEOUT_SECONDS:
+                    return ClusterAlert(
+                        text1="TAKE CONTROL IMMEDIATELY",
+                        text2="System Unresponsive",
+                        size=3,
+                        status=2,
+                        alert_type="clusterSelfdriveTimeout",
+                    )
+                return ClusterAlert(
+                    text1="System Unresponsive",
+                    text2="Reboot Device",
+                    size=2,
+                    status=0,
+                    alert_type="clusterSelfdriveReboot",
+                )
+        return current_alert
+
+    def onroad_state(self) -> bool | None:
+        if not self._service_alive("deviceState"):
+            return None
+        started = safe_get(self._service_data("deviceState"), "started", None)
+        return bool(started) if started is not None else None
 
     def status_text(self) -> str:
         profile_stage = self._profile_start()
@@ -234,7 +543,16 @@ class OpenpilotLiveSource:
         return text
 
     def screen_brightness_percent(self) -> int | None:
+        camera_brightness = self._camera_brightness_percent()
+        if camera_brightness is not None:
+            return camera_brightness
+
         if not self._service_alive("deviceState"):
+            return None
+        try:
+            if not bool(self.sm["deviceState"].started):
+                return 0
+        except Exception:
             return None
         try:
             value = float(self.sm["deviceState"].screenBrightnessPercent)
@@ -244,7 +562,27 @@ class OpenpilotLiveSource:
             return None
         return int(round(clamp(value, 0.0, 100.0)))
 
+    def _camera_brightness_percent(self) -> int | None:
+        if not self._service_alive("wideRoadCameraState") or not self._service_valid("wideRoadCameraState"):
+            return None
+        try:
+            exposure = float(self.sm["wideRoadCameraState"].exposureValPercent)
+        except Exception:
+            return None
+        if not math.isfinite(exposure):
+            return None
+
+        lightness = clamp(100.0 - exposure, 0.0, 100.0)
+        if lightness <= 8.0:
+            normalized = lightness / 903.3
+        else:
+            normalized = ((lightness + 16.0) / 116.0) ** 3.0
+        brightness = 30.0 + clamp(normalized, 0.0, 1.0) * 70.0
+        return int(round(clamp(brightness, 0.0, 100.0)))
+
     def close(self) -> None:
+        if self._carrot_navi_media is not None:
+            self._carrot_navi_media.close()
         return None
 
     def _apply_service_update(self, service: str, event_t: float) -> None:
@@ -259,16 +597,28 @@ class OpenpilotLiveSource:
             self.parser._update_nav_instruction(data, event_t)
         elif service == "navRoute":
             self._update_nav_route(data)
+        elif service == "carrotNavi":
+            self._update_carrot_navi(data)
         elif service == "longitudinalPlan":
-            self.parser._update_longitudinal_plan(data)
+            self.parser._update_longitudinal_plan(data, self._service_valid(service))
         elif service == "controlsState":
             self.parser._update_controls_state(data)
         elif service == "selfdriveState":
-            self.parser._update_selfdrive_state(data)
+            self.parser._update_selfdrive_state(data, event_t)
         elif service == "carControl":
             self.parser._update_car_control(data)
+        elif service == "deviceState":
+            self.parser._update_device_state(data)
+        elif service == "roadCameraState":
+            self.parser._update_road_camera_state(data)
         elif service == "cameraOdometry":
             self.parser._update_camera_odometry(data, self._service_valid(service))
+        elif service == "liveCalibration":
+            self.parser._update_live_calibration(data, self._service_valid(service))
+        elif service == "livePose":
+            self.parser._update_live_pose(data, event_t)
+        elif service == "carParams":
+            self.parser._update_car_params(data)
         elif service == "radarState":
             self.parser._update_radar_state(data, event_t)
         elif service == "liveTracks":
@@ -276,9 +626,26 @@ class OpenpilotLiveSource:
         elif service in ("can", "sendcan"):
             self.parser._update_can_detections(data, event_t, service)
 
+    def _update_carrot_navi(self, data: Any) -> None:
+        try:
+            generation = int(data.generation)
+        except Exception:
+            generation = -1
+        if generation == self._carrot_navi_generation:
+            return
+        now = time.monotonic()
+        self._carrot_navi_generation = generation
+        self._carrot_navi = parse_carrot_navi(data, now, self._carrot_navi)
+        self._carrot_navi, self._carrot_navi_next_expiry_s = fresh_carrot_navi(self._carrot_navi, now)
+
+    def _current_carrot_navi(self, now: float):
+        if now >= self._carrot_navi_next_expiry_s:
+            self._carrot_navi, self._carrot_navi_next_expiry_s = fresh_carrot_navi(self._carrot_navi, now)
+        return self._carrot_navi
+
     def _with_debug_state(self, state: ClusterUiState) -> ClusterUiState:
         force_debug_ui = self._hud_debug_mode in (2, 3)
-        navi_mode = self._navi_debug_enabled or self._hud_debug_mode == 3
+        navi_mode = self._navi_debug_enabled or self._hud_debug_mode == 3 or bool(self._nav_route_coords)
         if force_debug_ui:
             state = replace(state, debug_ui_visible=True)
         if not self._live_debug_enabled and not self._debug_plot_enabled and not navi_mode:
@@ -688,7 +1055,7 @@ class OpenpilotLiveSource:
         return replace(state, speed_limit_kph=navi_debug.speed_limit_kph, speed_limit_source="n")
 
     def _external_nav_route_model_path(self) -> tuple[ModelPathPoint, ...]:
-        anchor = self._nav_route_anchor_from_carrot_man()
+        anchor = self._nav_route_anchor_from_gps()
         if anchor is None or len(self._nav_route_coords) < 2:
             return ()
         if self._nav_route_anchor == anchor and self._nav_route_model_path:
@@ -700,21 +1067,21 @@ class OpenpilotLiveSource:
         sin_h = math.sin(heading_rad)
         meters_per_lat = 40008000.0 / 360.0
         meters_per_lon = meters_per_lat * math.cos(math.radians(lat0))
-        points: list[ModelPathPoint] = []
-        previous_forward = -1.0
+        points: list[ModelPathPoint] = [ModelPathPoint(forward_m=0.0, lateral_m=0.0)]
+        previous_forward = 0.0
 
         for lat, lon in self._nav_route_coords:
             east_m = (lon - lon0) * meters_per_lon
             north_m = (lat - lat0) * meters_per_lat
             lateral_m = east_m * cos_h - north_m * sin_h
             forward_m = east_m * sin_h + north_m * cos_h
-            if forward_m < -5.0 or forward_m > 180.0:
+            if forward_m < 0.0 or forward_m > 180.0:
                 continue
             if abs(lateral_m) > 40.0:
                 continue
             if forward_m <= previous_forward + 0.25:
                 continue
-            points.append(ModelPathPoint(forward_m=max(0.0, forward_m), lateral_m=lateral_m))
+            points.append(ModelPathPoint(forward_m=forward_m, lateral_m=lateral_m))
             previous_forward = forward_m
             if len(points) >= 96:
                 break
@@ -723,11 +1090,11 @@ class OpenpilotLiveSource:
         self._nav_route_model_path = tuple(points)
         return self._nav_route_model_path
 
-    def _nav_route_anchor_from_carrot_man(self) -> tuple[float, float, float] | None:
-        carrot_man = self._service_data("carrotMan")
-        lat = self._finite_attr(carrot_man, "xPosLat", 0.0)
-        lon = self._finite_attr(carrot_man, "xPosLon", 0.0)
-        heading = self._finite_attr(carrot_man, "xPosAngle", 0.0)
+    def _nav_route_anchor_from_gps(self) -> tuple[float, float, float] | None:
+        gps = self._service_data("liveGPS")
+        lat = self._finite_attr(gps, "latitude", 0.0)
+        lon = self._finite_attr(gps, "longitude", 0.0)
+        heading = self._finite_attr(gps, "bearingDeg", 0.0)
         if abs(lat) < 0.000001 or abs(lon) < 0.000001:
             return None
         if not -90.0 <= lat <= 90.0 or not -180.0 <= lon <= 180.0:
@@ -885,7 +1252,7 @@ class OpenpilotLiveSource:
         if not self._service_alive("carState"):
             return
         try:
-            self.parser.current_speed_kph = clamp(float(self.sm["carState"].vEgo) * 3.6, 0.0, 140.0)
+            self.parser.current_speed_kph = clamp(float(self.sm["carState"].vEgo) * 3.6, 0.0, 260.0)
         except Exception:
             return
 
@@ -895,6 +1262,13 @@ class OpenpilotLiveSource:
         except AttributeError:
             mono_time = 0
         return float(mono_time) / 1_000_000_000.0 if mono_time else time.monotonic()
+
+    def _service_receive_time(self, service: str) -> float | None:
+        try:
+            receive_t = float(self.sm.recv_time.get(service, 0.0))
+        except (AttributeError, TypeError, ValueError):
+            return None
+        return receive_t if math.isfinite(receive_t) and receive_t > 0.0 else None
 
     def _service_alive(self, service: str) -> bool:
         try:

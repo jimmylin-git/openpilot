@@ -9,7 +9,7 @@ from pathlib import Path
 
 CARROT_DIR = Path(__file__).resolve().parent
 BUNDLE_DIR = CARROT_DIR / "cluster"
-OPENPILOT_ROOT = CARROT_DIR.parents[1]
+OPENPILOT_ROOT = CARROT_DIR.parents[2]
 
 for path in (OPENPILOT_ROOT, BUNDLE_DIR):
     path_text = str(path)
@@ -37,14 +37,27 @@ def _all_cpu_cores() -> list[int]:
 def _cores_for_mode(core_mode: int) -> list[int]:
     if core_mode == CLUSTER_CORE_MODE_ALL:
         return _all_cpu_cores()
-    return DEFAULT_REALTIME_CORES[:]
+    allowed = set(range(os.cpu_count() or 1))
+    return [core for core in DEFAULT_REALTIME_CORES if core in allowed] or _all_cpu_cores()
 
 
 def _parse_realtime_cores(text: str) -> list[int]:
     normalized = text.strip().lower()
     if normalized in ("all", "*"):
         return _all_cpu_cores()
-    return [int(core.strip()) for core in text.split(",") if core.strip()]
+    allowed = set(range(os.cpu_count() or 1))
+    cores = []
+    for value in text.split(","):
+        value = value.strip()
+        if not value:
+            continue
+        try:
+            core = int(value)
+        except ValueError:
+            continue
+        if core in allowed:
+            cores.append(core)
+    return sorted(set(cores)) or _all_cpu_cores()
 
 
 def _read_int_param(param_name: str, default: int) -> int:
@@ -83,20 +96,16 @@ def configure_cluster_locale() -> None:
         return
 
 
-def configure_cluster_realtime() -> None:
-    realtime_enabled = os.environ.get("CLUSTER_REALTIME", "0").strip().lower() in ("1", "true", "yes", "on")
-    if not realtime_enabled:
-        return
-
+def configure_cluster_scheduling() -> None:
     try:
         from openpilot.common.realtime import config_realtime_process
 
         cores = _resolved_realtime_cores()
         priority = _resolved_realtime_priority()
         config_realtime_process(cores, priority)
-        print(f"[cluster_run] realtime enabled cores={cores} priority={priority}", flush=True)
+        print(f"[cluster_run] scheduler configured cores={cores} priority={priority}", flush=True)
     except Exception as exc:
-        print(f"[cluster_run] failed to configure realtime process: {exc}", flush=True)
+        print(f"[cluster_run] failed to configure process scheduling: {exc}", flush=True)
 
 
 def main(*, exit_on_error: bool = True) -> None:
@@ -106,7 +115,7 @@ def main(*, exit_on_error: bool = True) -> None:
         args = ["--input", "live", *args]
     sys.argv = [sys.argv[0], *args]
 
-    configure_cluster_realtime()
+    configure_cluster_scheduling()
     from main import main as cluster_main
 
     cluster_main(exit_on_error=exit_on_error)
