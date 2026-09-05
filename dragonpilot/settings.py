@@ -183,7 +183,7 @@ SETTINGS = [
         "key": "dp_ui_display_mode",
         "type": "text_spin_button_item",
         "title": lambda: tr("Display Mode"),
-        "description": lambda: tr("Std.: Stock behavior.<br>MAIN+: ACC MAIN on = Display ON.<br>OP+: OP enabled = Display ON.<br>MAIN-: ACC MAIN on = Display OFF<br>OP-: OP enabled = Display OFF."),
+        "description": lambda: tr("Std.: Stock behavior.<br>MAIN+: ACC MAIN on = Display ON.<br>OP+: OP enabled = Display ON.<br>MAIN-: ACC MAIN on = Display OFF<br>OP-: OP enabled = Display OFF.<br>TOUCH: Display OFF until the screen is touched."),
         "default": 0,
         "options": [
           lambda: tr("Std."),
@@ -191,6 +191,7 @@ SETTINGS = [
           lambda: tr("OP+"),
           lambda: tr("MAIN-"),
           lambda: tr("OP-"),
+          lambda: tr("TOUCH"),
         ],
       },
       {

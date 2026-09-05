@@ -228,6 +228,7 @@ class Device:
     self._interactive_timeout_callbacks: list[Callable] = []
     self._prev_timed_out = False
     self._awake: bool = True
+    self._touch_mode_awake: bool = False
 
     self._offroad_brightness: int = BACKLIGHT_OFFROAD
     self._last_brightness: int = 0
@@ -300,6 +301,7 @@ class Device:
   # // 2 OP+ - OP enabled = Display ON
   # // 3 MAIN- - ACC MAIN on = Display OFF
   # // 4 OP- - OP enabled = Display OFF
+  # // 5 TOUCH - Display OFF until the screen is touched
   def _ignition_state_ovrride(self, ignition):
     # 0 stock behaviour or ignition is off
     if ui_state.dp_ui_display_mode == 0 or not ignition:
@@ -333,6 +335,10 @@ class Device:
       else:
         return True
 
+    # 5 TOUCH - handled by _update_wakefulness so a touch can wake the display.
+    if ui_state.dp_ui_display_mode == 5:
+      return False
+
     # oops
     return ignition
 
@@ -341,7 +347,8 @@ class Device:
     ignition_just_turned_off = not ui_state.ignition and self._ignition
     self._ignition = ui_state.ignition
 
-    if ignition_just_turned_off or any(ev.left_down for ev in gui_app.mouse_events):
+    touched = any(ev.left_down for ev in gui_app.mouse_events)
+    if ignition_just_turned_off or touched:
       self._reset_interactive_timeout()
 
     interaction_timeout = time.monotonic() > self._interaction_time
@@ -352,7 +359,15 @@ class Device:
 
     ignition = self._ignition_state_ovrride(ui_state.ignition)
 
-    self._set_awake(ignition or not interaction_timeout or PC)
+    if ui_state.dp_ui_display_mode == 5 and not PC:
+      if touched:
+        self._touch_mode_awake = True
+      elif interaction_timeout:
+        self._touch_mode_awake = False
+      self._set_awake(self._touch_mode_awake)
+    else:
+      self._touch_mode_awake = False
+      self._set_awake(ignition or not interaction_timeout or PC)
 
   def _set_awake(self, on: bool):
     if on != self._awake:
