@@ -70,6 +70,7 @@ from cluster_usb_pipeline import AsyncJpegUsbPipeline
 
 DEFAULT_FPS = 0.0
 DEFAULT_USB_BRIGHTNESS = 80
+MIN_AUTO_USB_BRIGHTNESS = 15
 DEFAULT_H264_BITRATE = "auto"
 DEFAULT_H264_GOP = 1
 H264_AUTO_BITRATE_BITS_PER_FPS = 234_000
@@ -451,9 +452,12 @@ def resolved_usb_brightness(
     if live_source is not None:
         auto_brightness = live_source.screen_brightness_percent()
         if auto_brightness is not None:
-            return normalize_cluster_brightness_percent(auto_brightness)
+            return max(
+                MIN_AUTO_USB_BRIGHTNESS,
+                normalize_cluster_brightness_percent(auto_brightness),
+            )
 
-    return DEFAULT_USB_BRIGHTNESS
+    return max(MIN_AUTO_USB_BRIGHTNESS, DEFAULT_USB_BRIGHTNESS)
 
 
 def build_rgba_color_test_pattern(width: int, height: int) -> bytearray:

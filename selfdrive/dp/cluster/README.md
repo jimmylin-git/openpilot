@@ -204,7 +204,8 @@ Explicit `CLUSTER_REALTIME`, `CLUSTER_REALTIME_CORES`, or
 `CLUSTER_REALTIME_PRIORITY` environment values still win.
 When `--usb-brightness` is omitted, USB launches follow `ClusterHudBrightness`:
 `0` auto follows live `deviceState.screenBrightnessPercent` after samples are
-available, and `1` through `100` are fixed brightness percentages.
+available, with a 35% minimum to keep the HUD readable, and `1` through `100`
+are fixed brightness percentages.
 Brightness commands use no-ACK command `14` during USB initialization and when
 the resolved brightness changes.
 
