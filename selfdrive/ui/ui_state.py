@@ -229,6 +229,7 @@ class Device:
     self._prev_timed_out = False
     self._awake: bool = True
     self._touch_mode_awake: bool = False
+    self._touch_mode_active: bool = False
 
     self._offroad_brightness: int = BACKLIGHT_OFFROAD
     self._last_brightness: int = 0
@@ -360,12 +361,17 @@ class Device:
     ignition = self._ignition_state_ovrride(ui_state.ignition)
 
     if ui_state.dp_ui_display_mode == 5 and not PC:
-      if touched:
+      if not self._touch_mode_active:
+        self._touch_mode_active = True
+        self._touch_mode_awake = True
+        self._reset_interactive_timeout()
+      elif touched:
         self._touch_mode_awake = True
       elif interaction_timeout:
         self._touch_mode_awake = False
       self._set_awake(self._touch_mode_awake)
     else:
+      self._touch_mode_active = False
       self._touch_mode_awake = False
       self._set_awake(ignition or not interaction_timeout or PC)
 
