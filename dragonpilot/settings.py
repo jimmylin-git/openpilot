@@ -28,6 +28,12 @@ SETTINGS = [
         "description": lambda: tr("Enable openpilot to auto-lock doors above 20 km/h and auto-unlock when shifting to Park."),
       },
       {
+        "key": "dp_toyota_manual_door_lock",
+        "type": "toggle_item",
+        "title": lambda: tr("Manual Door Lock"),
+        "description": lambda: tr("Toggle on to lock the doors immediately, toggle off to unlock them immediately."),
+      },
+      {
         "key": "dp_toyota_tss1_sng",
         "type": "toggle_item",
         "title": lambda: tr("Enable TSS1 SnG Mod"),
