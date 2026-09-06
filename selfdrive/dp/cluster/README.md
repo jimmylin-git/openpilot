@@ -186,8 +186,7 @@ are fixed at startup. Set `CLUSTER_AUTORUN_FPS` only for fixed test overrides;
 `ClusterHudDebug` controls the autorun output gate: `0` starts external HUD
 rendering only while openpilot is onroad, and `1`, `2`, and `3` keep the
 always-on debug behavior after power-up. In live input only, `2` also keeps the
-top UI icons visible when source data is missing, and `3` also shows the navi
-debug UI before navi data has arrived. When output is gated off,
+top UI icons visible when source data is missing. When output is gated off,
 `cluster_autorun` sends TURZX brightness `0` so a stale HUD frame does not
 remain visible.
 The autorun watcher normalizes locale before this dim-only USB path too, so
@@ -202,6 +201,12 @@ Changing either param makes the running HUD exit so `cluster_autorun` can
 relaunch it with the new affinity/priority, without a whole system restart.
 Explicit `CLUSTER_REALTIME`, `CLUSTER_REALTIME_CORES`, or
 `CLUSTER_REALTIME_PRIORITY` environment values still win.
+The manager launches `cluster_autorun` as the single live entry point. The
+launcher passes `--input live` plus the fixed live-display settings (`15 FPS`,
+JPEG quality `50`, automatic brightness, and automatic theme). The
+`ClusterHudLiveFps`, `ClusterHudEncoder`, `ClusterHudTheme`, and
+`ClusterHudBrightness` names are currently read-only integration points unless
+another component writes those Params; they are not settings UI by themselves.
 When `--usb-brightness` is omitted, USB launches follow `ClusterHudBrightness`:
 `0` auto follows live `deviceState.screenBrightnessPercent` after samples are
 available, with a 35% minimum to keep the HUD readable, and `1` through `100`
@@ -224,12 +229,7 @@ option; without raw received CAN, `carState` still provides LF/RF distance and
 LR/RR distance when the current cereal schema exposes it. Blindspot booleans do
 not create fallback vehicle boxes.
 Cluster road speed-limit display treats `carState.speedLimit` from the
-vehicle/HDA path as km/h. Navigation speed limits are accepted in either the
-km/h values used by the current navigation integrations or the m/s values used
-by upstream `navd`; km/h-looking values such as 50/100 stay unchanged. Empty
-navigation speed-limit samples do not immediately clear the last valid
-navigation limit; the cluster holds it briefly to avoid `n` source flicker
-between `--` and the real limit during nav update timing gaps.
+vehicle/HDA path as km/h.
 Turn-signal arrows are hidden while off and only draw during their blink-on
 phase. The top HUD also uses `carState.gearShifter`, `gearStep`, `pcmCruiseGap`,
 `selfdriveState.personality`, and `carControl.latActive` to show gear
@@ -279,14 +279,10 @@ the live debug panel with grouped `LIVE DELAY`, `LIVE TORQUE`, `STEERING`, and
 core usage, `3` shows a large debug graph selected by `ShowPlotMode` with the
 driving scene disabled, and `4`
 shows the same graph in the right-side panel while keeping the driving scene.
-`5` shows the external navigation receiver debug panel while keeping the
-driving scene.
 Mode `3` also hides the speed, accel, clock, turn-signal, and git HUD so the
 large graph uses the available center/right height with only a small margin.
 Mode `4` keeps the driving HUD and uses the maximum right-side panel height with
-the same margin. Mode `5` draws the received navigation route through the
-normal planned-path renderer when route coordinates and current ego GPS are
-available. Modes `1`, `2`, `3`, `4`, and `5` suppress the route overlay so the
+the same margin. Modes `1`, `2`, `3`, and `4` suppress the route overlay so the
 selected debug view remains visible.
 `ClusterHudRadarInfo` controls world radar/vehicle speed and distance labels:
 `0` off, `1` speed for vehicle boxes only, `2` speed and distance for vehicle
