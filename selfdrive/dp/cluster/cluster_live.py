@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from cluster_config import BLUE, DEFAULT_LANE_WIDTH_M, SHOW_PLOT_MODE_PARAM
-from cluster_models import ClusterUiState, DebugPlotSnapshot, LaneMarking, LiveDebugInfo, ModelPathPoint
+from cluster_models import (
+    ClusterUiState,
+    DebugPlotSnapshot,
+    DetectedVehicle,
+    LaneMarking,
+    LiveDebugInfo,
+    ModelPathPoint,
+)
 from cluster_route_replay import RouteLogParser, finite_float, frame_to_state, safe_get, safe_optional_float
 from cluster_utils import clamp
 
@@ -48,6 +55,8 @@ LIVE_SERVICES_BASE = (
 )
 LIVE_CAN_SERVICES = ("can", "sendcan")
 LIVE_DATA_STALE_SECONDS = 2.0
+LIVE_SCENE_SMOOTHING_TAU_SECONDS = 0.16
+LIVE_VEHICLE_HOLD_SECONDS = 0.24
 
 
 class OpenpilotLiveSource:
@@ -73,6 +82,9 @@ class OpenpilotLiveSource:
         self.timeout_ms = max(0, int(timeout_ms))
         self.last_state: ClusterUiState | None = None
         self._last_car_state_update_t: float | None = None
+        self._smoothed_state: ClusterUiState | None = None
+        self._smoothed_state_t: float | None = None
+        self._last_vehicle_seen_t: float | None = None
         self.start_t = time.monotonic()
         self.frames = 0
         self.params: Any | None = None
@@ -159,6 +171,7 @@ class OpenpilotLiveSource:
             state = frame_to_state(frame)
             self._profile_add("source.live.frame_to_state", profile_stage)
 
+            state = self._smooth_scene_state(state)
             self.last_state = self._with_debug_state(state)
             self.frames += 1
             return self.last_state
@@ -173,6 +186,121 @@ class OpenpilotLiveSource:
     def live_data_available(self) -> bool:
         last_update_t = self._last_car_state_update_t
         return last_update_t is not None and time.monotonic() - last_update_t <= LIVE_DATA_STALE_SECONDS
+
+    def _smooth_scene_state(self, state: ClusterUiState) -> ClusterUiState:
+        now = time.monotonic()
+        previous = self._smoothed_state
+        previous_t = self._smoothed_state_t
+        if previous is None or previous_t is None:
+            self._smoothed_state = state
+            self._smoothed_state_t = now
+            return state
+
+        alpha = 1.0 - math.exp(
+            -max(0.001, now - previous_t) / LIVE_SCENE_SMOOTHING_TAU_SECONDS
+        )
+        previous_vehicles = {
+            (vehicle.label, vehicle.source): vehicle for vehicle in previous.detected_vehicles
+        }
+        current_vehicle_keys = {(vehicle.label, vehicle.source) for vehicle in state.detected_vehicles}
+        if state.detected_vehicles:
+            self._last_vehicle_seen_t = now
+        smoothed_vehicles = tuple(
+            self._smooth_vehicle(vehicle, previous_vehicles.get((vehicle.label, vehicle.source)), alpha)
+            for vehicle in state.detected_vehicles
+        )
+        if (
+            self._last_vehicle_seen_t is not None
+            and now - self._last_vehicle_seen_t <= LIVE_VEHICLE_HOLD_SECONDS
+        ):
+            smoothed_vehicles += tuple(
+                vehicle
+                for vehicle in previous.detected_vehicles
+                if (vehicle.label, vehicle.source) not in current_vehicle_keys
+            )
+
+        smoothed = replace(
+            state,
+            lanes=self._smooth_lanes(state.lanes, previous.lanes, alpha),
+            model_path=self._smooth_model_path(state.model_path, previous.model_path, alpha),
+            detected_vehicles=smoothed_vehicles,
+        )
+        self._smoothed_state = smoothed
+        self._smoothed_state_t = now
+        return smoothed
+
+    @staticmethod
+    def _smooth_lanes(
+        current: tuple[LaneMarking, ...],
+        previous: tuple[LaneMarking, ...],
+        alpha: float,
+    ) -> tuple[LaneMarking, ...]:
+        if not current:
+            return previous
+        if len(current) != len(previous):
+            return current
+        return tuple(
+            replace(
+                marking,
+                offset=previous_marking.offset + (marking.offset - previous_marking.offset) * alpha,
+                model_points=OpenpilotLiveSource._smooth_model_path(
+                    marking.model_points,
+                    previous_marking.model_points,
+                    alpha,
+                ),
+                model_lateral_shift_m=(
+                    previous_marking.model_lateral_shift_m
+                    + (marking.model_lateral_shift_m - previous_marking.model_lateral_shift_m) * alpha
+                ),
+            )
+            for marking, previous_marking in zip(current, previous)
+        )
+
+    @staticmethod
+    def _smooth_model_path(
+        current: tuple[ModelPathPoint, ...],
+        previous: tuple[ModelPathPoint, ...],
+        alpha: float,
+    ) -> tuple[ModelPathPoint, ...]:
+        if len(current) != len(previous):
+            return current
+        return tuple(
+            replace(
+                point,
+                forward_m=previous_point.forward_m + (point.forward_m - previous_point.forward_m) * alpha,
+                lateral_m=previous_point.lateral_m + (point.lateral_m - previous_point.lateral_m) * alpha,
+                lateral_std_m=OpenpilotLiveSource._smooth_optional(
+                    point.lateral_std_m, previous_point.lateral_std_m, alpha
+                ),
+            )
+            for point, previous_point in zip(current, previous)
+        )
+
+    @staticmethod
+    def _smooth_optional(current: float | None, previous: float | None, alpha: float) -> float | None:
+        if current is None or previous is None:
+            return current
+        return previous + (current - previous) * alpha
+
+    @staticmethod
+    def _smooth_vehicle(
+        current: DetectedVehicle,
+        previous: DetectedVehicle | None,
+        alpha: float,
+    ) -> DetectedVehicle:
+        if previous is None:
+            return current
+        return replace(
+            current,
+            longitudinal_m=previous.longitudinal_m + (current.longitudinal_m - previous.longitudinal_m) * alpha,
+            lateral_m=previous.lateral_m + (current.lateral_m - previous.lateral_m) * alpha,
+            relative_speed_mps=OpenpilotLiveSource._smooth_optional(
+                current.relative_speed_mps, previous.relative_speed_mps, alpha
+            ),
+            absolute_speed_kph=OpenpilotLiveSource._smooth_optional(
+                current.absolute_speed_kph, previous.absolute_speed_kph, alpha
+            ),
+        )
 
     def status_text(self) -> str:
         profile_stage = self._profile_start()

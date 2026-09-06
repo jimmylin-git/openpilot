@@ -686,6 +686,58 @@ class ClusterUiRenderer:
         profile_stage = self._profile_start()
         self._draw_hud(state, signal_lights)
         self._profile_add("render.hud", profile_stage)
+        profile_stage = self._profile_start()
+        self._draw_screen_frame_effect(state)
+        self._profile_add("render.screen_frame_effect", profile_stage)
+
+    def _draw_screen_frame_effect(self, state: ClusterUiState) -> None:
+        gear = (state.gear_text or "").strip().upper()
+        if state.cruise_display_state == "engaged":
+            color = (64, 156, 255)
+            ripple = True
+        else:
+            color = {
+                "P": (214, 218, 224),
+                "N": (255, 196, 48),
+                "R": (255, 72, 72),
+                "D": (72, 220, 126),
+            }.get(gear, (132, 140, 150))
+            ripple = False
+
+        now = time.perf_counter()
+        pulse = 0.5 + 0.5 * math.sin(now * math.tau / 1.6)
+        alpha = int(70 + 105 * pulse)
+        width = 2.0 + 2.0 * pulse
+        sx = self.width / DESIGN_WIDTH
+        sy = self.height / DESIGN_HEIGHT
+        rl.rl_push_matrix()
+        rl.rl_scalef(sx, sy, 1.0)
+        try:
+            inset = 8.0
+            bounds = rl.Rectangle(
+                inset,
+                inset,
+                DESIGN_WIDTH - inset * 2.0,
+                DESIGN_HEIGHT - inset * 2.0,
+            )
+            rl.draw_rectangle_lines_ex(bounds, width, rl_color((*color, alpha)))
+            if ripple:
+                ripple_phase = (now % 1.6) / 1.6
+                ripple_inset = 8.0 + ripple_phase * 42.0
+                ripple_alpha = int(115 * (1.0 - ripple_phase))
+                ripple_bounds = rl.Rectangle(
+                    ripple_inset,
+                    ripple_inset,
+                    DESIGN_WIDTH - ripple_inset * 2.0,
+                    DESIGN_HEIGHT - ripple_inset * 2.0,
+                )
+                rl.draw_rectangle_lines_ex(
+                    ripple_bounds,
+                    max(1.0, width * (1.0 - ripple_phase)),
+                    rl_color((*color, ripple_alpha)),
+                )
+        finally:
+            rl.rl_pop_matrix()
 
     def _clear_world(self) -> None:
         theme = self._current_theme()
@@ -2761,8 +2813,8 @@ class ClusterUiRenderer:
         display_speed_kph = raw_speed * 1.055 if raw_speed is not None else None
         speed_value = int(round(clamp(display_speed_kph, 0.0, MAX_SPEED_KPH)))
         base_font_size = 140
-        max_font_size = 190
-        max_speed_ref = 120.0
+        max_font_size = 230
+        max_speed_ref = 100.0
         speed_ratio = min(1.0, speed_value / max_speed_ref)
         dynamic_font_size = int(base_font_size + (max_font_size - base_font_size) * speed_ratio)
 
