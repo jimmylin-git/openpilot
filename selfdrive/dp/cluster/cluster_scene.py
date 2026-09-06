@@ -98,7 +98,8 @@ RADAR_MERGED_SOURCE_TAG = "+radar:"
 CORNER_RADAR_LABELS = frozenset(("LF", "RF", "LR", "RR"))
 DRIVE_CAMERA_FORWARD_SHIFT_M = 5.0
 DRIVE_CAMERA_EGO_BOTTOM_POSITION_M = (0.0, -6.0, 5.00)
-DRIVE_CAMERA_EGO_BOTTOM_TARGET_M = (0.0, 14.0, -1.00)
+DRIVE_CAMERA_EGO_BOTTOM_TARGET_M = (0.0, 14.0, -0.20)
+DRIVE_CAMERA_TARGET_Z_M = 0.60
 DRIVE_VIEW_REAR_RELATIVE_M = -5.0
 DRIVE_VIEW_REAR_ROAD_MARGIN_M = 8.0
 LONGITUDINAL_RENDER_DISTANCE_SCALE = 0.5
@@ -2555,7 +2556,7 @@ def scene_camera(state: ClusterUiState, lane_width_m: float, anchor_x_m: float =
     else:
         drive_camera = CameraSpec(
             position=Vec3(0.0, -16.0 + DRIVE_CAMERA_FORWARD_SHIFT_M, 6.00),
-            target=Vec3(0.0, 7.0 + DRIVE_CAMERA_FORWARD_SHIFT_M, -0.20),
+            target=Vec3(0.0, 7.0 + DRIVE_CAMERA_FORWARD_SHIFT_M, DRIVE_CAMERA_TARGET_Z_M),
             fovy_deg=44.0,
         )
 
