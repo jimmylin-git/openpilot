@@ -47,6 +47,7 @@ LIVE_SERVICES_BASE = (
     "wideRoadCameraState",
 )
 LIVE_CAN_SERVICES = ("can", "sendcan")
+LIVE_DATA_STALE_SECONDS = 2.0
 
 
 class OpenpilotLiveSource:
@@ -71,6 +72,7 @@ class OpenpilotLiveSource:
         self.parser = RouteLogParser()
         self.timeout_ms = max(0, int(timeout_ms))
         self.last_state: ClusterUiState | None = None
+        self._last_car_state_update_t: float | None = None
         self.start_t = time.monotonic()
         self.frames = 0
         self.params: Any | None = None
@@ -143,6 +145,8 @@ class OpenpilotLiveSource:
                 continue
             event_t = self._service_time(service)
             self._apply_service_update(service, event_t)
+            if service == "carState":
+                self._last_car_state_update_t = time.monotonic()
         self._profile_add("source.live.apply_updates", profile_stage)
 
         if self._service_alive("carState"):
@@ -165,6 +169,10 @@ class OpenpilotLiveSource:
 
         self.last_state = self._with_debug_state(state)
         return self.last_state
+
+    def live_data_available(self) -> bool:
+        last_update_t = self._last_car_state_update_t
+        return last_update_t is not None and time.monotonic() - last_update_t <= LIVE_DATA_STALE_SECONDS
 
     def status_text(self) -> str:
         profile_stage = self._profile_start()

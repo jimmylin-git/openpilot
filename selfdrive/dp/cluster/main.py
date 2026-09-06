@@ -566,10 +566,14 @@ def run_demo(
     h264_pipeline: H264UsbPipeline | None = None
     active_brightness_setting = normalize_cluster_brightness_percent(usb_brightness)
     usb_brightness_auto_enabled = usb_brightness_param_reader is not None
-    initial_usb_brightness = resolved_usb_brightness(
-        active_brightness_setting,
-        None,
-        auto_enabled=usb_brightness_auto_enabled,
+    initial_usb_brightness = (
+        0
+        if input_mode == "live"
+        else resolved_usb_brightness(
+            active_brightness_setting,
+            None,
+            auto_enabled=usb_brightness_auto_enabled,
+        )
     )
     if output_mode in ("usb", "both"):
         usb_display = TuringUsbDisplay(
@@ -1028,10 +1032,14 @@ def run_demo(
                             else f"{active_brightness_setting}%"
                         )
                         print(f"{CLUSTER_BRIGHTNESS_PARAM} updated: {brightness_text}", flush=True)
-                next_usb_brightness = resolved_usb_brightness(
-                    active_brightness_setting,
-                    live_source,
-                    auto_enabled=usb_brightness_auto_enabled,
+                next_usb_brightness = (
+                    0
+                    if live_source is not None and not live_source.live_data_available()
+                    else resolved_usb_brightness(
+                        active_brightness_setting,
+                        live_source,
+                        auto_enabled=usb_brightness_auto_enabled,
+                    )
                 )
                 usb_display.set_brightness(next_usb_brightness)
                 next_brightness_param_read = brightness_now + BRIGHTNESS_PARAM_POLL_SECONDS
