@@ -27,6 +27,10 @@ REPLAY = "REPLAY" in os.environ
 
 EventName = log.OnroadEvent.EventName
 
+# dp - plain flag file for the Toyota manual door lock toggle. Using a raw file (instead of a
+# registered Param key) means no params_pyx.so rebuild is required after adding this feature.
+MANUAL_DOOR_LOCK_FLAG = "/data/dp_toyota_manual_door_lock"
+
 # forward
 carlog.addHandler(ForwardingHandler(cloudlog))
 
@@ -306,9 +310,10 @@ class Car:
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
 
-      # dp - Toyota: manual door lock/unlock toggle, independent from the speed/gear based auto lock/unlock
+      # dp - Toyota: manual door lock/unlock toggle, independent from the speed/gear based auto lock/unlock.
+      # Stored as a plain file (not a registered Param) so no params_pyx.so rebuild is required.
       if self.CP.brand == 'toyota':
-        manual_door_lock = self.params.get_bool("dp_toyota_manual_door_lock")
+        manual_door_lock = os.path.exists(MANUAL_DOOR_LOCK_FLAG)
         if manual_door_lock != self.manual_door_locked:
           cmd = LOCK_CMD if manual_door_lock else UNLOCK_CMD
           self.can_callbacks[1]([CanData(LOCK_UNLOCK_CAN_ID, cmd, 0)])
