@@ -202,8 +202,9 @@ relaunch it with the new affinity/priority, without a whole system restart.
 Explicit `CLUSTER_REALTIME`, `CLUSTER_REALTIME_CORES`, or
 `CLUSTER_REALTIME_PRIORITY` environment values still win.
 The manager launches `cluster_autorun` as the single live entry point. The
-launcher passes `--input live` plus the fixed live-display settings (`15 FPS`,
-JPEG quality `50`, automatic brightness, and automatic theme). The
+launcher resets `ClusterHudBrightness` to `0` at startup, then passes
+`--input live` plus the fixed live-display settings (`15 FPS`, JPEG quality
+`50`, automatic brightness, and automatic theme). The
 `ClusterHudLiveFps`, `ClusterHudEncoder`, `ClusterHudTheme`, and
 `ClusterHudBrightness` names are currently read-only integration points unless
 another component writes those Params; they are not settings UI by themselves.
