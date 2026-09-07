@@ -10,9 +10,6 @@ CLUSTER_DIR = Path("/data/openpilot/selfdrive/dp/cluster")
 
 def main() -> None:
     main_script = CLUSTER_DIR / "main.py"
-    from openpilot.common.params import Params
-
-    Params().put("ClusterHudBrightness", "0")
     print("[cluster_autorun] Using camera-based automatic brightness", flush=True)
     print("[cluster_autorun] Starting cluster HUD with live openpilot data", flush=True)
     subprocess.run(
