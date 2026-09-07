@@ -208,9 +208,10 @@ JPEG quality `50`, automatic brightness, and automatic theme). The
 `ClusterHudBrightness` names are currently read-only integration points unless
 another component writes those Params; they are not settings UI by themselves.
 When `--usb-brightness` is omitted, USB launches follow `ClusterHudBrightness`:
-`0` auto follows live `deviceState.screenBrightnessPercent` after samples are
-available, with a 35% minimum to keep the HUD readable, and `1` through `100`
-are fixed brightness percentages.
+`0` auto follows the wide-road camera exposure after samples are available,
+using the same ambient-light estimate as the main UI and smoothing changes over
+time. The resolved brightness is limited to `10..60`; `1` through `100` are
+fixed brightness percentages, also limited to `10..60`.
 Brightness commands use no-ACK command `14` during USB initialization and when
 the resolved brightness changes.
 

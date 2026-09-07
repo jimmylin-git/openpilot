@@ -446,7 +446,7 @@ def resolved_usb_brightness(
         return max(MIN_USB_BRIGHTNESS, min(MAX_USB_BRIGHTNESS, normalized))
 
     if live_source is not None:
-        auto_brightness = live_source.screen_brightness_percent()
+        auto_brightness = live_source.ambient_brightness_percent()
         if auto_brightness is not None:
             return max(
                 MIN_USB_BRIGHTNESS,

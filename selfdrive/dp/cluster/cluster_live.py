@@ -98,6 +98,7 @@ class OpenpilotLiveSource:
         self._live_debug_enabled = False
         self._debug_plot_enabled = False
         self._standby_state = standby_state()
+        self._smoothed_ambient_brightness: float | None = None
         self.profile_enabled = False
         self._profile_samples: list[tuple[str, float]] = []
         try:
@@ -318,16 +319,28 @@ class OpenpilotLiveSource:
         self._profile_add("source.live.status_text", profile_stage)
         return text
 
-    def screen_brightness_percent(self) -> int | None:
-        if not self._service_alive("deviceState"):
+    def ambient_brightness_percent(self) -> int | None:
+        if not self._service_alive("wideRoadCameraState"):
             return None
         try:
-            value = float(self.sm["deviceState"].screenBrightnessPercent)
-        except Exception:
+            camera_state = self.sm["wideRoadCameraState"]
+            exposure = float(camera_state.exposureValPercent)
+            scale = 6.0 if camera_state.sensor == "ar0231" else 1.0
+            light_sensor = max(100.0 - scale * exposure, 0.0)
+            if light_sensor <= 8.0:
+                luminance = light_sensor / 903.3
+            else:
+                luminance = ((light_sensor + 16.0) / 116.0) ** 3.0
+            target = 30.0 + 70.0 * min(max(luminance, 0.0), 1.0)
+        except (AttributeError, TypeError, ValueError):
             return None
-        if not math.isfinite(value):
+        if not math.isfinite(target):
             return None
-        return int(round(clamp(value, 0.0, 100.0)))
+        if self._smoothed_ambient_brightness is None:
+            self._smoothed_ambient_brightness = target
+        else:
+            self._smoothed_ambient_brightness += (target - self._smoothed_ambient_brightness) * 0.25
+        return int(round(clamp(self._smoothed_ambient_brightness, 0.0, 100.0)))
 
     def close(self) -> None:
         return None
