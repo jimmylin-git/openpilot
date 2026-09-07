@@ -17,6 +17,7 @@ from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import ObdCallback
 from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
+from opendbc.car.toyota.carcontroller import LOCK_UNLOCK_CAN_ID, LOCK_CMD, UNLOCK_CMD
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper
 from openpilot.selfdrive.car.car_specific import MockCarState
@@ -80,6 +81,8 @@ class Car:
     self.params = Params()
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
+
+    self.manual_door_locked = False
 
     is_release = self.params.get_bool("IsReleaseBranch")
 
@@ -302,6 +305,15 @@ class Car:
     while not evt.is_set():
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
+
+      # dp - Toyota: manual door lock/unlock toggle, independent from the speed/gear based auto lock/unlock
+      if self.CP.brand == 'toyota':
+        manual_door_lock = self.params.get_bool("dp_toyota_manual_door_lock")
+        if manual_door_lock != self.manual_door_locked:
+          cmd = LOCK_CMD if manual_door_lock else UNLOCK_CMD
+          self.can_callbacks[1]([CanData(LOCK_UNLOCK_CAN_ID, cmd, 0)])
+          self.manual_door_locked = manual_door_lock
+
       time.sleep(0.1)
 
   def card_thread(self):

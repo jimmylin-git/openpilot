@@ -369,10 +369,17 @@ class Updater:
         # Check for version X.Y.Z at the start (ignores trailing suffixes like -pre-build)
         m = re.match(r'^(\d+)\.(\d+)\.(\d+)', name)
 
+        # sp/dp cluster branch naming, e.g. SP-0.10.3-cluster, DP-0.10.3-cluster,
+        # or DP-0.10.3-pre-build-cluster
+        cluster_m = re.match(r'^(?:SP|DP)-(\d+)\.(\d+)\.(\d+)(?:-pre-build)?-cluster$', name)
+
         # Logic:
         # 1. Allow exactly 'pre-build'
         # 2. OR Allow if it parses as a version AND that version is >= 0.9.8
-        if name in ('testing', 'pre-build') or (m and tuple(map(int, m.groups())) >= (0, 9, 8)):
+        # 3. OR Allow SP/DP-<version>-cluster branches with version >= 0.9.8
+        if (name in ('testing', 'pre-build')
+            or (m and tuple(map(int, m.groups())) >= (0, 9, 8))
+            or (cluster_m and tuple(map(int, cluster_m.groups())) >= (0, 9, 8))):
           self.branches[name] = x.group('commit_sha')
 
     cur_branch = self.get_branch(OVERLAY_MERGED)
