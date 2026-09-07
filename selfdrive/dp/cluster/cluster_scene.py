@@ -163,6 +163,8 @@ EGO_VEHICLE_CENTER_FORWARD_M = EGO_FORWARD_M - VEHICLE_LENGTH_M * 0.5
 LANE_HIGHLIGHT_COLOR = (64, 148, 255)
 LANE_HIGHLIGHT_ALPHA = 220
 LANE_HIGHLIGHT_ROUTE_ALPHA = 170
+EGO_LANE_CRUISE_ALPHA = 150
+EGO_LANE_CRUISE_ROUTE_ALPHA = 110
 BSD_LANE_MARKING_MATCH_TOLERANCE = 0.45
 LANE_DASH_LENGTH_M = 5.2
 LANE_DASH_GAP_M = 4.2
@@ -3044,6 +3046,11 @@ def lane_highlight_color(route_mode: bool) -> Color:
     return LANE_HIGHLIGHT_COLOR[0], LANE_HIGHLIGHT_COLOR[1], LANE_HIGHLIGHT_COLOR[2], alpha
 
 
+def ego_lane_cruise_color(route_mode: bool) -> Color:
+    alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
+    return GREEN[0], GREEN[1], GREEN[2], alpha
+
+
 def bsd_lane_marking_offsets(state: ClusterUiState) -> tuple[float, ...]:
     offsets: list[float] = []
     if state.left_blindspot:
@@ -3144,6 +3151,20 @@ def build_cluster_scene(
         )
         if highlight_strip is not None:
             highlight_lanes.append(highlight_strip)
+    if state.cruise_display_state == "engaged":
+        ego_lane_strip = lane_floor_strip(
+            state,
+            clamp(state.ego_lane_offset, -1.25, 1.25),
+            ego_lane_cruise_color(route_mode),
+            lane_width_m,
+            road_start_m,
+            road_end_m,
+            road_steps,
+            route_mode,
+            0.005,
+        )
+        if ego_lane_strip is not None:
+            highlight_lanes.append(ego_lane_strip)
     profile_scene_add(profile_add, "scene.build.highlight_lanes", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)
