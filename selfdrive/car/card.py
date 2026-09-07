@@ -83,6 +83,7 @@ class Car:
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
 
     self.manual_door_locked = False
+    self.manual_door_lock_sync_pending = None
 
     is_release = self.params.get_bool("IsReleaseBranch")
 
@@ -289,9 +290,11 @@ class Car:
           if can_send.address != LOCK_UNLOCK_CAN_ID:
             continue
           if can_send.dat == LOCK_CMD:
+            self.manual_door_lock_sync_pending = True
             self.params.put_bool_nonblocking("dp_toyota_manual_door_lock", True)
             self.manual_door_locked = True
           elif can_send.dat == UNLOCK_CMD:
+            self.manual_door_lock_sync_pending = False
             self.params.put_bool_nonblocking("dp_toyota_manual_door_lock", False)
             self.manual_door_locked = False
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
@@ -320,9 +323,15 @@ class Car:
       if self.CP.brand == 'toyota':
         manual_door_lock = self.params.get_bool("dp_toyota_manual_door_lock")
         if manual_door_lock != self.manual_door_locked:
+          if manual_door_lock == self.manual_door_lock_sync_pending:
+            self.manual_door_lock_sync_pending = None
+            self.manual_door_locked = manual_door_lock
+            time.sleep(0.1)
+            continue
           cmd = LOCK_CMD if manual_door_lock else UNLOCK_CMD
           self.can_callbacks[1]([CanData(LOCK_UNLOCK_CAN_ID, cmd, 0)])
           self.manual_door_locked = manual_door_lock
+          self.manual_door_lock_sync_pending = None
 
       time.sleep(0.1)
 
