@@ -23,8 +23,6 @@ def main() -> None:
             "jpeg",
             "--usb-jpeg-quality",
             "50",
-            "--usb-brightness",
-            "0",
             "--theme",
             "auto",
         ],

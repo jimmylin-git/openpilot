@@ -70,7 +70,7 @@ from cluster_usb_pipeline import AsyncJpegUsbPipeline
 DEFAULT_FPS = 0.0
 DEFAULT_USB_BRIGHTNESS = 60
 MAX_USB_BRIGHTNESS = 60
-MIN_AUTO_USB_BRIGHTNESS = 15
+MIN_USB_BRIGHTNESS = 10
 DEFAULT_H264_BITRATE = "auto"
 DEFAULT_H264_GOP = 1
 H264_AUTO_BITRATE_BITS_PER_FPS = 234_000
@@ -443,17 +443,17 @@ def resolved_usb_brightness(
 ) -> int:
     normalized = normalize_cluster_brightness_percent(setting)
     if normalized > 0 or not auto_enabled:
-        return min(MAX_USB_BRIGHTNESS, normalized)
+        return max(MIN_USB_BRIGHTNESS, min(MAX_USB_BRIGHTNESS, normalized))
 
     if live_source is not None:
         auto_brightness = live_source.screen_brightness_percent()
         if auto_brightness is not None:
             return max(
-                MIN_AUTO_USB_BRIGHTNESS,
+                MIN_USB_BRIGHTNESS,
                 min(MAX_USB_BRIGHTNESS, normalize_cluster_brightness_percent(auto_brightness)),
             )
 
-    return min(MAX_USB_BRIGHTNESS, max(MIN_AUTO_USB_BRIGHTNESS, DEFAULT_USB_BRIGHTNESS))
+    return min(MAX_USB_BRIGHTNESS, max(MIN_USB_BRIGHTNESS, DEFAULT_USB_BRIGHTNESS))
 
 
 def build_rgba_color_test_pattern(width: int, height: int) -> bytearray:
@@ -568,7 +568,7 @@ def run_demo(
     active_brightness_setting = normalize_cluster_brightness_percent(usb_brightness)
     usb_brightness_auto_enabled = usb_brightness_param_reader is not None
     initial_usb_brightness = (
-        0
+        MIN_USB_BRIGHTNESS
         if input_mode == "live"
         else resolved_usb_brightness(
             active_brightness_setting,
@@ -1034,7 +1034,7 @@ def run_demo(
                         )
                         print(f"{CLUSTER_BRIGHTNESS_PARAM} updated: {brightness_text}", flush=True)
                 next_usb_brightness = (
-                    0
+                    MIN_USB_BRIGHTNESS
                     if live_source is not None and not live_source.live_data_available()
                     else resolved_usb_brightness(
                         active_brightness_setting,
