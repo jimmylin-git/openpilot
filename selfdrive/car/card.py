@@ -284,6 +284,16 @@ class Car:
       # send car controls over can
       now_nanos = self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9)
       self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos)
+      if self.CP.brand == 'toyota':
+        for can_send in can_sends:
+          if can_send.address != LOCK_UNLOCK_CAN_ID:
+            continue
+          if can_send.dat == LOCK_CMD:
+            self.params.put_bool_nonblocking("dp_toyota_manual_door_lock", True)
+            self.manual_door_locked = True
+          elif can_send.dat == UNLOCK_CMD:
+            self.params.put_bool_nonblocking("dp_toyota_manual_door_lock", False)
+            self.manual_door_locked = False
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
       self.CC_prev = CC
