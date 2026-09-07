@@ -88,16 +88,16 @@ FOLLOW_STATUS_CENTER_X = GEAR_STATUS_CENTER_X + 132
 FOLLOW_STATUS_W = 160
 FOLLOW_STATUS_H = 42.0 * DRIVE_STATUS_SCALE
 FOLLOW_STATUS_GAP_BARS = 3
-FOLLOW_GAP_ACTIVE = (187, 61, 145, 255)
-FOLLOW_GAP_INACTIVE = (118, 122, 128, 150)
-FOLLOW_GAP_BAR_W = 5.4
-FOLLOW_GAP_BAR_H = 7.7
-FOLLOW_GAP_BAR_R = 1.3
-FOLLOW_GAP_BAR_SCALE = 1.75 * DRIVE_STATUS_SCALE
-FOLLOW_GAP_BAR_STEP_X = 6.3
 FOLLOW_GAP_ICON_ASPECT = 44.0 / 27.5
 FOLLOW_GAP_ICON_H = 32.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_ICON_W = FOLLOW_GAP_ICON_H * FOLLOW_GAP_ICON_ASPECT
+EGO_GAP_INDICATOR_Z_OFFSET_M = 0.55
+EGO_GAP_BAR_ACTIVE = (*GREEN, 255)
+EGO_GAP_BAR_INACTIVE = (118, 122, 128, 130)
+EGO_GAP_BAR_W = 10.0
+EGO_GAP_BAR_H = 16.0
+EGO_GAP_BAR_R = 3.0
+EGO_GAP_BAR_STEP_X = 14.0
 TOP_CRUISE_CENTER_X = FOLLOW_STATUS_CENTER_X + 202
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
 TOP_CRUISE_UNIT_FONT_SIZE = TOP_CRUISE_FONT_SIZE
@@ -1533,6 +1533,10 @@ class ClusterUiRenderer:
             state.radar_source_color_mode,
         )
         self._profile_add("draw_scene.vehicle_badges", profile_stage)
+        if scene.vehicles:
+            profile_stage = self._profile_start()
+            self._draw_ego_gap_indicator(state, scene.vehicles[0], camera, scene.scene_shift_x_m)
+            self._profile_add("draw_scene.ego_gap_indicator", profile_stage)
 
     def _draw_strip(self, strip: MeshStrip) -> None:
         count = min(len(strip.left), len(strip.right))
@@ -2699,31 +2703,50 @@ class ClusterUiRenderer:
 
     def _draw_follow_gap_status(self, state: ClusterUiState, bottom_y: float) -> None:
         x = FOLLOW_STATUS_CENTER_X - FOLLOW_STATUS_W * 0.5
-
-        gap_count = 0 if state.cruise_gap is None else int(clamp(float(state.cruise_gap), 1.0, float(FOLLOW_STATUS_GAP_BARS)))
-        bar_w = FOLLOW_GAP_BAR_W * FOLLOW_GAP_BAR_SCALE * 0.8
-        bar_h = FOLLOW_GAP_BAR_H * FOLLOW_GAP_BAR_SCALE * 2.5
-        bar_r = FOLLOW_GAP_BAR_R * FOLLOW_GAP_BAR_SCALE
-        bar_step = FOLLOW_GAP_BAR_STEP_X * FOLLOW_GAP_BAR_SCALE
-        bars_total_w = bar_w + bar_step * (FOLLOW_STATUS_GAP_BARS - 1)
         icon_x = x + FOLLOW_STATUS_W - FOLLOW_GAP_ICON_W
         icon_y = bottom_y - FOLLOW_GAP_ICON_H
-        bar_x = icon_x - bars_total_w - 13.0
-        bar_y = bottom_y - bar_h
+        self._draw_follow_vehicle_icon(icon_x, icon_y)
+
+    def _draw_ego_gap_indicator(
+        self,
+        state: ClusterUiState,
+        ego_vehicle: VehicleBox,
+        camera,
+        scene_shift_x_m: float = 0.0,
+    ) -> None:
+        if state.cruise_gap is None:
+            return
+        anchor = rl.Vector3(
+            ego_vehicle.center.x + scene_shift_x_m,
+            ego_vehicle.center.y,
+            ego_vehicle.height_m + EGO_GAP_INDICATOR_Z_OFFSET_M,
+        )
+        screen = world_to_screen_label_anchor(anchor, camera, self.width, self.height)
+        if screen is None:
+            return
+
+        gap_count = int(clamp(float(state.cruise_gap), 1.0, float(FOLLOW_STATUS_GAP_BARS)))
+        distance_m = max(0.0, ego_vehicle.center.y - EGO_FORWARD_M)
+        scale = world_label_scale(distance_m)
+        bar_w = EGO_GAP_BAR_W * scale
+        bar_h = EGO_GAP_BAR_H * scale
+        bar_r = EGO_GAP_BAR_R * scale
+        bar_step = EGO_GAP_BAR_STEP_X * scale
+        bars_total_w = bar_w + bar_step * (FOLLOW_STATUS_GAP_BARS - 1)
+        bar_x = screen.x - bars_total_w * 0.5
+        bar_y = screen.y - bar_h * 0.5
         for index in range(FOLLOW_STATUS_GAP_BARS):
-            active = index >= FOLLOW_STATUS_GAP_BARS - gap_count
+            active = index < gap_count
             self._rounded_rect(
                 bar_x + index * bar_step,
                 bar_y,
                 bar_w,
                 bar_h,
                 bar_r,
-                FOLLOW_GAP_ACTIVE if active else FOLLOW_GAP_INACTIVE,
+                EGO_GAP_BAR_ACTIVE if active else EGO_GAP_BAR_INACTIVE,
                 None,
                 0.0,
             )
-
-        self._draw_follow_vehicle_icon(icon_x, icon_y)
 
     def _draw_follow_vehicle_icon(self, x: float, y: float) -> None:
         texture = self._follow_vehicle_texture
