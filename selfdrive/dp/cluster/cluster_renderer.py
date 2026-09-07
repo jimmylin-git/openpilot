@@ -68,7 +68,6 @@ KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
 #VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "car.obj"
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "cybertruck_cluster.obj"
-FOLLOW_VEHICLE_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "car.png"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "wheel.png"
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
 TURN_SIGNAL_LEFT_CENTER_X = 610
@@ -85,12 +84,7 @@ GEAR_STATUS_BOX_SIZE = DRIVE_STATUS_ROW_HEIGHT * 0.82
 GEAR_STATUS_FONT_SIZE = 34.0 * DRIVE_STATUS_SCALE * 0.82
 GEAR_STATUS_OUTLINE_WIDTH = 2.0 * DRIVE_STATUS_SCALE
 FOLLOW_STATUS_CENTER_X = GEAR_STATUS_CENTER_X + 132
-FOLLOW_STATUS_W = 160
-FOLLOW_STATUS_H = 42.0 * DRIVE_STATUS_SCALE
 FOLLOW_STATUS_GAP_BARS = 3
-FOLLOW_GAP_ICON_ASPECT = 44.0 / 27.5
-FOLLOW_GAP_ICON_H = 32.0 * DRIVE_STATUS_SCALE
-FOLLOW_GAP_ICON_W = FOLLOW_GAP_ICON_H * FOLLOW_GAP_ICON_ASPECT
 EGO_GAP_INDICATOR_Z_OFFSET_M = 0.55
 EGO_GAP_BAR_ACTIVE = (*GREEN, 255)
 EGO_GAP_BAR_INACTIVE = (118, 122, 128, 130)
@@ -503,7 +497,6 @@ class ClusterUiRenderer:
         self._nv12_pack_shader_locations: dict[str, int] = {}
         self._vehicle_model = None
         self._vehicle_model_load_attempted = False
-        self._follow_vehicle_texture = None
         self._lfa_texture = None
         self._lfa_active_texture = None
         self._route_video_texture = None
@@ -595,9 +588,6 @@ class ClusterUiRenderer:
         self._load_vehicle_model()
         self._profile_add("renderer.open.load_vehicle_model", profile_stage)
         profile_stage = self._profile_start()
-        self._load_follow_vehicle_texture()
-        self._profile_add("renderer.open.load_follow_vehicle_texture", profile_stage)
-        profile_stage = self._profile_start()
         self._load_drive_status_textures()
         self._profile_add("renderer.open.load_drive_status_textures", profile_stage)
         self._window_open = True
@@ -635,9 +625,6 @@ class ClusterUiRenderer:
         if self._route_video_texture is not None:
             rl.unload_texture(self._route_video_texture)
             self._route_video_texture = None
-        if self._follow_vehicle_texture is not None:
-            rl.unload_texture(self._follow_vehicle_texture)
-            self._follow_vehicle_texture = None
         if self._lfa_texture is not None:
             rl.unload_texture(self._lfa_texture)
             self._lfa_texture = None
@@ -1325,11 +1312,6 @@ class ClusterUiRenderer:
         except Exception as exc:
             print(f"Cybertruck vehicle model load failed: {exc}")
             self._vehicle_model = None
-
-    def _load_follow_vehicle_texture(self) -> None:
-        if self._follow_vehicle_texture is not None:
-            return
-        self._follow_vehicle_texture = self._load_icon_texture(FOLLOW_VEHICLE_ICON_PATH, "Follow gap vehicle")
 
     def _load_drive_status_textures(self) -> None:
         if self._lfa_texture is None:
@@ -2659,7 +2641,6 @@ class ClusterUiRenderer:
             gear_color,
         )
 
-        self._draw_follow_gap_status(state, bottom_y)
         self._draw_top_cruise_set(state, bottom_y)
         self._draw_lfa_status_icon(state, bottom_y)
 
@@ -2671,7 +2652,6 @@ class ClusterUiRenderer:
         _, unit_h = self._measure_text("km/h", TOP_CRUISE_UNIT_FONT_SIZE, unit_spacing)
         row_h = max(
             GEAR_STATUS_BOX_SIZE,
-            FOLLOW_GAP_ICON_H,
             LFA_STATUS_ICON_SIZE,
             speed_h,
             unit_h,
@@ -2700,12 +2680,6 @@ class ClusterUiRenderer:
             text_color,
             anchor="center",
         )
-
-    def _draw_follow_gap_status(self, state: ClusterUiState, bottom_y: float) -> None:
-        x = FOLLOW_STATUS_CENTER_X - FOLLOW_STATUS_W * 0.5
-        icon_x = x + FOLLOW_STATUS_W - FOLLOW_GAP_ICON_W
-        icon_y = bottom_y - FOLLOW_GAP_ICON_H
-        self._draw_follow_vehicle_icon(icon_x, icon_y)
 
     def _draw_ego_gap_indicator(
         self,
@@ -2747,20 +2721,6 @@ class ClusterUiRenderer:
                 None,
                 0.0,
             )
-
-    def _draw_follow_vehicle_icon(self, x: float, y: float) -> None:
-        texture = self._follow_vehicle_texture
-        if texture is None:
-            theme = self._current_theme()
-            car_x = x + FOLLOW_GAP_ICON_W * 0.5
-            car_y = y + FOLLOW_GAP_ICON_H * 0.5
-            self._rounded_rect(car_x - 16, car_y - 8, 32, 16, 5.0, theme.muted, None, 0.0)
-            self._rounded_rect(car_x - 7, car_y - 14, 15, 8, 4.0, theme.muted, None, 0.0)
-            return
-
-        source = rl.Rectangle(0.0, 0.0, float(texture.width), float(texture.height))
-        dest = rl.Rectangle(x, y, FOLLOW_GAP_ICON_W, FOLLOW_GAP_ICON_H)
-        rl.draw_texture_pro(texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(WHITE))
 
     def _draw_bottom_aligned_texture_icon(
         self,
