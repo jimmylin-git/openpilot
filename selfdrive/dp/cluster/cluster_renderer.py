@@ -720,7 +720,26 @@ class ClusterUiRenderer:
                 DESIGN_WIDTH - inset * 2.0,
                 DESIGN_HEIGHT - inset * 2.0,
             )
-            rl.draw_rectangle_lines_ex(bounds, width, rl_color((*color, alpha)))
+            gradient_layers = 12
+            for layer in range(gradient_layers):
+                progress = layer / max(1, gradient_layers - 1)
+                layer_inset = inset + progress * 6.0
+                layer_color = tuple(
+                    int(component * (1.0 - progress * 0.35))
+                    for component in color
+                )
+                layer_alpha = int(alpha * (1.0 - progress * 0.78))
+                layer_bounds = rl.Rectangle(
+                    layer_inset,
+                    layer_inset,
+                    DESIGN_WIDTH - layer_inset * 2.0,
+                    DESIGN_HEIGHT - layer_inset * 2.0,
+                )
+                rl.draw_rectangle_lines_ex(
+                    layer_bounds,
+                    max(1.0, width * (1.0 - progress * 0.35)),
+                    rl_color((*layer_color, layer_alpha)),
+                )
             if ripple:
                 ripple_phase = (now % 1.6) / 1.6
                 ripple_inset = 8.0 + ripple_phase * 42.0
@@ -2014,8 +2033,6 @@ class ClusterUiRenderer:
             self._draw_center_clock(state)
             self._profile_add("hud.center_clock", profile_stage)
             profile_stage = self._profile_start()
-            self._draw_actual_fps(state.actual_fps)
-            self._profile_add("hud.actual_fps", profile_stage)
             if screen_mode == CLUSTER_SCREEN_MODE_DEBUG:
                 profile_stage = self._profile_start()
                 self._draw_live_debug_panel(state)
@@ -2043,12 +2060,6 @@ class ClusterUiRenderer:
                 profile_stage = self._profile_start()
                 self._draw_route_overlay(state.route_overlay)
                 self._profile_add("hud.route_overlay", profile_stage)
-            profile_stage = self._profile_start()
-            self._draw_git_status(state.git_status)
-            self._profile_add("hud.git_status", profile_stage)
-            profile_stage = self._profile_start()
-            self._draw_cluster_core_usage(state.cluster_core_usage_text)
-            self._profile_add("hud.cluster_core_usage", profile_stage)
         finally:
             profile_stage = self._profile_start()
             rl.rl_pop_matrix()

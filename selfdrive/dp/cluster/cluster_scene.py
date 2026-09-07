@@ -100,6 +100,7 @@ DRIVE_CAMERA_FORWARD_SHIFT_M = 5.0
 DRIVE_CAMERA_EGO_BOTTOM_POSITION_M = (0.0, -6.0, 5.00)
 DRIVE_CAMERA_EGO_BOTTOM_TARGET_M = (0.0, 14.0, -0.20)
 DRIVE_CAMERA_TARGET_Z_M = 0.60
+SCENE_CAMERA_VERTICAL_DROP_M = 1.20
 DRIVE_VIEW_REAR_RELATIVE_M = -5.0
 DRIVE_VIEW_REAR_ROAD_MARGIN_M = 8.0
 LONGITUDINAL_RENDER_DISTANCE_SCALE = 0.5
@@ -2550,13 +2551,21 @@ def scene_camera(state: ClusterUiState, lane_width_m: float, anchor_x_m: float =
     if state.camera_view_mode == CLUSTER_CAMERA_VIEW_MODE_EGO_BOTTOM:
         drive_camera = CameraSpec(
             position=Vec3(*DRIVE_CAMERA_EGO_BOTTOM_POSITION_M),
-            target=Vec3(*DRIVE_CAMERA_EGO_BOTTOM_TARGET_M),
+            target=Vec3(
+                DRIVE_CAMERA_EGO_BOTTOM_TARGET_M[0],
+                DRIVE_CAMERA_EGO_BOTTOM_TARGET_M[1],
+                DRIVE_CAMERA_EGO_BOTTOM_TARGET_M[2] + SCENE_CAMERA_VERTICAL_DROP_M,
+            ),
             fovy_deg=44.0,
         )
     else:
         drive_camera = CameraSpec(
             position=Vec3(0.0, -16.0 + DRIVE_CAMERA_FORWARD_SHIFT_M, 6.00),
-            target=Vec3(0.0, 7.0 + DRIVE_CAMERA_FORWARD_SHIFT_M, DRIVE_CAMERA_TARGET_Z_M),
+            target=Vec3(
+                0.0,
+                7.0 + DRIVE_CAMERA_FORWARD_SHIFT_M,
+                DRIVE_CAMERA_TARGET_Z_M + SCENE_CAMERA_VERTICAL_DROP_M,
+            ),
             fovy_deg=44.0,
         )
 
@@ -2579,7 +2588,7 @@ def scene_camera(state: ClusterUiState, lane_width_m: float, anchor_x_m: float =
         target=Vec3(
             ego_x_m + orbit_forward_x * target_forward_m,
             ego_y_m + orbit_forward_y * target_forward_m,
-            SURROUND_TARGET_HEIGHT_M,
+            SURROUND_TARGET_HEIGHT_M + SCENE_CAMERA_VERTICAL_DROP_M,
         ),
         fovy_deg=40.0,
     )
