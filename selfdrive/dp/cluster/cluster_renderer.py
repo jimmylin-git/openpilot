@@ -686,9 +686,6 @@ class ClusterUiRenderer:
         profile_stage = self._profile_start()
         self._draw_hud(state, signal_lights)
         self._profile_add("render.hud", profile_stage)
-        profile_stage = self._profile_start()
-        self._draw_screen_frame_effect(state)
-        self._profile_add("render.screen_frame_effect", profile_stage)
 
     def _draw_screen_frame_effect(self, state: ClusterUiState) -> None:
         gear = (state.gear_text or "").strip().upper()
