@@ -89,10 +89,15 @@ FOLLOW_GAP_LANE_ICON_W = 46.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_LANE_ICON_H = 24.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_ACTIVE = (*GREEN, 255)
 FOLLOW_GAP_BAR_INACTIVE = (118, 122, 128, 130)
-FOLLOW_GAP_BAR_W = 4.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 12.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_R = 1.5 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_STEP_Y = 6.0 * DRIVE_STATUS_SCALE
+FOLLOW_GAP_BAR_MARGIN_W = 4.0 * DRIVE_STATUS_SCALE
+# FCD_Lane.png lines splay outward from top to bottom; these fractions (of the
+# icon width) were measured from the asset's opaque pixel span at its top and
+# bottom rows so each bar's width can taper to match the lane lines.
+FOLLOW_GAP_BAR_SPAN_TOP_FRAC = 0.5
+FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 1.0
 TOP_CRUISE_CENTER_X = DESIGN_WIDTH * 0.5
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_LANE_CENTER_X = TOP_CRUISE_CENTER_X - 96.0
@@ -2671,16 +2676,23 @@ class ClusterUiRenderer:
 
         gap_count = int(clamp(float(state.cruise_gap), 1.0, float(FOLLOW_STATUS_GAP_BARS)))
         bars_total_h = FOLLOW_GAP_BAR_H + FOLLOW_GAP_BAR_STEP_Y * (FOLLOW_STATUS_GAP_BARS - 1)
-        bar_x = icon_center_x - FOLLOW_GAP_BAR_W * 0.5
-        bar_y = icon_center_y - bars_total_h * 0.5
+        top_y = icon_center_y - bars_total_h * 0.5
         for index in range(FOLLOW_STATUS_GAP_BARS):
             # Bars stack bottom-to-top so the lit count grows upward like the horizontal layout rotated 90° CCW.
             row = FOLLOW_STATUS_GAP_BARS - 1 - index
             active = index < gap_count
+            row_y = top_y + row * FOLLOW_GAP_BAR_STEP_Y
+            # Interpolate bar width to hug the FCD_Lane.png lane lines, which are
+            # narrower near the top of the icon and splay wider toward the bottom.
+            row_center_frac = (row_y + FOLLOW_GAP_BAR_H * 0.5 - icon_center_y) / FOLLOW_GAP_LANE_ICON_H + 0.5
+            row_center_frac = clamp(row_center_frac, 0.0, 1.0)
+            span_frac = FOLLOW_GAP_BAR_SPAN_TOP_FRAC + (FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC - FOLLOW_GAP_BAR_SPAN_TOP_FRAC) * row_center_frac
+            bar_w = max(2.0, FOLLOW_GAP_LANE_ICON_W * span_frac - FOLLOW_GAP_BAR_MARGIN_W)
+            bar_x = icon_center_x - bar_w * 0.5
             self._rounded_rect(
                 bar_x,
-                bar_y + row * FOLLOW_GAP_BAR_STEP_Y,
-                FOLLOW_GAP_BAR_W,
+                row_y,
+                bar_w,
                 FOLLOW_GAP_BAR_H,
                 FOLLOW_GAP_BAR_R,
                 FOLLOW_GAP_BAR_ACTIVE if active else FOLLOW_GAP_BAR_INACTIVE,
