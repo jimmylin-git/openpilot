@@ -46,6 +46,15 @@ def register(show_spinner=False) -> str | None:
   if not public_key:
     dongle_id = UNREGISTERED_DONGLE_ID
     cloudlog.warning("missing public key")
+    if show_spinner:
+      # MR.ONE: a device without a key pair is not authorized - never enter the OS
+      spinner = Spinner()
+      try:
+        while True:
+          spinner.update("registering device - no key, contact MR.ONE")
+          time.sleep(5)
+      finally:
+        spinner.close()
   elif dongle_id is None:
     if show_spinner:
       spinner = Spinner()
@@ -72,23 +81,26 @@ def register(show_spinner=False) -> str | None:
         register_token = jwt.encode({'register': True, 'exp': datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1)},
                                     cast(str, private_key), algorithm=jwt_algo)
         cloudlog.info("getting pilotauth")
-        cloudlog.info("getting pilotauth")
         resp = api_get("v2/pilotauth/", method='POST', timeout=15,
                        imei=imei, imei2="", serial=serial)
 
-        # ========== 【唯一修改处】==========
-        if resp.status_code in (402, 403):
-          cloudlog.info(f"Unable to register device, got {resp.status_code}, retrying...")
-          dongle_id = UNREGISTERED_DONGLE_ID
-          if show_spinner:
-            spinner.update(f"registering device - serial: {serial}, contact MR.ONE")
-          time.sleep(2)  # 避免请求过快
-          continue  # 继续下一次注册尝试
+        # ========== MR.ONE: only an authorized dongle id lets the device through ==========
+        # Not authorized / pending approval / any other error (402, 403, bad JSON, ...):
+        # keep waiting on the registration screen - never skip into the OS.
+        if resp is not None and resp.status_code == 200:
+          try:
+            dongleauth = json.loads(resp.text)
+            dongle_id = dongleauth.get("dongle_id")
+          except Exception:
+            dongle_id = None
+          if dongle_id and dongle_id != UNREGISTERED_DONGLE_ID:
+            break  # authorized
+        if show_spinner:
+          spinner.update(f"registering device - serial: {serial}, contact MR.ONE")
+        cloudlog.info("Device not authorized yet, retrying...")
+        time.sleep(2)  # avoid hammering the backend
+        continue  # keep waiting for backend authorization
         # =====================================
-        else:
-          dongleauth = json.loads(resp.text)
-          dongle_id = dongleauth["dongle_id"]
-        break
       except NotImplementedError:
         # dependency issues with PyJWT will hang the registration test in backoff loop otherwise
         raise
@@ -96,10 +108,6 @@ def register(show_spinner=False) -> str | None:
         cloudlog.exception("failed to authenticate")
         backoff = min(backoff + 1, 15)
         time.sleep(backoff)
-
-      if time.monotonic() - start_time > 60 and show_spinner:
-        spinner.update(f"registering device - serial: {serial}, IMEI: {imei}")
-        return UNREGISTERED_DONGLE_ID  # hotfix to prevent an infinite wait for registration
 
     if show_spinner:
       spinner.close()
