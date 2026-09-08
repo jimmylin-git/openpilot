@@ -69,6 +69,7 @@ JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
 #VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "car.obj"
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "cybertruck_cluster.obj"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "wheel.png"
+FOLLOW_GAP_LANE_ICON_PATH = CLUSTER_DIR / "assets" / "FCD_Lane.png"
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
@@ -78,23 +79,23 @@ TURN_SIGNAL_MID_CENTER_X = (TURN_SIGNAL_LEFT_CENTER_X + TURN_SIGNAL_RIGHT_CENTER
 DRIVE_STATUS_BASE_BOX_SIZE = 46.0
 DRIVE_STATUS_ROW_HEIGHT = TURN_SIGNAL_HEAD_HALF_HEIGHT * 2.0
 DRIVE_STATUS_SCALE = DRIVE_STATUS_ROW_HEIGHT / DRIVE_STATUS_BASE_BOX_SIZE
-GEAR_STATUS_CENTER_X = TURN_SIGNAL_LEFT_CENTER_X + 102
-GEAR_STATUS_CENTER_Y = TURN_SIGNAL_CENTER_Y
-GEAR_STATUS_BOX_SIZE = DRIVE_STATUS_ROW_HEIGHT * 0.82
-GEAR_STATUS_FONT_SIZE = 34.0 * DRIVE_STATUS_SCALE * 0.82
+GEAR_STATUS_CENTER_X = 1416 + 476 * 0.5
+GEAR_STATUS_CENTER_Y = 360
+GEAR_STATUS_BOX_SIZE = DRIVE_STATUS_ROW_HEIGHT * 0.82 * 2.0
+GEAR_STATUS_FONT_SIZE = 34.0 * DRIVE_STATUS_SCALE * 0.82 * 2.0
 GEAR_STATUS_OUTLINE_WIDTH = 2.0 * DRIVE_STATUS_SCALE
-FOLLOW_STATUS_CENTER_X = GEAR_STATUS_CENTER_X + 132
 FOLLOW_STATUS_GAP_BARS = 3
-EGO_GAP_INDICATOR_Z_OFFSET_M = 0.55
-EGO_GAP_BAR_ACTIVE = (*GREEN, 255)
-EGO_GAP_BAR_INACTIVE = (118, 122, 128, 130)
-EGO_GAP_BAR_W = 10.0
-EGO_GAP_BAR_H = 16.0
-EGO_GAP_BAR_R = 3.0
-EGO_GAP_BAR_STEP_X = 14.0
-TOP_CRUISE_CENTER_X = FOLLOW_STATUS_CENTER_X + 202
+FOLLOW_GAP_LANE_ICON_W = 46.0 * DRIVE_STATUS_SCALE
+FOLLOW_GAP_LANE_ICON_H = 24.0 * DRIVE_STATUS_SCALE
+FOLLOW_GAP_BAR_ACTIVE = (*GREEN, 255)
+FOLLOW_GAP_BAR_INACTIVE = (118, 122, 128, 130)
+FOLLOW_GAP_BAR_W = 4.0 * DRIVE_STATUS_SCALE
+FOLLOW_GAP_BAR_H = 12.0 * DRIVE_STATUS_SCALE
+FOLLOW_GAP_BAR_R = 1.5 * DRIVE_STATUS_SCALE
+FOLLOW_GAP_BAR_STEP_Y = 6.0 * DRIVE_STATUS_SCALE
+TOP_CRUISE_CENTER_X = DESIGN_WIDTH * 0.5
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
-TOP_CRUISE_UNIT_FONT_SIZE = TOP_CRUISE_FONT_SIZE
+FOLLOW_GAP_LANE_CENTER_X = TOP_CRUISE_CENTER_X - 96.0
 LFA_STATUS_CENTER_X = TOP_CRUISE_CENTER_X + 142
 LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
 TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
@@ -499,6 +500,7 @@ class ClusterUiRenderer:
         self._vehicle_model_load_attempted = False
         self._lfa_texture = None
         self._lfa_active_texture = None
+        self._follow_gap_lane_texture = None
         self._route_video_texture = None
         self._route_video_size: tuple[int, int] | None = None
         self._route_video_frame_id: str | None = None
@@ -631,6 +633,9 @@ class ClusterUiRenderer:
         if self._lfa_active_texture is not None:
             rl.unload_texture(self._lfa_active_texture)
             self._lfa_active_texture = None
+        if self._follow_gap_lane_texture is not None:
+            rl.unload_texture(self._follow_gap_lane_texture)
+            self._follow_gap_lane_texture = None
         if self._owns_font and self._font is not None:
             rl.unload_font(self._font)
         self._font = None
@@ -1318,6 +1323,8 @@ class ClusterUiRenderer:
             self._lfa_texture = self._load_icon_texture(LFA_ICON_PATH, "LFA")
         if self._lfa_active_texture is None:
             self._lfa_active_texture = self._load_lfa_active_texture()
+        if self._follow_gap_lane_texture is None:
+            self._follow_gap_lane_texture = self._load_icon_texture(FOLLOW_GAP_LANE_ICON_PATH, "Follow gap lane")
 
     def _load_icon_texture(self, path: Path, label: str):
         if not path.exists():
@@ -1515,10 +1522,6 @@ class ClusterUiRenderer:
             state.radar_source_color_mode,
         )
         self._profile_add("draw_scene.vehicle_badges", profile_stage)
-        if scene.vehicles:
-            profile_stage = self._profile_start()
-            self._draw_ego_gap_indicator(state, scene.vehicles[0], camera, scene.scene_shift_x_m)
-            self._profile_add("draw_scene.ego_gap_indicator", profile_stage)
 
     def _draw_strip(self, strip: MeshStrip) -> None:
         count = min(len(strip.left), len(strip.right))
@@ -2013,9 +2016,6 @@ class ClusterUiRenderer:
             self._draw_turn_signal("right", right_signal_lit, show_inactive=state.debug_ui_visible)
             self._profile_add("hud.turn_signal_right", profile_stage)
             profile_stage = self._profile_start()
-            self._draw_center_clock(state)
-            self._profile_add("hud.center_clock", profile_stage)
-            profile_stage = self._profile_start()
             if screen_mode == CLUSTER_SCREEN_MODE_DEBUG:
                 profile_stage = self._profile_start()
                 self._draw_live_debug_panel(state)
@@ -2047,31 +2047,6 @@ class ClusterUiRenderer:
             profile_stage = self._profile_start()
             rl.rl_pop_matrix()
             self._profile_add("hud.pop_matrix", profile_stage)
-
-    def _draw_center_clock(self, state: ClusterUiState) -> None:
-        if not state.center_clock_text:
-            return
-
-        theme = self._current_theme()
-        text = state.center_clock_text
-        x = SYSTEM_PANEL_X + SYSTEM_PANEL_W * 0.5
-        y = 360
-        size = 54
-        spacing = max(1.0, size * 0.02)
-        text_width, text_height = self._measure_text(text, size, spacing)
-
-        pad_x = 28
-        pad_y = 14
-        rect = rl.Rectangle(
-            x - text_width * 0.5 - pad_x,
-            y - text_height * 0.5 - pad_y,
-            text_width + pad_x * 2,
-            text_height + pad_y * 2,
-        )
-
-        rl.draw_rectangle_rounded(rect, 0.28, 12, rl_color(theme.clock_bg))
-        rl.draw_rectangle_rounded_lines_ex(rect, 0.28, 12, 2.0, rl_color(theme.clock_outline))
-        self._draw_text(text, x, y, size, theme.clock_text, anchor="center")
 
     def _draw_debug_plot(
         self,
@@ -2635,26 +2610,24 @@ class ClusterUiRenderer:
         self._draw_drive_status_box(
             gear_display,
             GEAR_STATUS_CENTER_X,
-            bottom_y - GEAR_STATUS_BOX_SIZE * 0.5,
+            GEAR_STATUS_CENTER_Y,
             GEAR_STATUS_BOX_SIZE,
             GEAR_STATUS_FONT_SIZE,
             gear_color,
         )
 
         self._draw_top_cruise_set(state, bottom_y)
+        self._draw_follow_gap_lane_icon(state, bottom_y)
         self._draw_lfa_status_icon(state, bottom_y)
 
     def _drive_status_bottom_y(self, state: ClusterUiState) -> float:
         speed_text = self._cruise_set_speed_text(state)
         speed_spacing = max(1.0, TOP_CRUISE_FONT_SIZE * 0.02)
-        unit_spacing = max(1.0, TOP_CRUISE_UNIT_FONT_SIZE * 0.02)
         _, speed_h = self._measure_text(speed_text, TOP_CRUISE_FONT_SIZE, speed_spacing)
-        _, unit_h = self._measure_text("km/h", TOP_CRUISE_UNIT_FONT_SIZE, unit_spacing)
         row_h = max(
-            GEAR_STATUS_BOX_SIZE,
             LFA_STATUS_ICON_SIZE,
+            FOLLOW_GAP_LANE_ICON_H,
             speed_h,
-            unit_h,
         )
         return SPEED_LIMIT_SIGN_CENTER_Y - SPEED_LIMIT_SIGN_RADIUS + row_h
 
@@ -2681,43 +2654,36 @@ class ClusterUiRenderer:
             anchor="center",
         )
 
-    def _draw_ego_gap_indicator(
-        self,
-        state: ClusterUiState,
-        ego_vehicle: VehicleBox,
-        camera,
-        scene_shift_x_m: float = 0.0,
-    ) -> None:
+    def _draw_follow_gap_lane_icon(self, state: ClusterUiState, bottom_y: float) -> None:
         if state.cruise_gap is None:
             return
-        anchor = rl.Vector3(
-            ego_vehicle.center.x + scene_shift_x_m,
-            ego_vehicle.center.y,
-            ego_vehicle.height_m + EGO_GAP_INDICATOR_Z_OFFSET_M,
-        )
-        screen = world_to_screen_label_anchor(anchor, camera, self.width, self.height)
-        if screen is None:
-            return
+        icon_center_x = FOLLOW_GAP_LANE_CENTER_X
+        icon_center_y = bottom_y - FOLLOW_GAP_LANE_ICON_H * 0.5
+        if self._follow_gap_lane_texture is not None:
+            self._draw_bottom_aligned_texture_icon(
+                self._follow_gap_lane_texture,
+                icon_center_x,
+                bottom_y,
+                FOLLOW_GAP_LANE_ICON_W,
+                FOLLOW_GAP_LANE_ICON_H,
+                WHITE,
+            )
 
         gap_count = int(clamp(float(state.cruise_gap), 1.0, float(FOLLOW_STATUS_GAP_BARS)))
-        distance_m = max(0.0, ego_vehicle.center.y - EGO_FORWARD_M)
-        scale = world_label_scale(distance_m)
-        bar_w = EGO_GAP_BAR_W * scale
-        bar_h = EGO_GAP_BAR_H * scale
-        bar_r = EGO_GAP_BAR_R * scale
-        bar_step = EGO_GAP_BAR_STEP_X * scale
-        bars_total_w = bar_w + bar_step * (FOLLOW_STATUS_GAP_BARS - 1)
-        bar_x = screen.x - bars_total_w * 0.5
-        bar_y = screen.y - bar_h * 0.5
+        bars_total_h = FOLLOW_GAP_BAR_H + FOLLOW_GAP_BAR_STEP_Y * (FOLLOW_STATUS_GAP_BARS - 1)
+        bar_x = icon_center_x - FOLLOW_GAP_BAR_W * 0.5
+        bar_y = icon_center_y - bars_total_h * 0.5
         for index in range(FOLLOW_STATUS_GAP_BARS):
+            # Bars stack bottom-to-top so the lit count grows upward like the horizontal layout rotated 90° CCW.
+            row = FOLLOW_STATUS_GAP_BARS - 1 - index
             active = index < gap_count
             self._rounded_rect(
-                bar_x + index * bar_step,
-                bar_y,
-                bar_w,
-                bar_h,
-                bar_r,
-                EGO_GAP_BAR_ACTIVE if active else EGO_GAP_BAR_INACTIVE,
+                bar_x,
+                bar_y + row * FOLLOW_GAP_BAR_STEP_Y,
+                FOLLOW_GAP_BAR_W,
+                FOLLOW_GAP_BAR_H,
+                FOLLOW_GAP_BAR_R,
+                FOLLOW_GAP_BAR_ACTIVE if active else FOLLOW_GAP_BAR_INACTIVE,
                 None,
                 0.0,
             )
@@ -2745,19 +2711,10 @@ class ClusterUiRenderer:
         theme = self._current_theme()
         speed_text = self._cruise_set_speed_text(state)
         speed_color = self._cruise_set_color(state, theme)
-        unit_color = speed_color
         speed_spacing = max(1.0, TOP_CRUISE_FONT_SIZE * 0.02)
-        unit_spacing = max(1.0, TOP_CRUISE_UNIT_FONT_SIZE * 0.02)
-        speed_w, _ = self._measure_text(speed_text, TOP_CRUISE_FONT_SIZE, speed_spacing)
-        unit_w, _ = self._measure_text("km/h", TOP_CRUISE_UNIT_FONT_SIZE, unit_spacing)
-        unit_gap = 5.0
-        total_w = speed_w + unit_w + unit_gap
-        start_x = TOP_CRUISE_CENTER_X - total_w * 0.5
         _, speed_h = self._measure_text(speed_text, TOP_CRUISE_FONT_SIZE, speed_spacing)
-        _, unit_h = self._measure_text("km/h", TOP_CRUISE_UNIT_FONT_SIZE, unit_spacing)
-        text_center_y = bottom_y - max(speed_h, unit_h) * 0.5
-        self._draw_text(speed_text, start_x, text_center_y, TOP_CRUISE_FONT_SIZE, speed_color)
-        self._draw_text("km/h", start_x + speed_w + unit_gap, text_center_y, TOP_CRUISE_UNIT_FONT_SIZE, unit_color)
+        text_center_y = bottom_y - speed_h * 0.5
+        self._draw_text(speed_text, TOP_CRUISE_CENTER_X, text_center_y, TOP_CRUISE_FONT_SIZE, speed_color, anchor="center")
 
     def _draw_lfa_status_icon(self, state: ClusterUiState, bottom_y: float) -> None:
         theme = self._current_theme()
