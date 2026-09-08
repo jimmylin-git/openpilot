@@ -85,17 +85,19 @@ GEAR_STATUS_BOX_SIZE = DRIVE_STATUS_ROW_HEIGHT * 0.82 * 2.0
 GEAR_STATUS_FONT_SIZE = 34.0 * DRIVE_STATUS_SCALE * 0.82 * 2.0
 GEAR_STATUS_OUTLINE_WIDTH = 2.0 * DRIVE_STATUS_SCALE
 FOLLOW_STATUS_GAP_BARS = 3
-FOLLOW_GAP_LANE_ICON_W = 46.0 * DRIVE_STATUS_SCALE
-FOLLOW_GAP_LANE_ICON_H = 24.0 * DRIVE_STATUS_SCALE
+FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_ACTIVE = (*GREEN, 255)
 FOLLOW_GAP_BAR_INACTIVE = (118, 122, 128, 130)
 FOLLOW_GAP_BAR_H = 12.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_R = 1.5 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_STEP_Y = 6.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_MARGIN_W = 4.0 * DRIVE_STATUS_SCALE
-# FCD_Lane.png lines splay outward from top to bottom; these fractions (of the
-# icon width) were measured from the asset's opaque pixel span at its top and
-# bottom rows so each bar's width can taper to match the lane lines.
+# FCD_Lane.png (128x128) is transparent outside rows ~16-111; within that band
+# the two lane lines splay from ~50% of the icon width to ~99% of it. These
+# fractions were measured from the asset's opaque pixel span so each bar's
+# width/position can taper to match the lane lines.
+FOLLOW_GAP_LANE_CONTENT_TOP_FRAC = 16.0 / 128.0
+FOLLOW_GAP_LANE_CONTENT_BOTTOM_FRAC = 111.0 / 128.0
 FOLLOW_GAP_BAR_SPAN_TOP_FRAC = 0.5
 FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 1.0
 TOP_CRUISE_CENTER_X = DESIGN_WIDTH * 0.5
@@ -2631,7 +2633,7 @@ class ClusterUiRenderer:
         _, speed_h = self._measure_text(speed_text, TOP_CRUISE_FONT_SIZE, speed_spacing)
         row_h = max(
             LFA_STATUS_ICON_SIZE,
-            FOLLOW_GAP_LANE_ICON_H,
+            FOLLOW_GAP_LANE_ICON_SIZE,
             speed_h,
         )
         return SPEED_LIMIT_SIGN_CENTER_Y - SPEED_LIMIT_SIGN_RADIUS + row_h
@@ -2663,16 +2665,22 @@ class ClusterUiRenderer:
         if state.cruise_gap is None:
             return
         icon_center_x = FOLLOW_GAP_LANE_CENTER_X
-        icon_center_y = bottom_y - FOLLOW_GAP_LANE_ICON_H * 0.5
+        icon_size = FOLLOW_GAP_LANE_ICON_SIZE
+        icon_center_y = bottom_y - icon_size * 0.5
+        icon_top_y = icon_center_y - icon_size * 0.5
         if self._follow_gap_lane_texture is not None:
             self._draw_bottom_aligned_texture_icon(
                 self._follow_gap_lane_texture,
                 icon_center_x,
                 bottom_y,
-                FOLLOW_GAP_LANE_ICON_W,
-                FOLLOW_GAP_LANE_ICON_H,
+                icon_size,
+                icon_size,
                 WHITE,
             )
+
+        content_top_y = icon_top_y + icon_size * FOLLOW_GAP_LANE_CONTENT_TOP_FRAC
+        content_bottom_y = icon_top_y + icon_size * FOLLOW_GAP_LANE_CONTENT_BOTTOM_FRAC
+        content_h = max(1.0, content_bottom_y - content_top_y)
 
         gap_count = int(clamp(float(state.cruise_gap), 1.0, float(FOLLOW_STATUS_GAP_BARS)))
         bars_total_h = FOLLOW_GAP_BAR_H + FOLLOW_GAP_BAR_STEP_Y * (FOLLOW_STATUS_GAP_BARS - 1)
@@ -2683,11 +2691,11 @@ class ClusterUiRenderer:
             active = index < gap_count
             row_y = top_y + row * FOLLOW_GAP_BAR_STEP_Y
             # Interpolate bar width to hug the FCD_Lane.png lane lines, which are
-            # narrower near the top of the icon and splay wider toward the bottom.
-            row_center_frac = (row_y + FOLLOW_GAP_BAR_H * 0.5 - icon_center_y) / FOLLOW_GAP_LANE_ICON_H + 0.5
+            # narrower near the top of the icon's content band and splay wider toward the bottom.
+            row_center_frac = (row_y + FOLLOW_GAP_BAR_H * 0.5 - content_top_y) / content_h
             row_center_frac = clamp(row_center_frac, 0.0, 1.0)
             span_frac = FOLLOW_GAP_BAR_SPAN_TOP_FRAC + (FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC - FOLLOW_GAP_BAR_SPAN_TOP_FRAC) * row_center_frac
-            bar_w = max(2.0, FOLLOW_GAP_LANE_ICON_W * span_frac - FOLLOW_GAP_BAR_MARGIN_W)
+            bar_w = max(2.0, icon_size * span_frac - FOLLOW_GAP_BAR_MARGIN_W)
             bar_x = icon_center_x - bar_w * 0.5
             self._rounded_rect(
                 bar_x,
