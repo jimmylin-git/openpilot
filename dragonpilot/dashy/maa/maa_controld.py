@@ -614,8 +614,8 @@ def main():
 
   params = Params()
   sm = messaging.SubMaster(
-    ['navRoute', 'navInstruction', 'liveGPS', 'carState'],
-    ignore_alive=['navRoute', 'navInstruction', 'liveGPS', 'carState']
+    ['navRoute', 'navInstruction', 'navInstructionExt', 'liveGPS', 'carState'],
+    ignore_alive=['navRoute', 'navInstruction', 'navInstructionExt', 'liveGPS', 'carState']
   )
   pm = messaging.PubMaster(['maaControl'])
 
@@ -661,6 +661,8 @@ def main():
     # Get turn info from navInstruction
     nav = sm['navInstruction']
     nav_valid = sm.valid['navInstruction']
+    nav_ext = sm['navInstructionExt']
+    nav_ext_valid = sm.valid['navInstructionExt']
 
     # Always update route coordinates (needed for turn angle calculation)
     nav_route = sm['navRoute']
@@ -729,8 +731,9 @@ def main():
     if turn_tracker.state in (TurnState.APPROACHING, TurnState.EXECUTING):
       # Safety checks: detect if turn info changed significantly
       if nav_valid and maneuver_dist is not None:
-        # Use turnAngle from navInstructionExt - this is geometry-based (reliable)
-        turn_angle = getattr(nav, 'turnAngle', 0.0) or 0.0
+        # Use geometry-based turn angle from navInstructionExt.
+        turn_angle = getattr(nav_ext, 'turnAngle', 0.0) if nav_ext_valid else 0.0
+        turn_angle = turn_angle or 0.0
         estimated_dist = turn_tracker.get_estimated_distance()
 
         # Check 1: Did we pass the turn? (nav distance jumped up = now showing NEXT turn)
@@ -819,9 +822,11 @@ def main():
       nav_type = getattr(nav, 'maneuverType', '') or ''
       modifier = getattr(nav, 'maneuverModifier', '') or ''
 
-      # Get pre-computed turn geometry from navInstruction
-      turn_angle = getattr(nav, 'turnAngle', 0.0) or 0.0
-      turn_curvature = getattr(nav, 'turnCurvature', 0.0) or 0.0
+      # Get pre-computed turn geometry from navInstructionExt.
+      turn_angle = getattr(nav_ext, 'turnAngle', 0.0) if nav_ext_valid else 0.0
+      turn_curvature = getattr(nav_ext, 'turnCurvature', 0.0) if nav_ext_valid else 0.0
+      turn_angle = turn_angle or 0.0
+      turn_curvature = turn_curvature or 0.0
 
       maa.turnAngle = float(turn_angle)
       maa.turnCurvature = float(turn_curvature)

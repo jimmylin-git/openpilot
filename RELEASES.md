@@ -2,6 +2,7 @@ Version 0.10.3 (2025-12-17) -- merge cluster
 ========================
 * Custom TFT gauge cluster display (speed, gear, LFA, ACC set speed, follow-distance gap bar, 3D lead vehicle/lane view, animated neon tunnel background)
 * Toyota manual door lock toggle: toggle on locks the doors immediately, toggle off unlocks them immediately
+* Dashy navigation turn/lane-change alerts shown on the cluster up to 200 m in advance (display only, no steering control)
 
 Version 0.10.3 (2025-12-17)
 ========================
