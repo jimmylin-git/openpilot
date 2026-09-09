@@ -114,6 +114,13 @@ SPEED_VALUE_CENTER_Y = 230 + 130
 SPEED_LIMIT_SIGN_CENTER_X = 460
 SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
 SPEED_LIMIT_SIGN_RADIUS = 56.0
+BACKGROUND_LIGHT_LINE_COUNT = 9
+BACKGROUND_LIGHT_LINE_SPEED = 0.22
+BACKGROUND_LIGHT_LINE_TOP_Y = 176.0
+BACKGROUND_LIGHT_LINE_BASE_WIDTH = 18.0
+BACKGROUND_LIGHT_LINE_ELBOW_SPREAD = 128.0
+BACKGROUND_LIGHT_LINE_ACTIVE_LENGTH = 0.16
+BACKGROUND_LIGHT_LINE_GLOW_WIDTH = 12.0
 SPEED_LIMIT_SOURCE_LABELS = {
     "vehicle": "v",
     "car": "v",
@@ -778,8 +785,86 @@ class ClusterUiRenderer:
         rl.clear_background(rl_color(theme.bg))
         self._profile_add("render_world.clear_background", profile_stage)
         profile_stage = self._profile_start()
+        self._draw_background_light_lines()
+        self._profile_add("render_world.background_light_lines", profile_stage)
+        profile_stage = self._profile_start()
         self._draw_scene(scene, state)
         self._profile_add("render_world.draw_scene", profile_stage)
+
+    def _draw_background_light_lines(self) -> None:
+        """Draw animated perspective lines behind the 3D scene."""
+        now = time.perf_counter()
+        sx = self.width / DESIGN_WIDTH
+        sy = self.height / DESIGN_HEIGHT
+        center_x = DESIGN_WIDTH * 0.5
+        center_y = DESIGN_HEIGHT * 0.47
+        rl.rl_push_matrix()
+        rl.rl_scalef(sx, sy, 1.0)
+        try:
+            for side in (-1, 1):
+                base_color = (34, 222, 255) if side < 0 else (255, 48, 224)
+                for index in range(BACKGROUND_LIGHT_LINE_COUNT):
+                    progress = index / max(1, BACKGROUND_LIGHT_LINE_COUNT - 1)
+                    top_x = center_x + side * (
+                        42.0 + progress * (DESIGN_WIDTH * 0.5 - 42.0)
+                    )
+                    elbow_y = BACKGROUND_LIGHT_LINE_TOP_Y + progress * 88.0
+                    elbow_x = top_x
+                    bottom_x = side * (
+                        BACKGROUND_LIGHT_LINE_BASE_WIDTH
+                        + progress * (DESIGN_WIDTH * 0.5 + BACKGROUND_LIGHT_LINE_ELBOW_SPREAD)
+                    )
+                    points = (
+                        rl.Vector2(top_x, 0.0),
+                        rl.Vector2(elbow_x, elbow_y),
+                        rl.Vector2(bottom_x, float(DESIGN_HEIGHT)),
+                    )
+                    line_alpha = int(48 + 46 * (1.0 - progress))
+                    for glow in range(3, 0, -1):
+                        rl.draw_line_ex(
+                            points[0],
+                            points[1],
+                            BACKGROUND_LIGHT_LINE_GLOW_WIDTH * glow,
+                            rl_color((*base_color, max(5, line_alpha // (glow + 1)))),
+                        )
+                        rl.draw_line_ex(
+                            points[1],
+                            points[2],
+                            BACKGROUND_LIGHT_LINE_GLOW_WIDTH * glow,
+                            rl_color((*base_color, max(5, line_alpha // (glow + 1)))),
+                        )
+                    rl.draw_line_ex(points[0], points[1], 1.8, rl_color((*base_color, line_alpha)))
+                    rl.draw_line_ex(points[1], points[2], 1.8, rl_color((*base_color, line_alpha)))
+
+                    phase = (now * BACKGROUND_LIGHT_LINE_SPEED + progress) % 1.0
+                    head = phase
+                    tail = max(0.0, head - BACKGROUND_LIGHT_LINE_ACTIVE_LENGTH)
+                    for marker in (tail, head):
+                        if marker <= 0.5:
+                            marker_progress = marker * 2.0
+                            start = points[0]
+                            end = points[1]
+                        else:
+                            marker_progress = (marker - 0.5) * 2.0
+                            start = points[1]
+                            end = points[2]
+                        marker_point = rl.Vector2(
+                            start.x + (end.x - start.x) * marker_progress,
+                            start.y + (end.y - start.y) * marker_progress,
+                        )
+                        if marker is head:
+                            rl.draw_circle_v(
+                                marker_point,
+                                5.0,
+                                rl_color((*base_color, 150)),
+                            )
+                            rl.draw_circle_v(
+                                marker_point,
+                                2.0,
+                                rl_color((*base_color, 255)),
+                            )
+        finally:
+            rl.rl_pop_matrix()
 
     def render_to_file(self, state: ClusterUiState, output_path: str | Path) -> None:
         image = self._render_to_image(state)
