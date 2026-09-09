@@ -57,7 +57,7 @@ from cluster_scene import (
     build_cluster_scene,
 )
 from cluster_system_monitor import SystemStats, SystemStatsSampler
-from cluster_utils import blink_visible, clamp
+from cluster_utils import blink_visible, clamp, smoothstep
 
 
 CLUSTER_DIR = Path(__file__).resolve().parent
@@ -115,6 +115,25 @@ SPEED_VALUE_CENTER_Y = 230 + 130
 SPEED_LIMIT_SIGN_CENTER_X = 460
 SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
 SPEED_LIMIT_SIGN_RADIUS = 56.0
+# Neon-blue tunnel background: concentric polygon "rings" expand outward from a
+# vanishing point near screen center, mimicking flying through a glowing tunnel.
+# The ring pattern rotates with the steering wheel (same convention as the LFA
+# icon) and its expansion speed scales with vehicle speed, with a slow idle
+# animation when stationary.
+TUNNEL_RING_SIDES = 10
+TUNNEL_RING_COUNT = 10
+TUNNEL_CENTER_Y_FRAC = 0.47
+TUNNEL_MAX_RADIUS_PX = math.hypot(DESIGN_WIDTH, DESIGN_HEIGHT) * 0.58
+TUNNEL_BASE_COLOR = (40, 170, 255)
+TUNNEL_LINE_THICKNESS = 2.2
+TUNNEL_GLOW_PASSES = 3
+TUNNEL_GLOW_WIDTH = 9.0
+TUNNEL_FADE_IN_T = 0.12
+TUNNEL_FADE_OUT_T = 0.82
+TUNNEL_MAX_ALPHA = 150
+TUNNEL_IDLE_CYCLE_HZ = 0.12
+TUNNEL_CYCLE_HZ_PER_KPH = 0.01
+TUNNEL_MAX_CYCLE_HZ = 1.6
 SPEED_LIMIT_SOURCE_LABELS = {
     "vehicle": "v",
     "car": "v",
@@ -516,6 +535,8 @@ class ClusterUiRenderer:
         self._route_video_frame_id: str | None = None
         self._left_turn_signal_started_at: float | None = None
         self._right_turn_signal_started_at: float | None = None
+        self._tunnel_phase = 0.0
+        self._tunnel_last_time: float | None = None
         self._triangle_strip_point_cache: OrderedDict[
             tuple[int, int],
             tuple[tuple[Vec3, ...], tuple[Vec3, ...], object, int],
@@ -779,8 +800,65 @@ class ClusterUiRenderer:
         rl.clear_background(rl_color(theme.bg))
         self._profile_add("render_world.clear_background", profile_stage)
         profile_stage = self._profile_start()
+        self._draw_background_tunnel_lights(state)
+        self._profile_add("render_world.background_tunnel_lights", profile_stage)
+        profile_stage = self._profile_start()
         self._draw_scene(scene, state)
         self._profile_add("render_world.draw_scene", profile_stage)
+
+    def _draw_background_tunnel_lights(self, state: ClusterUiState) -> None:
+        """Draw a neon-blue tunnel effect: concentric rings expanding outward
+        from a vanishing point, rotating with the steering wheel (same
+        convention as the LFA icon) and expanding faster at higher speed."""
+        now = time.perf_counter()
+        if self._tunnel_last_time is None:
+            self._tunnel_last_time = now
+        dt = clamp(now - self._tunnel_last_time, 0.0, 0.25)
+        self._tunnel_last_time = now
+
+        speed_kph = max(0.0, state.speed_kph or 0.0)
+        cycle_hz = clamp(
+            TUNNEL_IDLE_CYCLE_HZ + speed_kph * TUNNEL_CYCLE_HZ_PER_KPH,
+            TUNNEL_IDLE_CYCLE_HZ,
+            TUNNEL_MAX_CYCLE_HZ,
+        )
+        self._tunnel_phase = (self._tunnel_phase + cycle_hz * dt) % 1.0
+
+        rotation_deg = -float(state.steering_angle_deg or 0.0)
+        center = rl.Vector2(DESIGN_WIDTH * 0.5, DESIGN_HEIGHT * TUNNEL_CENTER_Y_FRAC)
+        sx = self.width / DESIGN_WIDTH
+        sy = self.height / DESIGN_HEIGHT
+        rl.rl_push_matrix()
+        rl.rl_scalef(sx, sy, 1.0)
+        try:
+            for index in range(TUNNEL_RING_COUNT):
+                t = (index / TUNNEL_RING_COUNT + self._tunnel_phase) % 1.0
+                radius = TUNNEL_MAX_RADIUS_PX * t * t
+                fade_in = smoothstep(t / TUNNEL_FADE_IN_T)
+                fade_out = 1.0 - smoothstep((t - TUNNEL_FADE_OUT_T) / (1.0 - TUNNEL_FADE_OUT_T))
+                alpha = int(TUNNEL_MAX_ALPHA * fade_in * fade_out)
+                if alpha <= 0 or radius <= 1.0:
+                    continue
+                for glow in range(TUNNEL_GLOW_PASSES, 0, -1):
+                    glow_alpha = max(1, alpha // (glow + 1))
+                    rl.draw_poly_lines_ex(
+                        center,
+                        TUNNEL_RING_SIDES,
+                        radius,
+                        rotation_deg,
+                        TUNNEL_GLOW_WIDTH * glow,
+                        rl_color((*TUNNEL_BASE_COLOR, glow_alpha)),
+                    )
+                rl.draw_poly_lines_ex(
+                    center,
+                    TUNNEL_RING_SIDES,
+                    radius,
+                    rotation_deg,
+                    TUNNEL_LINE_THICKNESS,
+                    rl_color((*TUNNEL_BASE_COLOR, alpha)),
+                )
+        finally:
+            rl.rl_pop_matrix()
 
     def render_to_file(self, state: ClusterUiState, output_path: str | Path) -> None:
         image = self._render_to_image(state)
