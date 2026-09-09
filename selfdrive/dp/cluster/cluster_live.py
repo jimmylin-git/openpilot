@@ -52,8 +52,6 @@ LIVE_SERVICES_BASE = (
     "liveParameters",
     "liveTorqueParameters",
     "wideRoadCameraState",
-    "navInstruction",
-    "navInstructionExt",
 )
 LIVE_CAN_SERVICES = ("can", "sendcan")
 LIVE_DATA_STALE_SECONDS = 2.0
@@ -172,7 +170,6 @@ class OpenpilotLiveSource:
 
             profile_stage = self._profile_start()
             state = frame_to_state(frame)
-            state = replace(state, **self._navigation_alert_state())
             self._profile_add("source.live.frame_to_state", profile_stage)
 
             state = self._smooth_scene_state(state)
@@ -186,41 +183,6 @@ class OpenpilotLiveSource:
 
         self.last_state = self._with_debug_state(state)
         return self.last_state
-
-    def _navigation_alert_state(self) -> dict[str, Any | None]:
-        """Convert Dashy's navigation instruction into a display-only alert."""
-        if (
-            not self._service_alive("navInstruction")
-            or not self._service_valid("navInstruction")
-            or time.monotonic() - self._service_time("navInstruction") > LIVE_DATA_STALE_SECONDS
-        ):
-            return {"navigation_alert": None, "navigation_distance_m": None}
-
-        instruction = self.sm["navInstruction"]
-        maneuver_type = str(safe_get(instruction, "maneuverType") or "").strip().lower()
-        modifier = str(safe_get(instruction, "maneuverModifier") or "").strip().lower()
-        primary = str(safe_get(instruction, "maneuverPrimaryText") or "").strip().lower()
-        distance_m = self._finite_attr(instruction, "maneuverDistance", -1.0)
-        if distance_m < 0.0:
-            return {"navigation_alert": None, "navigation_distance_m": None}
-
-        direction = ""
-        direction_source = f"{maneuver_type} {modifier} {primary}"
-        if "left" in direction_source:
-            direction = "LEFT"
-        elif "right" in direction_source:
-            direction = "RIGHT"
-
-        is_lane_change = any(token in maneuver_type for token in ("lane", "merge"))
-        is_turn = any(token in maneuver_type for token in ("turn", "roundabout", "fork"))
-        if not (is_lane_change or is_turn) or not direction:
-            return {"navigation_alert": None, "navigation_distance_m": None}
-
-        label = f"CHANGE {direction}" if is_lane_change else f"TURN {direction}"
-        return {
-            "navigation_alert": label,
-            "navigation_distance_m": distance_m,
-        }
 
     def live_data_available(self) -> bool:
         last_update_t = self._last_car_state_update_t

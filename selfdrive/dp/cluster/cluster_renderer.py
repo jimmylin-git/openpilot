@@ -115,12 +115,6 @@ SPEED_VALUE_CENTER_Y = 230 + 130
 SPEED_LIMIT_SIGN_CENTER_X = 460
 SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
 SPEED_LIMIT_SIGN_RADIUS = 56.0
-NAV_ALERT_CENTER_X = DESIGN_WIDTH * 0.5
-NAV_ALERT_CENTER_Y = 218.0
-NAV_ALERT_WIDTH = 420.0
-NAV_ALERT_HEIGHT = 66.0
-NAV_ALERT_FONT_SIZE = 27.0
-NAV_ALERT_MAX_DISTANCE_M = 200.0
 # Neon-blue tunnel background: concentric polygon "rings" expand outward from a
 # vanishing point near screen center, mimicking flying through a glowing tunnel.
 # The ring pattern rotates with the steering wheel (same convention as the LFA
@@ -2083,8 +2077,6 @@ class ClusterUiRenderer:
                 profile_stage = self._profile_start()
                 self._draw_accel_block(state)
                 self._profile_add("hud.accel_block", profile_stage)
-                self._draw_navigation_alert(state)
-                self._profile_add("hud.navigation_alert", profile_stage)
                 profile_stage = self._profile_start()
                 self._draw_debug_plot(
                     state.debug_plot,
@@ -2715,53 +2707,6 @@ class ClusterUiRenderer:
         self._draw_top_cruise_set(state, bottom_y)
         self._draw_follow_gap_lane_icon(state, bottom_y)
         self._draw_lfa_status_icon(state, bottom_y)
-
-    def _draw_navigation_alert(self, state: ClusterUiState) -> None:
-        if (
-            not state.navigation_alert
-            or state.navigation_distance_m is None
-            or state.navigation_distance_m < 0.0
-            or state.navigation_distance_m > NAV_ALERT_MAX_DISTANCE_M
-        ):
-            return
-
-        theme = self._current_theme()
-        distance = state.navigation_distance_m
-        if distance >= 100.0:
-            distance_text = f"{distance:.0f} m"
-        else:
-            distance_text = f"{distance:.1f} m"
-        text = f"{state.navigation_alert} IN {distance_text}"
-        pulse = 0.5 + 0.5 * math.sin(time.perf_counter() * math.tau / 0.9)
-        color = (255, 196, 48)
-        alpha = int(175 + 65 * pulse)
-        rect = rl.Rectangle(
-            NAV_ALERT_CENTER_X - NAV_ALERT_WIDTH * 0.5,
-            NAV_ALERT_CENTER_Y - NAV_ALERT_HEIGHT * 0.5,
-            NAV_ALERT_WIDTH,
-            NAV_ALERT_HEIGHT,
-        )
-        rl.draw_rectangle_rounded(
-            rect,
-            0.22,
-            12,
-            rl_color((*color, max(35, alpha // 4))),
-        )
-        rl.draw_rectangle_rounded_lines_ex(
-            rect,
-            0.22,
-            12,
-            2.0,
-            rl_color((*color, alpha)),
-        )
-        self._draw_text(
-            text,
-            NAV_ALERT_CENTER_X,
-            NAV_ALERT_CENTER_Y,
-            NAV_ALERT_FONT_SIZE,
-            theme.text,
-            anchor="center",
-        )
 
     def _drive_status_bottom_y(self, state: ClusterUiState) -> float:
         speed_text = self._cruise_set_speed_text(state)

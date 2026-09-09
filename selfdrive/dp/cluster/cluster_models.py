@@ -246,8 +246,6 @@ class ClusterUiState:
     lateral_plan_debug_text: str | None = None
     lateral_plan_curvatures: tuple[float, ...] = ()
     lateral_plan_curvature_rates: tuple[float, ...] = ()
-    navigation_alert: str | None = None
-    navigation_distance_m: float | None = None
     display_speed_kph: float | None = None
     git_status: GitBranchStatus | None = None
     actual_fps: float | None = None
