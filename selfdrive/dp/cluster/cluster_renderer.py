@@ -70,6 +70,7 @@ JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "cybertruck_cluster.obj"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "wheel.png"
 FOLLOW_GAP_LANE_ICON_PATH = CLUSTER_DIR / "assets" / "FCD_Lane.png"
+BACKGROUND_IMAGE_PATH = CLUSTER_DIR / "assets" / "bg.png"
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
@@ -115,25 +116,6 @@ SPEED_VALUE_CENTER_Y = 230 + 130
 SPEED_LIMIT_SIGN_CENTER_X = 460
 SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
 SPEED_LIMIT_SIGN_RADIUS = 56.0
-# Neon-blue tunnel background: concentric polygon "rings" expand outward from a
-# vanishing point near screen center, mimicking flying through a glowing tunnel.
-# The ring pattern rotates with the steering wheel (same convention as the LFA
-# icon) and its expansion speed scales with vehicle speed, with a slow idle
-# animation when stationary.
-TUNNEL_RING_SIDES = 10
-TUNNEL_RING_COUNT = 10
-TUNNEL_CENTER_Y_FRAC = 0.47
-TUNNEL_MAX_RADIUS_PX = math.hypot(DESIGN_WIDTH, DESIGN_HEIGHT) * 0.58
-TUNNEL_BASE_COLOR = (40, 170, 255)
-TUNNEL_LINE_THICKNESS = 2.2
-TUNNEL_GLOW_PASSES = 3
-TUNNEL_GLOW_WIDTH = 9.0
-TUNNEL_FADE_IN_T = 0.12
-TUNNEL_FADE_OUT_T = 0.82
-TUNNEL_MAX_ALPHA = 150
-TUNNEL_IDLE_CYCLE_HZ = 0.12
-TUNNEL_CYCLE_HZ_PER_KPH = 0.01
-TUNNEL_MAX_CYCLE_HZ = 1.6
 SPEED_LIMIT_SOURCE_LABELS = {
     "vehicle": "v",
     "car": "v",
@@ -530,13 +512,12 @@ class ClusterUiRenderer:
         self._lfa_texture = None
         self._lfa_active_texture = None
         self._follow_gap_lane_texture = None
+        self._background_texture = None
         self._route_video_texture = None
         self._route_video_size: tuple[int, int] | None = None
         self._route_video_frame_id: str | None = None
         self._left_turn_signal_started_at: float | None = None
         self._right_turn_signal_started_at: float | None = None
-        self._tunnel_phase = 0.0
-        self._tunnel_last_time: float | None = None
         self._triangle_strip_point_cache: OrderedDict[
             tuple[int, int],
             tuple[tuple[Vec3, ...], tuple[Vec3, ...], object, int],
@@ -667,6 +648,9 @@ class ClusterUiRenderer:
         if self._follow_gap_lane_texture is not None:
             rl.unload_texture(self._follow_gap_lane_texture)
             self._follow_gap_lane_texture = None
+        if self._background_texture is not None:
+            rl.unload_texture(self._background_texture)
+            self._background_texture = None
         if self._owns_font and self._font is not None:
             rl.unload_font(self._font)
         self._font = None
@@ -800,63 +784,33 @@ class ClusterUiRenderer:
         rl.clear_background(rl_color(theme.bg))
         self._profile_add("render_world.clear_background", profile_stage)
         profile_stage = self._profile_start()
-        self._draw_background_tunnel_lights(state)
-        self._profile_add("render_world.background_tunnel_lights", profile_stage)
+        self._draw_background_image()
+        self._profile_add("render_world.background_image", profile_stage)
         profile_stage = self._profile_start()
         self._draw_scene(scene, state)
         self._profile_add("render_world.draw_scene", profile_stage)
 
-    def _draw_background_tunnel_lights(self, state: ClusterUiState) -> None:
-        """Draw a neon-blue tunnel effect: concentric rings expanding outward
-        from a vanishing point, rotating with the steering wheel (same
-        convention as the LFA icon) and expanding faster at higher speed."""
-        now = time.perf_counter()
-        if self._tunnel_last_time is None:
-            self._tunnel_last_time = now
-        dt = clamp(now - self._tunnel_last_time, 0.0, 0.25)
-        self._tunnel_last_time = now
-
-        speed_kph = max(0.0, state.speed_kph or 0.0)
-        cycle_hz = clamp(
-            TUNNEL_IDLE_CYCLE_HZ + speed_kph * TUNNEL_CYCLE_HZ_PER_KPH,
-            TUNNEL_IDLE_CYCLE_HZ,
-            TUNNEL_MAX_CYCLE_HZ,
-        )
-        self._tunnel_phase = (self._tunnel_phase + cycle_hz * dt) % 1.0
-
-        rotation_deg = -float(state.steering_angle_deg or 0.0)
-        center = rl.Vector2(DESIGN_WIDTH * 0.5, DESIGN_HEIGHT * TUNNEL_CENTER_Y_FRAC)
+    def _draw_background_image(self) -> None:
+        if self._background_texture is None:
+            return
         sx = self.width / DESIGN_WIDTH
         sy = self.height / DESIGN_HEIGHT
         rl.rl_push_matrix()
         rl.rl_scalef(sx, sy, 1.0)
         try:
-            for index in range(TUNNEL_RING_COUNT):
-                t = (index / TUNNEL_RING_COUNT + self._tunnel_phase) % 1.0
-                radius = TUNNEL_MAX_RADIUS_PX * t * t
-                fade_in = smoothstep(t / TUNNEL_FADE_IN_T)
-                fade_out = 1.0 - smoothstep((t - TUNNEL_FADE_OUT_T) / (1.0 - TUNNEL_FADE_OUT_T))
-                alpha = int(TUNNEL_MAX_ALPHA * fade_in * fade_out)
-                if alpha <= 0 or radius <= 1.0:
-                    continue
-                for glow in range(TUNNEL_GLOW_PASSES, 0, -1):
-                    glow_alpha = max(1, alpha // (glow + 1))
-                    rl.draw_poly_lines_ex(
-                        center,
-                        TUNNEL_RING_SIDES,
-                        radius,
-                        rotation_deg,
-                        TUNNEL_GLOW_WIDTH * glow,
-                        rl_color((*TUNNEL_BASE_COLOR, glow_alpha)),
-                    )
-                rl.draw_poly_lines_ex(
-                    center,
-                    TUNNEL_RING_SIDES,
-                    radius,
-                    rotation_deg,
-                    TUNNEL_LINE_THICKNESS,
-                    rl_color((*TUNNEL_BASE_COLOR, alpha)),
-                )
+            rl.draw_texture_pro(
+                self._background_texture,
+                rl.Rectangle(
+                    0.0,
+                    0.0,
+                    float(self._background_texture.width),
+                    float(self._background_texture.height),
+                ),
+                rl.Rectangle(0.0, 0.0, DESIGN_WIDTH, DESIGN_HEIGHT),
+                rl.Vector2(0.0, 0.0),
+                0.0,
+                rl_color(WHITE),
+            )
         finally:
             rl.rl_pop_matrix()
 
@@ -1407,6 +1361,8 @@ class ClusterUiRenderer:
             self._vehicle_model = None
 
     def _load_drive_status_textures(self) -> None:
+        if self._background_texture is None:
+            self._background_texture = self._load_icon_texture(BACKGROUND_IMAGE_PATH, "Cluster background")
         if self._lfa_texture is None:
             self._lfa_texture = self._load_icon_texture(LFA_ICON_PATH, "LFA")
         if self._lfa_active_texture is None:

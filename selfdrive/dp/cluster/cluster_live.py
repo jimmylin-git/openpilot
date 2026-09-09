@@ -188,6 +188,13 @@ class OpenpilotLiveSource:
         last_update_t = self._last_car_state_update_t
         return last_update_t is not None and time.monotonic() - last_update_t <= LIVE_DATA_STALE_SECONDS
 
+    def vehicle_started(self) -> bool | None:
+        """Return the current onroad state, or None until selfdriveState is available."""
+        if not self._service_alive("selfdriveState") or not self._service_valid("selfdriveState"):
+            return None
+        value = safe_get(self.sm["selfdriveState"], "started")
+        return bool(value) if value is not None else None
+
     def _smooth_scene_state(self, state: ClusterUiState) -> ClusterUiState:
         now = time.monotonic()
         previous = self._smoothed_state

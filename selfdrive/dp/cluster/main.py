@@ -80,6 +80,7 @@ DEFAULT_H264_DIMENSION_ALIGN = 1
 THEME_PARAM_POLL_SECONDS = 1.0
 FPS_PARAM_POLL_SECONDS = 1.0
 BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
+OFFROAD_USB_BRIGHTNESS = 5
 SCREEN_MODE_PARAM_POLL_SECONDS = 1.0
 CAMERA_VIEW_PARAM_POLL_SECONDS = 1.0
 RADAR_PARAM_POLL_SECONDS = 1.0
@@ -1033,15 +1034,17 @@ def run_demo(
                             else f"{active_brightness_setting}%"
                         )
                         print(f"{CLUSTER_BRIGHTNESS_PARAM} updated: {brightness_text}", flush=True)
-                next_usb_brightness = (
-                    MIN_USB_BRIGHTNESS
-                    if live_source is not None and not live_source.live_data_available()
-                    else resolved_usb_brightness(
+                vehicle_started = live_source.vehicle_started() if live_source is not None else None
+                if vehicle_started is False:
+                    next_usb_brightness = OFFROAD_USB_BRIGHTNESS
+                elif live_source is not None and not live_source.live_data_available():
+                    next_usb_brightness = MIN_USB_BRIGHTNESS
+                else:
+                    next_usb_brightness = resolved_usb_brightness(
                         active_brightness_setting,
                         live_source,
                         auto_enabled=usb_brightness_auto_enabled,
                     )
-                )
                 usb_display.set_brightness(next_usb_brightness)
                 next_brightness_param_read = brightness_now + BRIGHTNESS_PARAM_POLL_SECONDS
 
