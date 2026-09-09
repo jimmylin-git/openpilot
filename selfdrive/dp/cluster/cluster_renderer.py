@@ -785,15 +785,16 @@ class ClusterUiRenderer:
         rl.clear_background(rl_color(theme.bg))
         self._profile_add("render_world.clear_background", profile_stage)
         profile_stage = self._profile_start()
-        self._draw_background_light_lines()
+        self._draw_background_light_lines(state.steering)
         self._profile_add("render_world.background_light_lines", profile_stage)
         profile_stage = self._profile_start()
         self._draw_scene(scene, state)
         self._profile_add("render_world.draw_scene", profile_stage)
 
-    def _draw_background_light_lines(self) -> None:
-        """Draw animated perspective lines behind the 3D scene."""
+    def _draw_background_light_lines(self, steering: float = 0.0) -> None:
+        """Draw animated perspective lines that follow the projected road bend."""
         now = time.perf_counter()
+        steering = clamp(steering, -1.0, 1.0)
         sx = self.width / DESIGN_WIDTH
         sy = self.height / DESIGN_HEIGHT
         center_x = DESIGN_WIDTH * 0.5
@@ -809,11 +810,12 @@ class ClusterUiRenderer:
                         42.0 + progress * (DESIGN_WIDTH * 0.5 - 42.0)
                     )
                     elbow_y = BACKGROUND_LIGHT_LINE_TOP_Y + progress * 88.0
-                    elbow_x = top_x
+                    bend = steering * 150.0 * (0.35 + progress * 0.65)
+                    elbow_x = top_x + bend * 0.28
                     bottom_x = side * (
                         BACKGROUND_LIGHT_LINE_BASE_WIDTH
                         + progress * (DESIGN_WIDTH * 0.5 + BACKGROUND_LIGHT_LINE_ELBOW_SPREAD)
-                    )
+                    ) + bend
                     points = (
                         rl.Vector2(top_x, 0.0),
                         rl.Vector2(elbow_x, elbow_y),
