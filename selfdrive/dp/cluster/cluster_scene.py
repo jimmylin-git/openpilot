@@ -57,6 +57,8 @@ RoadEdgeLayer = tuple[int, Color, float, float]
 ProfileAdd = Callable[[str, float], None]
 PATH_BLOCKER_CLEARANCE_M = 1.25
 PATH_BLOCKER_LANE_TOLERANCE = 0.42
+LANE_CENTER_LOCK_START = 0.22
+LANE_CENTER_LOCK_END = 0.45
 RADAR_VEHICLE_MIN_VALID_COUNT = 20
 RADAR_VEHICLE_MAX_DISTANCE_M = 150.0
 RADAR_VEHICLE_MAX_LATERAL_LANES = 2.75
@@ -341,6 +343,27 @@ def road_curve_m(forward_m: float, steering: float) -> float:
 
 def road_world_x(offset: float, forward_m: float, steering: float, lane_width_m: float) -> float:
     return offset * lane_width_m + road_curve_m(forward_m, steering)
+
+
+def lane_center_locked_offset(offset: float, *, enabled: bool = True) -> float:
+    """Keep tracked objects centered until their motion clearly crosses lanes."""
+    if not enabled or not math.isfinite(offset):
+        return offset
+
+    lane_index = math.floor(offset + 0.5)
+    center = float(lane_index)
+    distance_from_center = offset - center
+    distance = abs(distance_from_center)
+    if distance <= LANE_CENTER_LOCK_START:
+        return center
+    if distance >= LANE_CENTER_LOCK_END:
+        return offset
+
+    release = smoothstep(
+        (distance - LANE_CENTER_LOCK_START)
+        / (LANE_CENTER_LOCK_END - LANE_CENTER_LOCK_START)
+    )
+    return center + distance_from_center * release
 
 
 def normalize2(x: float, y: float) -> tuple[float, float]:
@@ -2122,8 +2145,9 @@ def radar_vehicle_box(
     # vehicles' lateral_m); add the same road curve compensation used elsewhere
     # so radar-only points line up with the (possibly curving) lane markings
     # instead of drifting into neighboring lanes on a curve.
+    locked_offset = lane_center_locked_offset(point.lateral_m / lane_width_m)
     center_x_m = clamp(
-        point.lateral_m + road_curve_m_for_state(state, forward_m),
+        locked_offset * lane_width_m + road_curve_m_for_state(state, forward_m),
         -lane_width_m * 3.0,
         lane_width_m * 3.0,
     )
@@ -2519,6 +2543,7 @@ def vehicle_box(
     annotate: bool = False,
     x_offset_m: float = 0.0,
     model_curve_state: ClusterUiState | None = None,
+    lock_lane_center: bool = True,
 ) -> VehicleBox:
     confidence = clamp(confidence, 0.0, 1.0)
     alpha = int(92 + 163 * confidence)
@@ -2531,6 +2556,7 @@ def vehicle_box(
         if model_curve_state is not None
         else road_curve_m(forward_m, steering)
     )
+    offset = lane_center_locked_offset(offset, enabled=lock_lane_center)
     center_x_m = offset * lane_width_m + curve_m + x_offset_m
     right_x, right_y, forward_x, forward_y = vehicle_heading(
         offset,
@@ -2577,7 +2603,10 @@ def vehicle_box(
 
 
 def ego_anchor_x_m(state: ClusterUiState, lane_width_m: float) -> float:
-    ego_offset = clamp(state.ego_lane_offset, -1.25, 1.25)
+    ego_offset = lane_center_locked_offset(
+        clamp(state.ego_lane_offset, -1.25, 1.25),
+        enabled=state.lane_change_phase != "changing",
+    )
     return road_world_x(ego_offset, EGO_FORWARD_M, state.steering, lane_width_m)
 
 
@@ -3266,7 +3295,10 @@ def build_cluster_scene(
     profile_scene_add(profile_add, "scene.build.lane_markings", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)
-    ego_offset = clamp(state.ego_lane_offset, -1.25, 1.25)
+    ego_offset = lane_center_locked_offset(
+        clamp(state.ego_lane_offset, -1.25, 1.25),
+        enabled=state.lane_change_phase != "changing",
+    )
     target_offset = state.highlight_lane_offset if state.lane_change_phase == "changing" else None
     ego_vehicle = vehicle_box(
         ego_offset,
@@ -3277,6 +3309,7 @@ def build_cluster_scene(
         camera_active,
         target_offset,
         model_curve_state=state,
+        lock_lane_center=state.lane_change_phase != "changing",
     )
     merged_radar_labels = frozenset[str]()
     if route_mode:
@@ -3330,7 +3363,11 @@ def build_cluster_scene(
         )
         detected_blockers = tuple(
             PathBlocker(
-                clamp(detected.lateral_m / lane_width_m, -2.2, 2.2),
+                clamp(
+                    lane_center_locked_offset(detected.lateral_m / lane_width_m),
+                    -2.2,
+                    2.2,
+                ),
                 render_scene_forward_m(detected.longitudinal_m),
                 VEHICLE_LENGTH_M,
             )

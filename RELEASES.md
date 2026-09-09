@@ -1,3 +1,8 @@
+Version 0.10.3 r3 (2026-09-10) -- cluster lane-center locking
+===============================================================
+* Cluster lane-center locking keeps ego and detected vehicle boxes centered in their lanes, with smooth release during lane changes
+* Static Cluster background image and offroad 5% brightness
+
 Version 0.10.3 (2025-12-17) -- merge cluster
 ========================
 * Custom TFT gauge cluster display (speed, gear, LFA, ACC set speed, follow-distance gap bar, 3D lead vehicle/lane view, animated neon tunnel background)
