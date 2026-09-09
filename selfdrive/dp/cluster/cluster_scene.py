@@ -100,7 +100,11 @@ DRIVE_CAMERA_FORWARD_SHIFT_M = 5.0
 DRIVE_CAMERA_EGO_BOTTOM_POSITION_M = (0.0, -6.0, 5.00)
 DRIVE_CAMERA_EGO_BOTTOM_TARGET_M = (0.0, 14.0, -0.20)
 DRIVE_CAMERA_TARGET_Z_M = 0.60
-SCENE_CAMERA_VERTICAL_DROP_M = 1.20
+# Tilts the camera target upward, which shifts the whole 3D scene (road, lane
+# lines, and the ego vehicle model together) further down on screen. Solved so
+# the ego vehicle's rear/bottom edge sits ~50px above the 1920x720 design
+# canvas's bottom edge in the default drive camera view.
+SCENE_CAMERA_VERTICAL_DROP_M = 1.485
 DRIVE_VIEW_REAR_RELATIVE_M = -5.0
 DRIVE_VIEW_REAR_ROAD_MARGIN_M = 8.0
 LONGITUDINAL_RENDER_DISTANCE_SCALE = 0.5
@@ -1420,6 +1424,19 @@ def model_path_lateral_at_forward(state: ClusterUiState, relative_forward_m: flo
     return None
 
 
+def road_curve_m_for_state(state: ClusterUiState, forward_m: float) -> float:
+    """Curve offset (m) of the road at `forward_m`, preferring the live perceived
+    model path curvature so vehicle boxes line up with the lane markings (which
+    also render from live model data when it is available). Falls back to the
+    synthetic steering-based curve approximation when there is no model path,
+    e.g. in the simulator or before the model has produced a path.
+    """
+    model_curve_m = model_path_lateral_at_forward(state, scene_data_relative_forward_m(forward_m))
+    if model_curve_m is not None:
+        return model_curve_m
+    return road_curve_m(forward_m, state.steering)
+
+
 def model_path_world_x(state: ClusterUiState, lane_width_m: float, forward_m: float) -> float | None:
     lateral_m = model_path_lateral_at_forward(state, scene_data_relative_forward_m(forward_m))
     if lateral_m is None:
@@ -2101,7 +2118,15 @@ def radar_vehicle_box(
     alpha = int(92 + 163 * confidence)
     body_color = vehicle_color_for_source("radarPoint", theme, state.radar_source_color_mode)
     forward_m = render_scene_forward_m(point.longitudinal_m)
-    center_x_m = clamp(point.lateral_m, -lane_width_m * 3.0, lane_width_m * 3.0)
+    # point.lateral_m is a raw ego-frame straight-line offset (like detected
+    # vehicles' lateral_m); add the same road curve compensation used elsewhere
+    # so radar-only points line up with the (possibly curving) lane markings
+    # instead of drifting into neighboring lanes on a curve.
+    center_x_m = clamp(
+        point.lateral_m + road_curve_m_for_state(state, forward_m),
+        -lane_width_m * 3.0,
+        lane_width_m * 3.0,
+    )
     return VehicleBox(
         center=Vec3(center_x_m, forward_m, VEHICLE_HEIGHT_M * 0.5),
         right_x=1.0,
@@ -2493,11 +2518,20 @@ def vehicle_box(
     primary: bool = False,
     annotate: bool = False,
     x_offset_m: float = 0.0,
+    model_curve_state: ClusterUiState | None = None,
 ) -> VehicleBox:
     confidence = clamp(confidence, 0.0, 1.0)
     alpha = int(92 + 163 * confidence)
     body_color = color
-    center_x_m = road_world_x(offset, forward_m, steering, lane_width_m) + x_offset_m
+    # Prefer the live model path's real road curvature (when available) over the
+    # synthetic steering-based curve so this box lines up with the lane markings,
+    # which also render from live model data when it is available.
+    curve_m = (
+        road_curve_m_for_state(model_curve_state, forward_m)
+        if model_curve_state is not None
+        else road_curve_m(forward_m, steering)
+    )
+    center_x_m = offset * lane_width_m + curve_m + x_offset_m
     right_x, right_y, forward_x, forward_y = vehicle_heading(
         offset,
         forward_m,
@@ -3242,6 +3276,7 @@ def build_cluster_scene(
         EGO,
         camera_active,
         target_offset,
+        model_curve_state=state,
     )
     merged_radar_labels = frozenset[str]()
     if route_mode:
@@ -3286,6 +3321,7 @@ def build_cluster_scene(
                 primary=detected.primary,
                 annotate=vehicle_badge_has_special_info(detected),
                 x_offset_m=relative_scene_x_offset_m,
+                model_curve_state=state,
             )
             for detected in render_detected_vehicles
         )

@@ -86,22 +86,23 @@ GEAR_STATUS_FONT_SIZE = 34.0 * DRIVE_STATUS_SCALE * 0.82 * 2.0
 GEAR_STATUS_OUTLINE_WIDTH = 2.0 * DRIVE_STATUS_SCALE
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
-FOLLOW_GAP_BAR_ACTIVE = (*GREEN, 255)
-FOLLOW_GAP_BAR_INACTIVE = (118, 122, 128, 130)
-FOLLOW_GAP_BAR_H = 7.0 * DRIVE_STATUS_SCALE
+FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_R = 1.2 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_STEP_Y = 10.0 * DRIVE_STATUS_SCALE
-FOLLOW_GAP_BAR_MARGIN_W = 10.0 * DRIVE_STATUS_SCALE
+# 5px of clearance on each side between the bar and the FCD_Lane.png lane
+# lines, so the total margin subtracted from the lane-line span is 10px.
+FOLLOW_GAP_BAR_LANE_CLEARANCE_PX = 5.0
+FOLLOW_GAP_BAR_MARGIN_W = FOLLOW_GAP_BAR_LANE_CLEARANCE_PX * 2.0 * DRIVE_STATUS_SCALE
 # FCD_Lane.png (128x128) is transparent outside rows ~16-111; within that band
 # the two lane lines splay from ~50% of the icon width to ~99% of it. These
 # fractions were measured from the asset's opaque pixel span so each bar's
-# width/position can taper to match the lane lines. The bar span fractions are
-# kept well inside the lane-line fractions so bars stay narrower than the
-# lines and don't overlap them or each other.
+# width/position can taper to match the lane lines, with a fixed 5px gap
+# (FOLLOW_GAP_BAR_MARGIN_W) subtracted on each side so the bar stays inside
+# the lines without touching them.
 FOLLOW_GAP_LANE_CONTENT_TOP_FRAC = 16.0 / 128.0
 FOLLOW_GAP_LANE_CONTENT_BOTTOM_FRAC = 111.0 / 128.0
-FOLLOW_GAP_BAR_SPAN_TOP_FRAC = 0.26
-FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 0.5
+FOLLOW_GAP_BAR_SPAN_TOP_FRAC = 0.5
+FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 0.99
 FOLLOW_GAP_LANE_CENTER_X = DESIGN_WIDTH * 0.5
 LFA_STATUS_CENTER_X = FOLLOW_GAP_LANE_CENTER_X + 142
 TOP_CRUISE_CENTER_X = FOLLOW_GAP_LANE_CENTER_X - 142
@@ -114,13 +115,6 @@ SPEED_VALUE_CENTER_Y = 230 + 130
 SPEED_LIMIT_SIGN_CENTER_X = 460
 SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
 SPEED_LIMIT_SIGN_RADIUS = 56.0
-BACKGROUND_LIGHT_LINE_COUNT = 9
-BACKGROUND_LIGHT_LINE_SPEED = 0.22
-BACKGROUND_LIGHT_LINE_TOP_Y = 176.0
-BACKGROUND_LIGHT_LINE_BASE_WIDTH = 18.0
-BACKGROUND_LIGHT_LINE_ELBOW_SPREAD = 128.0
-BACKGROUND_LIGHT_LINE_ACTIVE_LENGTH = 0.16
-BACKGROUND_LIGHT_LINE_GLOW_WIDTH = 12.0
 SPEED_LIMIT_SOURCE_LABELS = {
     "vehicle": "v",
     "car": "v",
@@ -785,88 +779,8 @@ class ClusterUiRenderer:
         rl.clear_background(rl_color(theme.bg))
         self._profile_add("render_world.clear_background", profile_stage)
         profile_stage = self._profile_start()
-        self._draw_background_light_lines(state.steering)
-        self._profile_add("render_world.background_light_lines", profile_stage)
-        profile_stage = self._profile_start()
         self._draw_scene(scene, state)
         self._profile_add("render_world.draw_scene", profile_stage)
-
-    def _draw_background_light_lines(self, steering: float = 0.0) -> None:
-        """Draw animated perspective lines that follow the projected road bend."""
-        now = time.perf_counter()
-        steering = clamp(steering, -1.0, 1.0)
-        sx = self.width / DESIGN_WIDTH
-        sy = self.height / DESIGN_HEIGHT
-        center_x = DESIGN_WIDTH * 0.5
-        center_y = DESIGN_HEIGHT * 0.47
-        rl.rl_push_matrix()
-        rl.rl_scalef(sx, sy, 1.0)
-        try:
-            for side in (-1, 1):
-                base_color = (34, 222, 255) if side < 0 else (255, 48, 224)
-                for index in range(BACKGROUND_LIGHT_LINE_COUNT):
-                    progress = index / max(1, BACKGROUND_LIGHT_LINE_COUNT - 1)
-                    top_x = center_x + side * (
-                        42.0 + progress * (DESIGN_WIDTH * 0.5 - 42.0)
-                    )
-                    elbow_y = BACKGROUND_LIGHT_LINE_TOP_Y + progress * 88.0
-                    bend = steering * 150.0 * (0.35 + progress * 0.65)
-                    elbow_x = top_x + bend * 0.28
-                    bottom_x = side * (
-                        BACKGROUND_LIGHT_LINE_BASE_WIDTH
-                        + progress * (DESIGN_WIDTH * 0.5 + BACKGROUND_LIGHT_LINE_ELBOW_SPREAD)
-                    ) + bend
-                    points = (
-                        rl.Vector2(top_x, 0.0),
-                        rl.Vector2(elbow_x, elbow_y),
-                        rl.Vector2(bottom_x, float(DESIGN_HEIGHT)),
-                    )
-                    line_alpha = int(48 + 46 * (1.0 - progress))
-                    for glow in range(3, 0, -1):
-                        rl.draw_line_ex(
-                            points[0],
-                            points[1],
-                            BACKGROUND_LIGHT_LINE_GLOW_WIDTH * glow,
-                            rl_color((*base_color, max(5, line_alpha // (glow + 1)))),
-                        )
-                        rl.draw_line_ex(
-                            points[1],
-                            points[2],
-                            BACKGROUND_LIGHT_LINE_GLOW_WIDTH * glow,
-                            rl_color((*base_color, max(5, line_alpha // (glow + 1)))),
-                        )
-                    rl.draw_line_ex(points[0], points[1], 1.8, rl_color((*base_color, line_alpha)))
-                    rl.draw_line_ex(points[1], points[2], 1.8, rl_color((*base_color, line_alpha)))
-
-                    phase = (now * BACKGROUND_LIGHT_LINE_SPEED + progress) % 1.0
-                    head = phase
-                    tail = max(0.0, head - BACKGROUND_LIGHT_LINE_ACTIVE_LENGTH)
-                    for marker in (tail, head):
-                        if marker <= 0.5:
-                            marker_progress = marker * 2.0
-                            start = points[0]
-                            end = points[1]
-                        else:
-                            marker_progress = (marker - 0.5) * 2.0
-                            start = points[1]
-                            end = points[2]
-                        marker_point = rl.Vector2(
-                            start.x + (end.x - start.x) * marker_progress,
-                            start.y + (end.y - start.y) * marker_progress,
-                        )
-                        if marker is head:
-                            rl.draw_circle_v(
-                                marker_point,
-                                5.0,
-                                rl_color((*base_color, 150)),
-                            )
-                            rl.draw_circle_v(
-                                marker_point,
-                                2.0,
-                                rl_color((*base_color, 255)),
-                            )
-        finally:
-            rl.rl_pop_matrix()
 
     def render_to_file(self, state: ClusterUiState, output_path: str | Path) -> None:
         image = self._render_to_image(state)
@@ -2753,6 +2667,13 @@ class ClusterUiRenderer:
     def _draw_follow_gap_lane_icon(self, state: ClusterUiState, bottom_y: float) -> None:
         if state.cruise_gap is None:
             return
+        theme = self._current_theme()
+        active = bool(state.cruise_display_state == "engaged")
+        tint = WHITE if active else theme.muted
+        alpha = 255 if active else 190
+        bar_active_color = (*tint, alpha)
+        bar_inactive_color = (*theme.muted, 130)
+
         icon_center_x = FOLLOW_GAP_LANE_CENTER_X
         icon_size = FOLLOW_GAP_LANE_ICON_SIZE
         icon_center_y = bottom_y - icon_size * 0.5
@@ -2764,7 +2685,8 @@ class ClusterUiRenderer:
                 bottom_y,
                 icon_size,
                 icon_size,
-                WHITE,
+                tint,
+                alpha,
             )
 
         content_top_y = icon_top_y + icon_size * FOLLOW_GAP_LANE_CONTENT_TOP_FRAC
@@ -2777,7 +2699,7 @@ class ClusterUiRenderer:
         for index in range(FOLLOW_STATUS_GAP_BARS):
             # Bars stack bottom-to-top so the lit count grows upward like the horizontal layout rotated 90° CCW.
             row = FOLLOW_STATUS_GAP_BARS - 1 - index
-            active = index < gap_count
+            lit = index < gap_count
             row_y = top_y + row * FOLLOW_GAP_BAR_STEP_Y
             # Interpolate bar width to hug the FCD_Lane.png lane lines, which are
             # narrower near the top of the icon's content band and splay wider toward the bottom.
@@ -2792,7 +2714,7 @@ class ClusterUiRenderer:
                 bar_w,
                 FOLLOW_GAP_BAR_H,
                 FOLLOW_GAP_BAR_R,
-                FOLLOW_GAP_BAR_ACTIVE if active else FOLLOW_GAP_BAR_INACTIVE,
+                bar_active_color if lit else bar_inactive_color,
                 None,
                 0.0,
             )
