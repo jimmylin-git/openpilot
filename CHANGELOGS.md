@@ -1,5 +1,6 @@
-dragonpilot 0.10.3 r3 (2026-09-11)
+dragonpilot 0.10.3 r3 (2026-09-12)
 =======================
+* ✨ UI: Cluster BMW-style fixed 3-lane scene - always-on straight 3-lane layout (no confidence gating), faint scrolling ground grid for forward motion, front/front-left/front-right vehicle-only display, ego lane blue/green ACC coloring, green locked-lead vehicle coloring (2026-09-12)
 * ✨ UI: Cluster 3D scene rework - camera drop, straight confidence-gated lane lines, faded lead vehicle boxes, blue path line removed (2026-09-11)
 * ✨ UI: Cluster day/night background image switching (2026-09-10)
 * ✨ UI: Cluster lane-center locking for ego and detected vehicles (2026-09-10)

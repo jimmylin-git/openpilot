@@ -63,16 +63,27 @@ PATH_BLOCKER_LANE_TOLERANCE = 0.42
 NO_STEERING_CURVE = 0.0
 LANE_CENTER_LOCK_START = 0.22
 LANE_CENTER_LOCK_END = 0.45
-# Lane lines (and detected front vehicle boxes) below this modelV2 confidence
-# are hidden entirely instead of drawn faintly.
-LANE_MARKING_MIN_CONFIDENCE = 0.60
+# Detected front vehicle boxes below this modelV2 confidence are hidden
+# entirely instead of drawn faintly. Lane lines always render at a fixed
+# 3-lane layout regardless of confidence (see build_cluster_scene()).
 FRONT_VEHICLE_MIN_CONFIDENCE = 0.60
 # Detected vehicles fade out smoothly as confidence drops toward the cutoff
 # above, instead of popping to/from full opacity.
 FRONT_VEHICLE_FADE_RANGE = 0.20
+# Only vehicles ahead of the ego car and within the ego lane plus one
+# adjacent lane on each side (front / front-left / front-right) are drawn,
+# in lane-width units.
+FRONT_VEHICLE_LANE_RANGE_LANES = 1.5
 RADAR_VEHICLE_MIN_VALID_COUNT = 20
 RADAR_VEHICLE_MAX_DISTANCE_M = 150.0
 RADAR_VEHICLE_MAX_LATERAL_LANES = 2.75
+# Faint ground grid lines drawn across the fixed 3-lane band to convey forward
+# motion, since the lane lines themselves are now perfectly straight/static.
+GROUND_GRID_SPACING_M = 4.0
+GROUND_GRID_LINE_WIDTH_M = 0.05
+GROUND_GRID_HALF_WIDTH_LANES = 1.5
+GROUND_GRID_HEIGHT_M = 0.0015
+GROUND_GRID_ALPHA = 26
 RADAR_ROAD_EDGE_HARD_CLEARANCE_M = 0.55
 RADAR_ROAD_EDGE_STATIONARY_CLEARANCE_M = 1.05
 RADAR_ROAD_EDGE_OUTSIDE_MARGIN_M = 0.25
@@ -329,6 +340,7 @@ class ClusterScene:
     planned_path: tuple[MeshStrip, ...]
     radar_points: tuple[RadarPointMarker, ...]
     vehicles: tuple[VehicleBox, ...]
+    ground_grid: tuple[MeshStrip, ...] = ()
 
 
 def vec3_with_x_offset(vec: Vec3, x_offset_m: float) -> Vec3:
@@ -465,6 +477,41 @@ def strip_between_offsets(
     )
 
 
+def ground_grid_strips(
+    lane_width_m: float,
+    road_start_m: float,
+    road_end_m: float,
+    theme: ClusterTheme,
+    ground_scroll_m: float,
+) -> tuple[MeshStrip, ...]:
+    """Faint transverse tick lines spanning the fixed 3-lane band, scrolling
+    toward the camera as the car drives so the ground conveys forward motion
+    even though the lane lines themselves are perfectly straight/static."""
+    half_width_m = GROUND_GRID_HALF_WIDTH_LANES * lane_width_m
+    half_line_m = GROUND_GRID_LINE_WIDTH_M * 0.5
+    color = rgba(theme.faint, GROUND_GRID_ALPHA)
+    scroll_offset_m = ground_scroll_m % GROUND_GRID_SPACING_M
+    strips: list[MeshStrip] = []
+    forward_m = math.floor((road_start_m - scroll_offset_m) / GROUND_GRID_SPACING_M) * GROUND_GRID_SPACING_M + scroll_offset_m
+    while forward_m < road_end_m:
+        if forward_m >= road_start_m + half_line_m and forward_m <= road_end_m - half_line_m:
+            strips.append(
+                MeshStrip(
+                    left=(
+                        Vec3(-half_width_m, forward_m - half_line_m, GROUND_GRID_HEIGHT_M),
+                        Vec3(-half_width_m, forward_m + half_line_m, GROUND_GRID_HEIGHT_M),
+                    ),
+                    right=(
+                        Vec3(half_width_m, forward_m - half_line_m, GROUND_GRID_HEIGHT_M),
+                        Vec3(half_width_m, forward_m + half_line_m, GROUND_GRID_HEIGHT_M),
+                    ),
+                    color=color,
+                )
+            )
+        forward_m += GROUND_GRID_SPACING_M
+    return tuple(strips)
+
+
 def model_line_lateral_at_forward(
     points: tuple[ModelPathPoint, ...],
     relative_forward_m: float,
@@ -559,26 +606,9 @@ def lane_floor_strip(
     route_mode: bool,
     height_m: float,
 ) -> MeshStrip | None:
-    left_marking = marking_near_offset(state.lanes, lane_center_offset - 0.5)
-    right_marking = marking_near_offset(state.lanes, lane_center_offset + 0.5)
-    if left_marking is not None and right_marking is not None:
-        model_strip = strip_between_model_lines(
-            left_marking.model_points,
-            right_marking.model_points,
-            left_marking.model_lateral_shift_m,
-            right_marking.model_lateral_shift_m,
-            road_start_m,
-            road_end_m,
-            road_steps,
-            color,
-            height_m,
-            extend_before_model=True,
-        )
-        if model_strip is not None:
-            return model_strip
-
-    if route_mode:
-        return None
+    # Always a straight offset strip: lane floor highlights (ego lane, target
+    # lane preview) must not bend with model curvature, matching the lane
+    # markings themselves.
     return strip_between_offsets(
         lane_center_offset - 0.5,
         lane_center_offset + 0.5,
@@ -2525,6 +2555,33 @@ def front_vehicle_display_confidence(probability: float) -> float | None:
     )
 
 
+def vehicle_in_forward_display_lanes(vehicle: DetectedVehicle, lane_width_m: float) -> bool:
+    """Only vehicles ahead of the ego car, within its own lane or one
+    adjacent lane on either side (front / front-left / front-right), are
+    displayed - matching the fixed 3-lane layout."""
+    if vehicle.longitudinal_m <= 0.0:
+        return False
+    return abs(vehicle.lateral_m / lane_width_m) <= FRONT_VEHICLE_LANE_RANGE_LANES
+
+
+def point_in_forward_display_lanes(point: RadarPoint, lane_width_m: float) -> bool:
+    if point.longitudinal_m <= 0.0:
+        return False
+    return abs(point.lateral_m / lane_width_m) <= FRONT_VEHICLE_LANE_RANGE_LANES
+
+
+def vehicle_locked_lead_color(
+    vehicle: DetectedVehicle,
+    state: ClusterUiState,
+    theme: ClusterTheme = LIGHT_CLUSTER_THEME,
+) -> tuple[int, int, int]:
+    """The primary/leadOne vehicle turns green once ACC has locked onto it
+    (cruise engaged); otherwise vehicles keep their normal source coloring."""
+    if vehicle.primary and state.cruise_display_state == "engaged":
+        return GREEN
+    return vehicle_color_for_detection(vehicle, theme, state.radar_source_color_mode)
+
+
 def radar_vehicle_confidence(point: RadarPoint) -> float:
     if point.probability is not None:
         return clamp(0.58 + point.probability * 0.38, 0.58, 0.96)
@@ -3141,6 +3198,11 @@ def lane_highlight_color(route_mode: bool) -> Color:
     return LANE_HIGHLIGHT_COLOR[0], LANE_HIGHLIGHT_COLOR[1], LANE_HIGHLIGHT_COLOR[2], alpha
 
 
+def ego_lane_default_color(route_mode: bool) -> Color:
+    alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
+    return LANE_HIGHLIGHT_COLOR[0], LANE_HIGHLIGHT_COLOR[1], LANE_HIGHLIGHT_COLOR[2], alpha
+
+
 def ego_lane_cruise_color(route_mode: bool) -> Color:
     alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
     return GREEN[0], GREEN[1], GREEN[2], alpha
@@ -3192,6 +3254,7 @@ def build_cluster_scene(
     profile_add: ProfileAdd | None = None,
     highlight_lane_lit: bool = True,
     theme: ClusterTheme = LIGHT_CLUSTER_THEME,
+    ground_scroll_m: float = 0.0,
 ) -> ClusterScene:
     profile_stage = profile_scene_start(profile_add)
     lane_width_m = max(2.4, min(4.6, state.lane_width_m or DEFAULT_LANE_WIDTH_M))
@@ -3247,19 +3310,22 @@ def build_cluster_scene(
         if highlight_strip is not None:
             highlight_lanes.append(highlight_strip)
     if state.cruise_display_state == "engaged":
-        ego_lane_strip = lane_floor_strip(
-            state,
-            clamp(state.ego_lane_offset, -1.25, 1.25),
-            ego_lane_cruise_color(route_mode),
-            lane_width_m,
-            road_start_m,
-            road_end_m,
-            road_steps,
-            route_mode,
-            0.005,
-        )
-        if ego_lane_strip is not None:
-            highlight_lanes.append(ego_lane_strip)
+        ego_lane_color = ego_lane_cruise_color(route_mode)
+    else:
+        ego_lane_color = ego_lane_default_color(route_mode)
+    ego_lane_strip = lane_floor_strip(
+        state,
+        clamp(state.ego_lane_offset, -1.25, 1.25),
+        ego_lane_color,
+        lane_width_m,
+        road_start_m,
+        road_end_m,
+        road_steps,
+        route_mode,
+        0.005,
+    )
+    if ego_lane_strip is not None:
+        highlight_lanes.append(ego_lane_strip)
     profile_scene_add(profile_add, "scene.build.highlight_lanes", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)
@@ -3269,10 +3335,6 @@ def build_cluster_scene(
     bsd_marking_offsets = bsd_lane_marking_offsets(state)
     for marking in state.lanes:
         if not marking.visible:
-            continue
-        # Only render lane lines the model is confident about; below the
-        # threshold the line is hidden entirely rather than drawn faintly.
-        if marking.confidence < LANE_MARKING_MIN_CONFIDENCE:
             continue
         marking_specs = (
             (
@@ -3342,7 +3404,11 @@ def build_cluster_scene(
                 state,
             )
             merged_detected_vehicles = detected_vehicles_for_display(merged_detected_vehicles, state)
-        render_detected_vehicles = merged_detected_vehicles
+        render_detected_vehicles = tuple(
+            vehicle
+            for vehicle in merged_detected_vehicles
+            if vehicle_in_forward_display_lanes(vehicle, lane_width_m)
+        )
         merged_radar_labels = frozenset(
             label
             for label in (merged_radar_point_label(vehicle) for vehicle in render_detected_vehicles)
@@ -3358,7 +3424,7 @@ def build_cluster_scene(
                 render_scene_forward_m(detected.longitudinal_m),
                 NO_STEERING_CURVE,
                 lane_width_m,
-                vehicle_color_for_detection(detected, theme, state.radar_source_color_mode),
+                vehicle_locked_lead_color(detected, state, theme),
                 camera_active,
                 confidence=display_confidence,
                 label=detected.label,
@@ -3388,6 +3454,7 @@ def build_cluster_scene(
             for point, box in zip(selected_radar_vehicle_points, selected_radar_vehicle_boxes)
             if point.label not in merged_radar_labels
             and not radar_point_hidden_by_detected_vehicle(point, render_detected_vehicles, state)
+            and point_in_forward_display_lanes(point, lane_width_m)
         )
         visible_radar_vehicle_points = tuple(point for point, _ in visible_radar_vehicle_pairs)
         visible_radar_vehicle_boxes_raw = tuple(box for _, box in visible_radar_vehicle_pairs)
@@ -3402,6 +3469,7 @@ def build_cluster_scene(
 
     profile_stage = profile_scene_start(profile_add)
     road_surface = MeshStrip((), (), rgba(theme.road))
+    ground_grid = ground_grid_strips(lane_width_m, road_start_m, road_end_m, theme, ground_scroll_m)
     profile_scene_add(profile_add, "scene.build.road_surface", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)
@@ -3434,6 +3502,7 @@ def build_cluster_scene(
         camera=camera,
         scene_shift_x_m=scene_shift_x_m,
         road_surface=road_surface,
+        ground_grid=ground_grid,
         road_edges=road_edges,
         highlight_lanes=tuple(highlight_lanes),
         lane_markings=lane_markings,

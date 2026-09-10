@@ -1464,6 +1464,7 @@ class RouteLogParser:
                     relative_speed_mps=relative_speed_mps,
                     absolute_speed_kph=absolute_speed_kph,
                     acceleration_mps2=safe_optional_float(lead, "aLeadK"),
+                    primary=label == "TARGET",
                     ttc_s=ttc_from_relative_speed(d_rel, relative_speed_mps),
                 )
             )

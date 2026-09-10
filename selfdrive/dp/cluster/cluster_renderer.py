@@ -541,6 +541,8 @@ class ClusterUiRenderer:
         self._debug_plot_last_sample_time: float | None = None
         self.profile_enabled = os.environ.get("CLUSTER_PROFILE_RENDER") == "1"
         self._profile_samples: list[tuple[str, float]] = []
+        self._ground_scroll_m = 0.0
+        self._ground_scroll_last_t: float | None = None
 
     def set_profile_enabled(self, enabled: bool) -> None:
         self.profile_enabled = enabled
@@ -774,6 +776,14 @@ class ClusterUiRenderer:
         rl.clear_background(rl_color(theme.bg))
         self._profile_add("render_world.clear_background", profile_stage)
 
+    def _update_ground_scroll_m(self, state: ClusterUiState) -> float:
+        now = time.perf_counter()
+        if self._ground_scroll_last_t is not None:
+            dt = clamp(now - self._ground_scroll_last_t, 0.0, 0.25)
+            self._ground_scroll_m = (self._ground_scroll_m + max(0.0, state.speed_kph) / 3.6 * dt) % 100000.0
+        self._ground_scroll_last_t = now
+        return self._ground_scroll_m
+
     def _render_world(self, state: ClusterUiState, signal_lights: tuple[bool, bool] | None = None) -> None:
         if signal_lights is None:
             signal_lights = self._turn_signal_lights(state)
@@ -784,6 +794,7 @@ class ClusterUiRenderer:
             self._profile_add_elapsed if self.profile_enabled else None,
             highlight_lane_lit=self._highlight_lane_lit(state, signal_lights),
             theme=theme,
+            ground_scroll_m=self._update_ground_scroll_m(state),
         )
         self._profile_add("render_world.build_scene", profile_stage)
         profile_stage = self._profile_start()
@@ -1535,6 +1546,10 @@ class ClusterUiRenderer:
         if abs(scene.scene_shift_x_m) > 0.0001:
             rl.rl_translatef(scene.scene_shift_x_m, 0.0, 0.0)
         try:
+            profile_stage = self._profile_start()
+            for strip in scene.ground_grid:
+                self._draw_strip(strip)
+            self._profile_add("draw_scene.ground_grid", profile_stage)
             profile_stage = self._profile_start()
             for strip in scene.highlight_lanes:
                 self._draw_strip(strip)

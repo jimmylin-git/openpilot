@@ -1,3 +1,11 @@
+Version 0.10.3 r3 (2026-09-12) -- BMW-style fixed 3-lane cluster scene
+===============================================================
+* Reverted lane-line confidence gating: lane lines now always render as a fixed straight 3-lane layout regardless of modelV2 confidence, matching a BMW-style assisted-driving cluster reference
+* Added a faint scrolling ground grid (transverse tick lines) across the lane band to convey forward motion now that lane lines and the lane-change highlight floor are perfectly static/straight
+* Detected vehicles are now filtered to only show ones ahead of the ego car within its own lane plus one adjacent lane on each side (front / front-left / front-right)
+* Ego's own lane is now always highlighted - blue when cruise is not engaged, green when ACC is engaged - with smooth lane-change transitions reusing the existing lane-offset animation
+* The locked/primary lead vehicle (vision or radar-fused) now turns green once ACC has locked onto it, instead of the default gray
+
 Version 0.10.3 r3 (2026-09-11) -- cluster 3D scene rework
 ===============================================================
 * Whole 3D scene shifted further down so roughly the bottom third of the ego vehicle box is below the screen edge
