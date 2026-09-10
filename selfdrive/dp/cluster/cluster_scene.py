@@ -57,6 +57,10 @@ RoadEdgeLayer = tuple[int, Color, float, float]
 ProfileAdd = Callable[[str, float], None]
 PATH_BLOCKER_CLEARANCE_M = 1.25
 PATH_BLOCKER_LANE_TOLERANCE = 0.42
+# Lane markings, road edges, and vehicle boxes should stay put regardless of
+# steering wheel angle; only the synthetic (no-model) fallback for the blue
+# planned-path line still bends with steering.
+NO_STEERING_CURVE = 0.0
 LANE_CENTER_LOCK_START = 0.22
 LANE_CENTER_LOCK_END = 0.45
 RADAR_VEHICLE_MIN_VALID_COUNT = 20
@@ -570,7 +574,7 @@ def lane_floor_strip(
     return strip_between_offsets(
         lane_center_offset - 0.5,
         lane_center_offset + 0.5,
-        state.steering,
+        NO_STEERING_CURVE,
         lane_width_m,
         road_start_m,
         road_end_m,
@@ -1450,14 +1454,15 @@ def model_path_lateral_at_forward(state: ClusterUiState, relative_forward_m: flo
 def road_curve_m_for_state(state: ClusterUiState, forward_m: float) -> float:
     """Curve offset (m) of the road at `forward_m`, preferring the live perceived
     model path curvature so vehicle boxes line up with the lane markings (which
-    also render from live model data when it is available). Falls back to the
-    synthetic steering-based curve approximation when there is no model path,
-    e.g. in the simulator or before the model has produced a path.
+    also render from live model data when it is available). Falls back to zero
+    (no curve) when there is no model path, so lane markings and vehicle boxes
+    never bend purely from the steering wheel angle; only the planned-path
+    (blue) line's own synthetic fallback still reacts to steering.
     """
     model_curve_m = model_path_lateral_at_forward(state, scene_data_relative_forward_m(forward_m))
     if model_curve_m is not None:
         return model_curve_m
-    return road_curve_m(forward_m, state.steering)
+    return NO_STEERING_CURVE
 
 
 def model_path_world_x(state: ClusterUiState, lane_width_m: float, forward_m: float) -> float | None:
@@ -1465,7 +1470,7 @@ def model_path_world_x(state: ClusterUiState, lane_width_m: float, forward_m: fl
     if lateral_m is None:
         return None
     ego_offset = clamp(state.ego_lane_offset, -1.25, 1.25)
-    ego_x_m = road_world_x(ego_offset, EGO_FORWARD_M, state.steering, lane_width_m)
+    ego_x_m = road_world_x(ego_offset, EGO_FORWARD_M, NO_STEERING_CURVE, lane_width_m)
     return ego_x_m + lateral_m
 
 
@@ -1483,7 +1488,7 @@ def model_path_end_m(state: ClusterUiState, lane_width_m: float, blockers: tuple
         path_x_m = model_path_world_x(state, lane_width_m, blocker.forward_m)
         if path_x_m is None:
             continue
-        blocker_x_m = road_world_x(blocker.offset, blocker.forward_m, state.steering, lane_width_m)
+        blocker_x_m = road_world_x(blocker.offset, blocker.forward_m, NO_STEERING_CURVE, lane_width_m)
         if abs(path_x_m - blocker_x_m) > PATH_BLOCKER_LANE_TOLERANCE * lane_width_m:
             continue
         stop_m = blocker.forward_m - blocker.length_m * 0.5 - PATH_BLOCKER_CLEARANCE_M
@@ -1517,7 +1522,7 @@ def model_path_centerline(
         return tuple(points) if len(points) >= 2 else ()
     else:
         ego_offset = clamp(state.ego_lane_offset, -1.25, 1.25)
-        ego_x_m = road_world_x(ego_offset, EGO_FORWARD_M, state.steering, lane_width_m)
+        ego_x_m = road_world_x(ego_offset, EGO_FORWARD_M, NO_STEERING_CURVE, lane_width_m)
         points = [
             Vec3(ego_x_m + point.lateral_m, data_scene_forward_m(point.forward_m), PATH_HEIGHT_M)
             for point in model_points
@@ -2607,7 +2612,7 @@ def ego_anchor_x_m(state: ClusterUiState, lane_width_m: float) -> float:
         clamp(state.ego_lane_offset, -1.25, 1.25),
         enabled=state.lane_change_phase != "changing",
     )
-    return road_world_x(ego_offset, EGO_FORWARD_M, state.steering, lane_width_m)
+    return road_world_x(ego_offset, EGO_FORWARD_M, NO_STEERING_CURVE, lane_width_m)
 
 
 def scene_camera(state: ClusterUiState, lane_width_m: float, anchor_x_m: float = 0.0) -> CameraSpec:
@@ -3008,7 +3013,7 @@ def road_edge_strips(
         return (
             *road_edge_offset_strips(
                 left_offset,
-                state.steering,
+                NO_STEERING_CURVE,
                 lane_width_m,
                 default_color,
                 -1.0,
@@ -3018,7 +3023,7 @@ def road_edge_strips(
             ),
             *road_edge_offset_strips(
                 right_offset,
-                state.steering,
+                NO_STEERING_CURVE,
                 lane_width_m,
                 default_color,
                 1.0,
@@ -3050,7 +3055,7 @@ def road_edge_strips(
             strips.extend(
                 road_edge_offset_strips(
                     clamp(state.left_road_edge_offset, -2.8, -0.68),
-                    state.steering,
+                    NO_STEERING_CURVE,
                     lane_width_m,
                     left_color,
                     -1.0,
@@ -3078,7 +3083,7 @@ def road_edge_strips(
             strips.extend(
                 road_edge_offset_strips(
                     clamp(state.right_road_edge_offset, 0.68, 2.8),
-                    state.steering,
+                    NO_STEERING_CURVE,
                     lane_width_m,
                     right_color,
                     1.0,
@@ -3271,7 +3276,7 @@ def build_cluster_scene(
             profile_step = profile_scene_start(profile_add)
             strip_groups = lane_offset_strip_groups(
                 marking.offset,
-                state.steering,
+                NO_STEERING_CURVE,
                 lane_width_m,
                 road_start_m,
                 road_end_m,
@@ -3303,7 +3308,7 @@ def build_cluster_scene(
     ego_vehicle = vehicle_box(
         ego_offset,
         EGO_VEHICLE_CENTER_FORWARD_M,
-        state.steering,
+        NO_STEERING_CURVE,
         lane_width_m,
         EGO,
         camera_active,
@@ -3332,7 +3337,7 @@ def build_cluster_scene(
             vehicle_box(
                 clamp(detected.lateral_m / lane_width_m, -2.2, 2.2),
                 render_scene_forward_m(detected.longitudinal_m),
-                state.steering,
+                NO_STEERING_CURVE,
                 lane_width_m,
                 vehicle_color_for_detection(detected, theme, state.radar_source_color_mode),
                 camera_active,
