@@ -108,9 +108,9 @@ DRIVE_CAMERA_EGO_BOTTOM_TARGET_M = (0.0, 14.0, -0.20)
 DRIVE_CAMERA_TARGET_Z_M = 0.60
 # Tilts the camera target upward, which shifts the whole 3D scene (road, lane
 # lines, and the ego vehicle model together) further down on screen. Solved so
-# the ego vehicle's rear/bottom edge sits ~10px above the 1920x720 design
+# the ego vehicle's rear/bottom edge sits ~5px above the 1920x720 design
 # canvas's bottom edge in the default drive camera view.
-SCENE_CAMERA_VERTICAL_DROP_M = 2.10
+SCENE_CAMERA_VERTICAL_DROP_M = 2.18
 DRIVE_VIEW_REAR_RELATIVE_M = -5.0
 DRIVE_VIEW_REAR_ROAD_MARGIN_M = 8.0
 LONGITUDINAL_RENDER_DISTANCE_SCALE = 0.5
