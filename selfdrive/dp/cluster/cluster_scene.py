@@ -1871,6 +1871,8 @@ def radar_point_markers(
     for point in state.radar_points:
         if radar_point_hidden_by_vehicle_box(point, vehicle_points, state):
             continue
+        if abs(point.lateral_m / lane_width_m) > FRONT_VEHICLE_LANE_RANGE_LANES:
+            continue
         forward_m = render_scene_forward_m(point.longitudinal_m)
         if forward_m < min_forward_m or forward_m > max_forward_m:
             continue
