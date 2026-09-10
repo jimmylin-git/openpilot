@@ -71,6 +71,8 @@ VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "cybertruck_clu
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "wheel.png"
 FOLLOW_GAP_LANE_ICON_PATH = CLUSTER_DIR / "assets" / "FCD_Lane.png"
 BACKGROUND_IMAGE_PATH = CLUSTER_DIR / "assets" / "bg.png"
+BACKGROUND_IMAGE_DAY_PATH = CLUSTER_DIR / "assets" / "bg_day.png"
+BACKGROUND_IMAGE_NIGHT_PATH = CLUSTER_DIR / "assets" / "bg_night.png"
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
@@ -512,7 +514,8 @@ class ClusterUiRenderer:
         self._lfa_texture = None
         self._lfa_active_texture = None
         self._follow_gap_lane_texture = None
-        self._background_texture = None
+        self._background_texture_day = None
+        self._background_texture_night = None
         self._route_video_texture = None
         self._route_video_size: tuple[int, int] | None = None
         self._route_video_frame_id: str | None = None
@@ -648,9 +651,12 @@ class ClusterUiRenderer:
         if self._follow_gap_lane_texture is not None:
             rl.unload_texture(self._follow_gap_lane_texture)
             self._follow_gap_lane_texture = None
-        if self._background_texture is not None:
-            rl.unload_texture(self._background_texture)
-            self._background_texture = None
+        if self._background_texture_day is not None:
+            rl.unload_texture(self._background_texture_day)
+            self._background_texture_day = None
+        if self._background_texture_night is not None:
+            rl.unload_texture(self._background_texture_night)
+            self._background_texture_night = None
         if self._owns_font and self._font is not None:
             rl.unload_font(self._font)
         self._font = None
@@ -784,14 +790,15 @@ class ClusterUiRenderer:
         rl.clear_background(rl_color(theme.bg))
         self._profile_add("render_world.clear_background", profile_stage)
         profile_stage = self._profile_start()
-        self._draw_background_image()
+        self._draw_background_image(theme)
         self._profile_add("render_world.background_image", profile_stage)
         profile_stage = self._profile_start()
         self._draw_scene(scene, state)
         self._profile_add("render_world.draw_scene", profile_stage)
 
-    def _draw_background_image(self) -> None:
-        if self._background_texture is None:
+    def _draw_background_image(self, theme: ClusterTheme) -> None:
+        background_texture = self._background_texture_night if theme.is_dark else self._background_texture_day
+        if background_texture is None:
             return
         sx = self.width / DESIGN_WIDTH
         sy = self.height / DESIGN_HEIGHT
@@ -799,12 +806,12 @@ class ClusterUiRenderer:
         rl.rl_scalef(sx, sy, 1.0)
         try:
             rl.draw_texture_pro(
-                self._background_texture,
+                background_texture,
                 rl.Rectangle(
                     0.0,
                     0.0,
-                    float(self._background_texture.width),
-                    float(self._background_texture.height),
+                    float(background_texture.width),
+                    float(background_texture.height),
                 ),
                 rl.Rectangle(0.0, 0.0, DESIGN_WIDTH, DESIGN_HEIGHT),
                 rl.Vector2(0.0, 0.0),
@@ -1361,8 +1368,16 @@ class ClusterUiRenderer:
             self._vehicle_model = None
 
     def _load_drive_status_textures(self) -> None:
-        if self._background_texture is None:
-            self._background_texture = self._load_icon_texture(BACKGROUND_IMAGE_PATH, "Cluster background")
+        if self._background_texture_day is None:
+            self._background_texture_day = self._load_icon_texture(
+                BACKGROUND_IMAGE_DAY_PATH if BACKGROUND_IMAGE_DAY_PATH.exists() else BACKGROUND_IMAGE_PATH,
+                "Cluster background (day)",
+            )
+        if self._background_texture_night is None:
+            self._background_texture_night = self._load_icon_texture(
+                BACKGROUND_IMAGE_NIGHT_PATH if BACKGROUND_IMAGE_NIGHT_PATH.exists() else BACKGROUND_IMAGE_PATH,
+                "Cluster background (night)",
+            )
         if self._lfa_texture is None:
             self._lfa_texture = self._load_icon_texture(LFA_ICON_PATH, "LFA")
         if self._lfa_active_texture is None:

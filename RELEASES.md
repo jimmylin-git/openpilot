@@ -1,5 +1,6 @@
 Version 0.10.3 r3 (2026-09-10) -- cluster lane-center locking
 ===============================================================
+* Cluster background switches between bg_day.png and bg_night.png based on the current cluster theme (day/night/auto)
 * Cluster lane-center locking keeps ego and detected vehicle boxes centered in their lanes, with smooth release during lane changes
 * Static Cluster background image and offroad 5% brightness
 
