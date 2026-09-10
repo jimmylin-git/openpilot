@@ -63,6 +63,13 @@ PATH_BLOCKER_LANE_TOLERANCE = 0.42
 NO_STEERING_CURVE = 0.0
 LANE_CENTER_LOCK_START = 0.22
 LANE_CENTER_LOCK_END = 0.45
+# Lane lines (and detected front vehicle boxes) below this modelV2 confidence
+# are hidden entirely instead of drawn faintly.
+LANE_MARKING_MIN_CONFIDENCE = 0.60
+FRONT_VEHICLE_MIN_CONFIDENCE = 0.60
+# Detected vehicles fade out smoothly as confidence drops toward the cutoff
+# above, instead of popping to/from full opacity.
+FRONT_VEHICLE_FADE_RANGE = 0.20
 RADAR_VEHICLE_MIN_VALID_COUNT = 20
 RADAR_VEHICLE_MAX_DISTANCE_M = 150.0
 RADAR_VEHICLE_MAX_LATERAL_LANES = 2.75
@@ -107,10 +114,11 @@ DRIVE_CAMERA_EGO_BOTTOM_POSITION_M = (0.0, -6.0, 5.00)
 DRIVE_CAMERA_EGO_BOTTOM_TARGET_M = (0.0, 14.0, -0.20)
 DRIVE_CAMERA_TARGET_Z_M = 0.60
 # Tilts the camera target upward, which shifts the whole 3D scene (road, lane
-# lines, and the ego vehicle model together) further down on screen. Solved so
-# the ego vehicle's rear/bottom edge sits ~5px above the 1920x720 design
+# lines, and the ego vehicle model together) further down on screen. Solved
+# (via perspective projection of the ego vehicle box) so that roughly the
+# bottom third of the ego vehicle model sits below the 1920x720 design
 # canvas's bottom edge in the default drive camera view.
-SCENE_CAMERA_VERTICAL_DROP_M = 2.18
+SCENE_CAMERA_VERTICAL_DROP_M = 4.11
 DRIVE_VIEW_REAR_RELATIVE_M = -5.0
 DRIVE_VIEW_REAR_ROAD_MARGIN_M = 8.0
 LONGITUDINAL_RENDER_DISTANCE_SCALE = 0.5
@@ -2498,6 +2506,25 @@ def model_line_lateral_at(
     return ordered[-1].lateral_m + lateral_shift_m
 
 
+def front_vehicle_display_confidence(probability: float) -> float | None:
+    """Maps a detected front-vehicle's raw probability to a display alpha
+    fade, or None if it should not be drawn at all.
+
+    Below FRONT_VEHICLE_MIN_CONFIDENCE the box is hidden entirely; just above
+    it, the box fades in smoothly over FRONT_VEHICLE_FADE_RANGE instead of
+    popping straight to full opacity.
+    """
+    if probability < FRONT_VEHICLE_MIN_CONFIDENCE:
+        return None
+    return smoothstep(
+        clamp(
+            (probability - FRONT_VEHICLE_MIN_CONFIDENCE) / FRONT_VEHICLE_FADE_RANGE,
+            0.0,
+            1.0,
+        )
+    )
+
+
 def radar_vehicle_confidence(point: RadarPoint) -> float:
     if point.probability is not None:
         return clamp(0.58 + point.probability * 0.38, 0.58, 0.96)
@@ -3237,12 +3264,15 @@ def build_cluster_scene(
 
     profile_stage = profile_scene_start(profile_add)
     lane_strips: list[MeshStrip] = []
-    lane_model_ms = 0.0
     lane_offset_ms = 0.0
     lane_collect_ms = 0.0
     bsd_marking_offsets = bsd_lane_marking_offsets(state)
     for marking in state.lanes:
         if not marking.visible:
+            continue
+        # Only render lane lines the model is confident about; below the
+        # threshold the line is hidden entirely rather than drawn faintly.
+        if marking.confidence < LANE_MARKING_MIN_CONFIDENCE:
             continue
         marking_specs = (
             (
@@ -3256,42 +3286,27 @@ def build_cluster_scene(
                 LANE_MARKING_HEIGHT_M,
             ),
         )
-        strip_groups: tuple[tuple[MeshStrip, ...], ...] | None = None
-        if marking.model_points:
-            profile_step = profile_scene_start(profile_add)
-            strip_groups = model_line_strip_groups(
-                marking.model_points,
-                marking.model_lateral_shift_m,
-                road_start_m,
-                road_end_m,
-                marking_specs,
-                marking.style,
-                True,
-                profile_add,
-                "scene.lane_model",
-            )
-            if profile_add is not None:
-                lane_model_ms += (time.perf_counter() - profile_step) * 1000.0
-        if strip_groups is None:
-            profile_step = profile_scene_start(profile_add)
-            strip_groups = lane_offset_strip_groups(
-                marking.offset,
-                NO_STEERING_CURVE,
-                lane_width_m,
-                road_start_m,
-                road_end_m,
-                marking_specs,
-                marking.style,
-            )
-            if profile_add is not None:
-                lane_offset_ms += (time.perf_counter() - profile_step) * 1000.0
+        # Lane lines are always drawn as straight offsets (no model curvature
+        # and no steering-based bend) so the marking.model_points curve data
+        # is intentionally not used here.
+        profile_step = profile_scene_start(profile_add)
+        strip_groups = lane_offset_strip_groups(
+            marking.offset,
+            NO_STEERING_CURVE,
+            lane_width_m,
+            road_start_m,
+            road_end_m,
+            marking_specs,
+            marking.style,
+        )
+        if profile_add is not None:
+            lane_offset_ms += (time.perf_counter() - profile_step) * 1000.0
         profile_step = profile_scene_start(profile_add)
         backing_strips, foreground_strips = strip_groups
         lane_strips.extend(backing_strips)
         lane_strips.extend(foreground_strips)
         if profile_add is not None:
             lane_collect_ms += (time.perf_counter() - profile_step) * 1000.0
-    profile_scene_add_elapsed(profile_add, "scene.build.lane_markings.model", lane_model_ms)
     profile_scene_add_elapsed(profile_add, "scene.build.lane_markings.offset", lane_offset_ms)
     profile_scene_add_elapsed(profile_add, "scene.build.lane_markings.collect", lane_collect_ms)
     profile_merge = profile_scene_start(profile_add)
@@ -3333,6 +3348,10 @@ def build_cluster_scene(
             for label in (merged_radar_point_label(vehicle) for vehicle in render_detected_vehicles)
             if label is not None
         )
+        detected_vehicle_boxes_with_confidence = tuple(
+            (detected, front_vehicle_display_confidence(detected.probability))
+            for detected in render_detected_vehicles
+        )
         detected_vehicle_boxes = tuple(
             vehicle_box(
                 clamp(detected.lateral_m / lane_width_m, -2.2, 2.2),
@@ -3341,7 +3360,7 @@ def build_cluster_scene(
                 lane_width_m,
                 vehicle_color_for_detection(detected, theme, state.radar_source_color_mode),
                 camera_active,
-                confidence=detected.probability,
+                confidence=display_confidence,
                 label=detected.label,
                 source=detected.source,
                 longitudinal_m=detected.longitudinal_m,
@@ -3361,22 +3380,8 @@ def build_cluster_scene(
                 x_offset_m=relative_scene_x_offset_m,
                 model_curve_state=state,
             )
-            for detected in render_detected_vehicles
-        )
-        blocking_detected_vehicles = tuple(
-            detected for detected in state.detected_vehicles if vehicle_blocks_path(detected)
-        )
-        detected_blockers = tuple(
-            PathBlocker(
-                clamp(
-                    lane_center_locked_offset(detected.lateral_m / lane_width_m),
-                    -2.2,
-                    2.2,
-                ),
-                render_scene_forward_m(detected.longitudinal_m),
-                VEHICLE_LENGTH_M,
-            )
-            for detected in blocking_detected_vehicles
+            for detected, display_confidence in detected_vehicle_boxes_with_confidence
+            if display_confidence is not None
         )
         visible_radar_vehicle_pairs = tuple(
             (point, box)
@@ -3386,22 +3391,12 @@ def build_cluster_scene(
         )
         visible_radar_vehicle_points = tuple(point for point, _ in visible_radar_vehicle_pairs)
         visible_radar_vehicle_boxes_raw = tuple(box for _, box in visible_radar_vehicle_pairs)
-        radar_blockers = tuple(
-            PathBlocker(
-                clamp(vehicle.center.x / lane_width_m, -2.2, 2.2),
-                vehicle.center.y,
-                vehicle.length_m,
-            )
-            for vehicle in visible_radar_vehicle_boxes_raw
-        )
         visible_radar_vehicle_boxes = tuple(
             vehicle_box_with_x_offset(vehicle, relative_scene_x_offset_m)
             for vehicle in visible_radar_vehicle_boxes_raw
         )
-        blockers = (*detected_blockers, *radar_blockers)
         vehicles = (ego_vehicle, *detected_vehicle_boxes, *visible_radar_vehicle_boxes)
     else:
-        blockers = ()
         vehicles = (ego_vehicle,)
     profile_scene_add(profile_add, "scene.build.vehicles", profile_stage)
 
@@ -3418,9 +3413,9 @@ def build_cluster_scene(
     profile_scene_add(profile_add, "scene.build.road_edges.merge", profile_merge)
     profile_scene_add(profile_add, "scene.build.road_edges", profile_stage)
 
-    profile_stage = profile_scene_start(profile_add)
-    planned_path = planned_path_strips(state, lane_width_m, blockers, theme, profile_add)
-    profile_scene_add(profile_add, "scene.build.planned_path", profile_stage)
+    # The blue planned/follow path line is intentionally not rendered; only
+    # lane lines are drawn for lateral guidance now.
+    planned_path: tuple[MeshStrip, ...] = ()
 
     profile_stage = profile_scene_start(profile_add)
     hidden_merged_radar_points = tuple(point for point in state.radar_points if point.label in merged_radar_labels)

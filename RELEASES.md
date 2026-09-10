@@ -1,3 +1,10 @@
+Version 0.10.3 r3 (2026-09-11) -- cluster 3D scene rework
+===============================================================
+* Whole 3D scene shifted further down so roughly the bottom third of the ego vehicle box is below the screen edge
+* Blue planned/follow path line removed; only lane lines remain for lateral guidance
+* Lane lines are always drawn perfectly straight (model curvature and steering-based bend no longer applied), and are hidden below 60% modelV2 confidence, naturally producing single/two-lane-left/two-lane-right/three-lane layouts
+* Detected front vehicle boxes are hidden below 60% confidence and fade in smoothly instead of popping to full opacity
+
 Version 0.10.3 r3 (2026-09-10) -- cluster lane-center locking
 ===============================================================
 * Cluster background switches between bg_day.png and bg_night.png based on the current cluster theme (day/night/auto)

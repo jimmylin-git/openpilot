@@ -226,6 +226,12 @@ class RouteReplayFrame:
     lateral_plan_debug_text: str | None = None
     lateral_plan_curvatures: tuple[float, ...] = ()
     lateral_plan_curvature_rates: tuple[float, ...] = ()
+    # modelV2 laneLineProbs confidence (0..1) per lane line, used to decide
+    # which lane lines are confident enough to render.
+    left_lane_prob: float = 1.0
+    right_lane_prob: float = 1.0
+    outer_left_lane_prob: float = 0.0
+    outer_right_lane_prob: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1213,6 +1219,10 @@ class RouteLogParser:
             lateral_plan_debug_text=self.lateral_plan_debug_text,
             lateral_plan_curvatures=self.lateral_plan_curvatures,
             lateral_plan_curvature_rates=self.lateral_plan_curvature_rates,
+            left_lane_prob=self.left_lane_prob,
+            right_lane_prob=self.right_lane_prob,
+            outer_left_lane_prob=self.outer_left_lane_prob,
+            outer_right_lane_prob=self.outer_right_lane_prob,
         )
 
     def _display_speed_kph_from_car_state(self, car_state: Any, fallback_speed_mps: float) -> float:
@@ -2379,6 +2389,10 @@ def blend_frames(left: RouteReplayFrame, right: RouteReplayFrame, amount: float)
         lateral_plan_debug_text=discrete.lateral_plan_debug_text,
         lateral_plan_curvatures=discrete.lateral_plan_curvatures,
         lateral_plan_curvature_rates=discrete.lateral_plan_curvature_rates,
+        left_lane_prob=lerp(left.left_lane_prob, right.left_lane_prob),
+        right_lane_prob=lerp(left.right_lane_prob, right.right_lane_prob),
+        outer_left_lane_prob=lerp(left.outer_left_lane_prob, right.outer_left_lane_prob),
+        outer_right_lane_prob=lerp(left.outer_right_lane_prob, right.outer_right_lane_prob),
     )
 
 
@@ -2419,12 +2433,14 @@ def lanes_for_frame(
             style = frame.left_lane_style
             visible = left_inner_visible
             width = 7
+            confidence = frame.left_lane_prob
         elif index == 2:
             offset = right_inner
             color = right_inner_color
             style = frame.right_lane_style
             visible = right_inner_visible
             width = 7
+            confidence = frame.right_lane_prob
         elif index == 0:
             offset = model_lane_offset_for_index(
                 index,
@@ -2438,6 +2454,7 @@ def lanes_for_frame(
             style = model_lane_style_for_index(index)
             visible = frame.extra_left_lane_visible
             width = 5
+            confidence = frame.outer_left_lane_prob
         elif index == 3:
             offset = model_lane_offset_for_index(
                 index,
@@ -2451,6 +2468,7 @@ def lanes_for_frame(
             style = model_lane_style_for_index(index)
             visible = frame.extra_right_lane_visible
             width = 5
+            confidence = frame.outer_right_lane_prob
         else:
             offset = model_lane_offset_for_index(
                 index,
@@ -2464,6 +2482,7 @@ def lanes_for_frame(
             style = model_lane_style_for_index(index)
             visible = True
             width = 5
+            confidence = 1.0
         visible = visible and lane_offset_inside_road_edges(
             offset,
             left_road_edge_offset,
@@ -2484,6 +2503,7 @@ def lanes_for_frame(
                     lane_grid_offset,
                     use_animated_lane_grid,
                 ),
+                confidence=confidence,
             )
         )
     if markings:
@@ -2511,6 +2531,7 @@ def lanes_for_frame(
                     lane_grid_offset,
                     use_animated_lane_grid,
                 ),
+                confidence=frame.outer_left_lane_prob,
             )
         )
     left_inner_points = model_line_at(frame.model_lane_lines, 1)
@@ -2533,6 +2554,7 @@ def lanes_for_frame(
                 lane_grid_offset,
                 use_animated_lane_grid,
             ),
+            confidence=frame.left_lane_prob,
         )
     )
     right_inner_points = model_line_at(frame.model_lane_lines, 2)
@@ -2555,6 +2577,7 @@ def lanes_for_frame(
                 lane_grid_offset,
                 use_animated_lane_grid,
             ),
+            confidence=frame.right_lane_prob,
         )
     )
     if use_animated_lane_grid and frame.lane_change == "right":
@@ -2579,6 +2602,7 @@ def lanes_for_frame(
                     lane_grid_offset,
                     use_animated_lane_grid,
                 ),
+                confidence=frame.outer_right_lane_prob,
             )
         )
     return tuple(markings)

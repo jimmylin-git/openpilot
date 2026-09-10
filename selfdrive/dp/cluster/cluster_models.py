@@ -49,6 +49,9 @@ class LaneMarking:
     width: int = 5
     model_points: tuple[ModelPathPoint, ...] = ()
     model_lateral_shift_m: float = 0.0
+    # Detection confidence (0..1) for this specific lane line, e.g. modelV2's
+    # laneLineProbs. Lines below the render threshold are hidden entirely.
+    confidence: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,5 +1,6 @@
-dragonpilot 0.10.3 r3 (2026-09-10)
+dragonpilot 0.10.3 r3 (2026-09-11)
 =======================
+* ✨ UI: Cluster 3D scene rework - camera drop, straight confidence-gated lane lines, faded lead vehicle boxes, blue path line removed (2026-09-11)
 * ✨ UI: Cluster day/night background image switching (2026-09-10)
 * ✨ UI: Cluster lane-center locking for ego and detected vehicles (2026-09-10)
 * ✨ UI: Custom TFT Gauge Cluster Display (2026-09-09)
