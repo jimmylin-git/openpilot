@@ -5,6 +5,7 @@ Version 0.10.3 r3 (2026-09-12) -- BMW-style fixed 3-lane cluster scene
 * Detected vehicles are now filtered to only show ones ahead of the ego car within its own lane plus one adjacent lane on each side (front / front-left / front-right)
 * Ego's own lane is now always highlighted - blue when cruise is not engaged, green when ACC is engaged - with smooth lane-change transitions reusing the existing lane-offset animation
 * The locked/primary lead vehicle (vision or radar-fused) now turns green once ACC has locked onto it, instead of the default gray
+* Road edges, all lane markings, lane highlights, and vehicle orientation are now fixed to the static three-lane diagram; vehicle boxes may only move smoothly sideways while transitioning between the front-left, front, and front-right lanes
 
 Version 0.10.3 r3 (2026-09-11) -- cluster 3D scene rework
 ===============================================================

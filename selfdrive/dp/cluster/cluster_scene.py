@@ -74,6 +74,7 @@ FRONT_VEHICLE_FADE_RANGE = 0.20
 # adjacent lane on each side (front / front-left / front-right) are drawn,
 # in lane-width units.
 FRONT_VEHICLE_LANE_RANGE_LANES = 1.5
+FIXED_THREE_LANE_MARKING_OFFSETS = (-1.5, -0.5, 0.5, 1.5)
 RADAR_VEHICLE_MIN_VALID_COUNT = 20
 RADAR_VEHICLE_MAX_DISTANCE_M = 150.0
 RADAR_VEHICLE_MAX_LATERAL_LANES = 2.75
@@ -404,19 +405,9 @@ def vehicle_heading(
     lane_width_m: float,
     target_offset: float | None = None,
 ) -> tuple[float, float, float, float]:
-    road_slope = 2.0 * clamp(steering, -1.0, 1.0) * ROAD_CURVE_M_PER_M2 * forward_m
-    lane_change_slope = 0.0
-    if target_offset is not None:
-        lane_delta_m = (target_offset - offset) * lane_width_m
-        lane_change_slope = clamp(
-            lane_delta_m / 18.0,
-            -VEHICLE_LANE_CHANGE_SLOPE,
-            VEHICLE_LANE_CHANGE_SLOPE,
-        )
-    forward_x, forward_y = normalize2(road_slope + lane_change_slope, 1.0)
-    right_x = forward_y
-    right_y = -forward_x
-    return right_x, right_y, forward_x, forward_y
+    # The driving view is a fixed three-lane diagram: vehicle boxes move
+    # sideways during lane changes but always remain aligned with the road.
+    return 1.0, 0.0, 0.0, 1.0
 
 
 def sample_range(start_m: float, end_m: float, steps: int) -> tuple[float, ...]:
@@ -1871,7 +1862,7 @@ def radar_point_markers(
     for point in state.radar_points:
         if radar_point_hidden_by_vehicle_box(point, vehicle_points, state):
             continue
-        if abs(point.lateral_m / lane_width_m) > FRONT_VEHICLE_LANE_RANGE_LANES:
+        if not point_in_forward_display_lanes(point, lane_width_m):
             continue
         forward_m = render_scene_forward_m(point.longitudinal_m)
         if forward_m < min_forward_m or forward_m > max_forward_m:
@@ -2186,15 +2177,11 @@ def radar_vehicle_box(
     alpha = int(92 + 163 * confidence)
     body_color = vehicle_color_for_source("radarPoint", theme, state.radar_source_color_mode)
     forward_m = render_scene_forward_m(point.longitudinal_m)
-    # point.lateral_m is a raw ego-frame straight-line offset (like detected
-    # vehicles' lateral_m); add the same road curve compensation used elsewhere
-    # so radar-only points line up with the (possibly curving) lane markings
-    # instead of drifting into neighboring lanes on a curve.
     locked_offset = lane_center_locked_offset(point.lateral_m / lane_width_m)
     center_x_m = clamp(
-        locked_offset * lane_width_m + road_curve_m_for_state(state, forward_m),
-        -lane_width_m * 3.0,
-        lane_width_m * 3.0,
+        locked_offset * lane_width_m,
+        -lane_width_m * FRONT_VEHICLE_LANE_RANGE_LANES,
+        lane_width_m * FRONT_VEHICLE_LANE_RANGE_LANES,
     )
     return VehicleBox(
         center=Vec3(center_x_m, forward_m, VEHICLE_HEIGHT_M * 0.5),
@@ -2563,13 +2550,13 @@ def vehicle_in_forward_display_lanes(vehicle: DetectedVehicle, lane_width_m: flo
     displayed - matching the fixed 3-lane layout."""
     if vehicle.longitudinal_m <= 0.0:
         return False
-    return abs(vehicle.lateral_m / lane_width_m) <= FRONT_VEHICLE_LANE_RANGE_LANES
+    return abs(vehicle.lateral_m / lane_width_m) < FRONT_VEHICLE_LANE_RANGE_LANES
 
 
 def point_in_forward_display_lanes(point: RadarPoint, lane_width_m: float) -> bool:
     if point.longitudinal_m <= 0.0:
         return False
-    return abs(point.lateral_m / lane_width_m) <= FRONT_VEHICLE_LANE_RANGE_LANES
+    return abs(point.lateral_m / lane_width_m) < FRONT_VEHICLE_LANE_RANGE_LANES
 
 
 def vehicle_locked_lead_color(
@@ -2639,16 +2626,8 @@ def vehicle_box(
     confidence = clamp(confidence, 0.0, 1.0)
     alpha = int(92 + 163 * confidence)
     body_color = color
-    # Prefer the live model path's real road curvature (when available) over the
-    # synthetic steering-based curve so this box lines up with the lane markings,
-    # which also render from live model data when it is available.
-    curve_m = (
-        road_curve_m_for_state(model_curve_state, forward_m)
-        if model_curve_state is not None
-        else road_curve_m(forward_m, steering)
-    )
     offset = lane_center_locked_offset(offset, enabled=lock_lane_center)
-    center_x_m = offset * lane_width_m + curve_m + x_offset_m
+    center_x_m = offset * lane_width_m + x_offset_m
     right_x, right_y, forward_x, forward_y = vehicle_heading(
         offset,
         forward_m,
@@ -3095,10 +3074,9 @@ def road_edge_strips(
 ) -> tuple[MeshStrip, ...]:
     def default_road_edge_strips() -> tuple[MeshStrip, ...]:
         default_color = road_edge_color(None, 1.0, theme)
-        left_offset, right_offset = road_surface_offsets(state, route_mode)
         return (
             *road_edge_offset_strips(
-                left_offset,
+                FIXED_THREE_LANE_MARKING_OFFSETS[0],
                 NO_STEERING_CURVE,
                 lane_width_m,
                 default_color,
@@ -3108,7 +3086,7 @@ def road_edge_strips(
                 theme,
             ),
             *road_edge_offset_strips(
-                right_offset,
+                FIXED_THREE_LANE_MARKING_OFFSETS[-1],
                 NO_STEERING_CURVE,
                 lane_width_m,
                 default_color,
@@ -3119,66 +3097,7 @@ def road_edge_strips(
             ),
         )
 
-    if not route_mode:
-        return default_road_edge_strips()
-
-    strips: list[MeshStrip] = []
-    if state.left_road_edge_offset is not None or state.left_road_edge_points:
-        left_color = road_edge_color(state.left_road_edge_distance_m, state.left_road_edge_confidence, theme)
-        if state.left_road_edge_points:
-            strips.extend(
-                road_edge_model_strips(
-                    state.left_road_edge_points,
-                    state.left_road_edge_lateral_shift_m,
-                    left_color,
-                    -1.0,
-                    road_start_m,
-                    road_end_m,
-                    theme,
-                )
-            )
-        elif state.left_road_edge_offset is not None:
-            strips.extend(
-                road_edge_offset_strips(
-                    clamp(state.left_road_edge_offset, -2.8, -0.68),
-                    NO_STEERING_CURVE,
-                    lane_width_m,
-                    left_color,
-                    -1.0,
-                    road_start_m,
-                    road_end_m,
-                    theme,
-                )
-            )
-    if state.right_road_edge_offset is not None or state.right_road_edge_points:
-        right_color = road_edge_color(state.right_road_edge_distance_m, state.right_road_edge_confidence, theme)
-        if state.right_road_edge_points:
-            strips.extend(
-                road_edge_model_strips(
-                    state.right_road_edge_points,
-                    state.right_road_edge_lateral_shift_m,
-                    right_color,
-                    1.0,
-                    road_start_m,
-                    road_end_m,
-                    theme,
-                    profile_add,
-                )
-            )
-        elif state.right_road_edge_offset is not None:
-            strips.extend(
-                road_edge_offset_strips(
-                    clamp(state.right_road_edge_offset, 0.68, 2.8),
-                    NO_STEERING_CURVE,
-                    lane_width_m,
-                    right_color,
-                    1.0,
-                    road_start_m,
-                    road_end_m,
-                    theme,
-                )
-            )
-    return tuple(strips)
+    return default_road_edge_strips()
 
 
 def profile_scene_start(profile_add: ProfileAdd | None) -> float:
@@ -3264,9 +3183,9 @@ def build_cluster_scene(
     display_detected_vehicles = detected_vehicles_without_zero_radar_samples(state.detected_vehicles)
     if display_radar_points is not state.radar_points or display_detected_vehicles != state.detected_vehicles:
         state = replace(state, radar_points=display_radar_points, detected_vehicles=display_detected_vehicles)
-    anchor_x_m = ego_anchor_x_m(state, lane_width_m)
-    scene_shift_x_m = -anchor_x_m
-    relative_scene_x_offset_m = -scene_shift_x_m
+    anchor_x_m = 0.0
+    scene_shift_x_m = 0.0
+    relative_scene_x_offset_m = 0.0
     camera = scene_camera(state, lane_width_m, anchor_x_m)
     camera_active = state.surround_view_active
     selected_radar_vehicle_points = radar_vehicle_points(state, lane_width_m)
@@ -3335,9 +3254,13 @@ def build_cluster_scene(
     lane_offset_ms = 0.0
     lane_collect_ms = 0.0
     bsd_marking_offsets = bsd_lane_marking_offsets(state)
-    for marking in state.lanes:
-        if not marking.visible:
-            continue
+    fixed_lane_markings = (
+        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[0], BLUE_SOFT, "solid", width=5),
+        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[1], BLUE, "solid", width=7),
+        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[2], BLUE, "solid", width=7),
+        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[3], BLUE_SOFT, "solid", width=5),
+    )
+    for marking in fixed_lane_markings:
         marking_specs = (
             (
                 marking.width + LANE_MARKING_BORDER_EXTRA_WIDTH_PX,
