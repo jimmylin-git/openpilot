@@ -80,14 +80,18 @@ RADAR_VEHICLE_MAX_DISTANCE_M = 150.0
 RADAR_VEHICLE_MAX_LATERAL_LANES = 2.75
 # Faint ground grid lines drawn across the fixed 3-lane band to convey forward
 # motion, since the lane lines themselves are now perfectly straight/static.
-GROUND_GRID_SPACING_M = 4.0
-GROUND_GRID_LINE_WIDTH_M = 0.05
+GROUND_GRID_SPACING_M = 1.5
+GROUND_GRID_LATERAL_SPACING_M = 0.25
+GROUND_GRID_LINE_WIDTH_M = 0.025
 GROUND_GRID_HALF_WIDTH_LANES = 1.5
 # Must sit above the lane/highlight floor tints (max height 0.006 m) so it is
 # not depth-occluded by them, but stay below the lane marking/road edge
 # layers (>= 0.026 m) so it never covers the actual lane lines.
 GROUND_GRID_HEIGHT_M = 0.008
-GROUND_GRID_ALPHA = 34
+GROUND_GRID_DAY_COLOR = (120, 154, 188)
+GROUND_GRID_NIGHT_COLOR = (74, 116, 164)
+GROUND_GRID_DAY_ALPHA = 54
+GROUND_GRID_NIGHT_ALPHA = 76
 RADAR_ROAD_EDGE_HARD_CLEARANCE_M = 0.55
 RADAR_ROAD_EDGE_STATIONARY_CLEARANCE_M = 1.05
 RADAR_ROAD_EDGE_OUTSIDE_MARGIN_M = 0.25
@@ -484,12 +488,16 @@ def ground_grid_strips(
     theme: ClusterTheme,
     ground_scroll_m: float,
 ) -> tuple[MeshStrip, ...]:
-    """Faint transverse tick lines spanning the fixed 3-lane band, scrolling
-    toward the camera as the car drives so the ground conveys forward motion
-    even though the lane lines themselves are perfectly straight/static."""
+    """Dense perspective grid spanning the fixed 3-lane band.
+
+    Transverse lines scroll toward the camera as the car drives. Longitudinal
+    lines remain fixed in the lane frame, matching the reference HUD grid.
+    """
     half_width_m = GROUND_GRID_HALF_WIDTH_LANES * lane_width_m
     half_line_m = GROUND_GRID_LINE_WIDTH_M * 0.5
-    color = rgba(theme.faint, GROUND_GRID_ALPHA)
+    grid_color = GROUND_GRID_NIGHT_COLOR if theme.is_dark else GROUND_GRID_DAY_COLOR
+    grid_alpha = GROUND_GRID_NIGHT_ALPHA if theme.is_dark else GROUND_GRID_DAY_ALPHA
+    color = rgba(grid_color, grid_alpha)
     # Negative offset so the tick lines march toward the camera (down the
     # screen) as ground_scroll_m accumulates with forward travel, instead of
     # away from the camera.
@@ -512,6 +520,23 @@ def ground_grid_strips(
                 )
             )
         forward_m += GROUND_GRID_SPACING_M
+    lateral_step_m = lane_width_m * GROUND_GRID_LATERAL_SPACING_M
+    lateral_m = -half_width_m
+    while lateral_m <= half_width_m + half_line_m:
+        strips.append(
+            MeshStrip(
+                left=(
+                    Vec3(lateral_m - half_line_m, road_start_m, GROUND_GRID_HEIGHT_M),
+                    Vec3(lateral_m + half_line_m, road_start_m, GROUND_GRID_HEIGHT_M),
+                ),
+                right=(
+                    Vec3(lateral_m - half_line_m, road_end_m, GROUND_GRID_HEIGHT_M),
+                    Vec3(lateral_m + half_line_m, road_end_m, GROUND_GRID_HEIGHT_M),
+                ),
+                color=color,
+            )
+        )
+        lateral_m += lateral_step_m
     return tuple(strips)
 
 
