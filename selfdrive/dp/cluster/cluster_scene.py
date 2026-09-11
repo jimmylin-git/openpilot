@@ -66,7 +66,7 @@ LANE_CENTER_LOCK_END = 0.45
 # Detected front vehicle boxes below this modelV2 confidence are hidden
 # entirely instead of drawn faintly. Lane lines always render at a fixed
 # 3-lane layout regardless of confidence (see build_cluster_scene()).
-FRONT_VEHICLE_MIN_CONFIDENCE = 0.60
+FRONT_VEHICLE_MIN_CONFIDENCE = 0.80
 # Detected vehicles fade out smoothly as confidence drops toward the cutoff
 # above, instead of popping to/from full opacity.
 FRONT_VEHICLE_FADE_RANGE = 0.20
@@ -3450,14 +3450,9 @@ def build_cluster_scene(
 
     profile_stage = profile_scene_start(profile_add)
     hidden_merged_radar_points = tuple(point for point in state.radar_points if point.label in merged_radar_labels)
-    radar_points = radar_point_markers(
-        state,
-        lane_width_m,
-        (*selected_radar_vehicle_points, *hidden_merged_radar_points),
-        min_forward_m=road_start_m,
-        max_forward_m=road_end_m if camera_active else ROAD_FAR_M + 30.0,
-        x_offset_m=relative_scene_x_offset_m,
-    )
+    # Radar points are used for vehicle fusion/boxes, but their small marker
+    # cubes are intentionally not rendered in the fixed 3-lane HUD.
+    radar_points: tuple[RadarPointMarker, ...] = ()
     profile_scene_add(profile_add, "scene.build.radar_points", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)

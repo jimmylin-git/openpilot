@@ -2222,7 +2222,7 @@ def route_lane_animation_values(
 
     if frame.lane_change_phase == "changing":
         if LANE_CHANGE_MODEL_DIRECT_ONLY:
-            ego_lane_offset = direction_sign * clamp(frame.lane_change_progress, 0.0, 1.0)
+            ego_lane_offset = direction_sign * smootherstep(frame.lane_change_progress)
             return ego_lane_offset, 0.0, 0.0, highlight_lane_offset, True
 
         lane_grid_offset = 0.0
@@ -2243,19 +2243,25 @@ def route_lane_animation_values(
                 0.0,
                 1.0,
             )
-            ego_lane_offset = direction_sign * smoothstep(change_progress)
+            ego_lane_offset = direction_sign * smootherstep(change_progress)
         else:
-            ego_lane_offset = direction_sign * smoothstep(frame.lane_change_progress)
+            ego_lane_offset = direction_sign * smootherstep(frame.lane_change_progress)
         return ego_lane_offset, lane_grid_offset, lane_grid_offset, highlight_lane_offset, True
 
     if frame.lane_change_phase == "recentering":
-        recenter_blend = smoothstep(frame.lane_change_progress)
-        start_ego_offset = direction_sign * smoothstep(frame.lane_change_recenter_start_progress)
+        recenter_blend = smootherstep(frame.lane_change_progress)
+        start_ego_offset = direction_sign * smootherstep(frame.lane_change_recenter_start_progress)
         lane_grid_offset = -direction_sign * recenter_blend
         ego_lane_offset = start_ego_offset * (1.0 - recenter_blend) + observed_ego_lane_offset * recenter_blend
         return ego_lane_offset, lane_grid_offset, lane_grid_offset, None, True
 
     return observed_ego_lane_offset, 0.0, 0.0, None, False
+
+
+def smootherstep(value: float) -> float:
+    """Quintic easing with zero velocity and acceleration at both ends."""
+    t = clamp(value, 0.0, 1.0)
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 
 
 def shifted_optional_offset(offset: float | None, shift: float) -> float | None:

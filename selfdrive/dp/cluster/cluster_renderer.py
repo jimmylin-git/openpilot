@@ -2734,7 +2734,7 @@ class ClusterUiRenderer:
 
         icon_center_x = FOLLOW_GAP_LANE_CENTER_X
         icon_size = FOLLOW_GAP_LANE_ICON_SIZE
-        icon_center_y = bottom_y - icon_size * 0.5
+        icon_center_y = TURN_SIGNAL_CENTER_Y
         icon_top_y = icon_center_y - icon_size * 0.5
         if self._follow_gap_lane_texture is not None:
             self._draw_bottom_aligned_texture_icon(
@@ -2802,7 +2802,7 @@ class ClusterUiRenderer:
         speed_color = self._cruise_set_color(state, theme)
         speed_spacing = max(1.0, TOP_CRUISE_FONT_SIZE * 0.02)
         _, speed_h = self._measure_text(speed_text, TOP_CRUISE_FONT_SIZE, speed_spacing)
-        text_center_y = bottom_y - speed_h * 0.5
+        text_center_y = TURN_SIGNAL_CENTER_Y
         self._draw_text(speed_text, TOP_CRUISE_CENTER_X, text_center_y, TOP_CRUISE_FONT_SIZE, speed_color, anchor="center")
 
     def _draw_lfa_status_icon(self, state: ClusterUiState, bottom_y: float) -> None:
@@ -2826,7 +2826,7 @@ class ClusterUiRenderer:
 
         outline = GREEN if active else theme.muted
         fill_alpha = 46 if active else 26
-        center = rl.Vector2(LFA_STATUS_CENTER_X, bottom_y - LFA_STATUS_ICON_SIZE * 0.5)
+        center = rl.Vector2(LFA_STATUS_CENTER_X, TURN_SIGNAL_CENTER_Y)
         scale = TOP_ICON_SIZE / 34.0
         rl.draw_circle_v(center, TOP_ICON_SIZE * 0.5, rl_color(outline, fill_alpha))
         rl.draw_circle_lines(int(center.x), int(center.y), TOP_ICON_SIZE * 0.5, rl_color(outline, 210))
