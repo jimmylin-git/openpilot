@@ -3129,6 +3129,16 @@ def ego_lane_cruise_color(route_mode: bool) -> Color:
     return GREEN[0], GREEN[1], GREEN[2], alpha
 
 
+def ego_lane_display_offset(state: ClusterUiState) -> float:
+    """Keep the ego-lane floor centered except during an ACC lane change."""
+    if (
+        state.cruise_display_state == "engaged"
+        and state.lane_change_phase in ("preparing", "changing", "recentering")
+    ):
+        return clamp(state.ego_lane_offset, -1.25, 1.25)
+    return 0.0
+
+
 def side_lane_fill_color(route_mode: bool) -> Color:
     alpha = SIDE_LANE_FILL_ROUTE_ALPHA if route_mode else SIDE_LANE_FILL_ALPHA
     return SIDE_LANE_FILL_COLOR[0], SIDE_LANE_FILL_COLOR[1], SIDE_LANE_FILL_COLOR[2], alpha
@@ -3198,7 +3208,11 @@ def build_cluster_scene(
     relative_scene_x_offset_m = 0.0
     camera = scene_camera(state, lane_width_m, anchor_x_m)
     camera_active = state.surround_view_active
-    selected_radar_vehicle_points = radar_vehicle_points(state, lane_width_m)
+    selected_radar_vehicle_points = tuple(
+        point
+        for point in radar_vehicle_points(state, lane_width_m)
+        if radar_vehicle_confidence(point) >= FRONT_VEHICLE_MIN_CONFIDENCE
+    )
     selected_radar_vehicle_boxes = tuple(
         radar_vehicle_box(point, state, lane_width_m, theme)
         for point in selected_radar_vehicle_points
@@ -3260,7 +3274,7 @@ def build_cluster_scene(
         ego_lane_color = ego_lane_default_color(route_mode)
     ego_lane_strip = lane_floor_strip(
         state,
-        clamp(state.ego_lane_offset, -1.25, 1.25),
+        ego_lane_display_offset(state),
         ego_lane_color,
         lane_width_m,
         road_start_m,
@@ -3327,7 +3341,7 @@ def build_cluster_scene(
 
     profile_stage = profile_scene_start(profile_add)
     ego_offset = lane_center_locked_offset(
-        clamp(state.ego_lane_offset, -1.25, 1.25),
+        ego_lane_display_offset(state),
         enabled=state.lane_change_phase != "changing",
     )
     target_offset = state.highlight_lane_offset if state.lane_change_phase == "changing" else None

@@ -801,7 +801,8 @@ class ClusterUiRenderer:
         rl.clear_background(rl_color(theme.bg))
         self._profile_add("render_world.clear_background", profile_stage)
         profile_stage = self._profile_start()
-        self._draw_background_image(theme)
+        # Keep the background-image loader and assets available, but leave the
+        # 3D scene on the plain theme background for now.
         self._profile_add("render_world.background_image", profile_stage)
         profile_stage = self._profile_start()
         self._draw_scene(scene, state)
@@ -1588,13 +1589,6 @@ class ClusterUiRenderer:
         )
         self._profile_add("draw_scene.radar_labels", profile_stage)
         profile_stage = self._profile_start()
-        self._draw_vehicle_badges(
-            scene.vehicles,
-            camera,
-            scene.scene_shift_x_m,
-            state.radar_info_mode,
-            state.radar_source_color_mode,
-        )
         self._profile_add("draw_scene.vehicle_badges", profile_stage)
 
     def _draw_strip(self, strip: MeshStrip) -> None:
