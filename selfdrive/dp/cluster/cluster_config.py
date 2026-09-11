@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 
 DESIGN_WIDTH = 1920
@@ -431,16 +430,9 @@ def normalize_cluster_radar_source_color_mode(value: object) -> int:
 
 
 def current_cluster_theme(mode: object = "auto", now: float | None = None) -> ClusterTheme:
-    normalized = normalize_cluster_theme_mode(mode)
-    if normalized == "dark":
-        return DARK_CLUSTER_THEME
-    if normalized == "light":
-        return LIGHT_CLUSTER_THEME
-
-    local_hour = time.localtime(now).tm_hour if now is not None else time.localtime().tm_hour
-    if local_hour >= AUTO_DARK_START_HOUR or local_hour < AUTO_LIGHT_START_HOUR:
-        return DARK_CLUSTER_THEME
-    return LIGHT_CLUSTER_THEME
+    # The cluster uses one consistent nighttime palette. Keep the mode
+    # argument for API compatibility while disabling day/night switching.
+    return DARK_CLUSTER_THEME
 
 
 BG = LIGHT_CLUSTER_THEME.bg

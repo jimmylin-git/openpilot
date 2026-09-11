@@ -71,8 +71,6 @@ VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "cybertruck_clu
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "wheel.png"
 FOLLOW_GAP_LANE_ICON_PATH = CLUSTER_DIR / "assets" / "FCD_Lane.png"
 BACKGROUND_IMAGE_PATH = CLUSTER_DIR / "assets" / "bg.png"
-BACKGROUND_IMAGE_DAY_PATH = CLUSTER_DIR / "assets" / "bg_day.png"
-BACKGROUND_IMAGE_NIGHT_PATH = CLUSTER_DIR / "assets" / "bg_night.png"
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
@@ -84,9 +82,7 @@ DRIVE_STATUS_ROW_HEIGHT = TURN_SIGNAL_HEAD_HALF_HEIGHT * 2.0
 DRIVE_STATUS_SCALE = DRIVE_STATUS_ROW_HEIGHT / DRIVE_STATUS_BASE_BOX_SIZE
 GEAR_STATUS_CENTER_X = 1416 + 476 * 0.5
 GEAR_STATUS_CENTER_Y = 360
-GEAR_STATUS_BOX_SIZE = DRIVE_STATUS_ROW_HEIGHT * 0.82 * 2.0
-GEAR_STATUS_FONT_SIZE = 34.0 * DRIVE_STATUS_SCALE * 0.82 * 2.0
-GEAR_STATUS_OUTLINE_WIDTH = 2.0 * DRIVE_STATUS_SCALE
+GEAR_STATUS_FONT_SIZE = 68.0 * DRIVE_STATUS_SCALE
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
@@ -112,7 +108,6 @@ TOP_CRUISE_CENTER_X = FOLLOW_GAP_LANE_CENTER_X - 142
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
 LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
 TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
-DRIVE_STATUS_BOX_RADIUS = 8.0 * DRIVE_STATUS_SCALE
 SPEED_VALUE_CENTER_X = 260 + 80
 SPEED_VALUE_CENTER_Y = 230 + 130
 SPEED_LIMIT_SIGN_CENTER_X = 460
@@ -514,8 +509,7 @@ class ClusterUiRenderer:
         self._lfa_texture = None
         self._lfa_active_texture = None
         self._follow_gap_lane_texture = None
-        self._background_texture_day = None
-        self._background_texture_night = None
+        self._background_texture = None
         self._route_video_texture = None
         self._route_video_size: tuple[int, int] | None = None
         self._route_video_frame_id: str | None = None
@@ -653,12 +647,9 @@ class ClusterUiRenderer:
         if self._follow_gap_lane_texture is not None:
             rl.unload_texture(self._follow_gap_lane_texture)
             self._follow_gap_lane_texture = None
-        if self._background_texture_day is not None:
-            rl.unload_texture(self._background_texture_day)
-            self._background_texture_day = None
-        if self._background_texture_night is not None:
-            rl.unload_texture(self._background_texture_night)
-            self._background_texture_night = None
+        if self._background_texture is not None:
+            rl.unload_texture(self._background_texture)
+            self._background_texture = None
         if self._owns_font and self._font is not None:
             rl.unload_font(self._font)
         self._font = None
@@ -801,15 +792,14 @@ class ClusterUiRenderer:
         rl.clear_background(rl_color(theme.bg))
         self._profile_add("render_world.clear_background", profile_stage)
         profile_stage = self._profile_start()
-        # Keep the background-image loader and assets available, but leave the
-        # 3D scene on the plain theme background for now.
+        self._draw_background_image(theme)
         self._profile_add("render_world.background_image", profile_stage)
         profile_stage = self._profile_start()
         self._draw_scene(scene, state)
         self._profile_add("render_world.draw_scene", profile_stage)
 
     def _draw_background_image(self, theme: ClusterTheme) -> None:
-        background_texture = self._background_texture_night if theme.is_dark else self._background_texture_day
+        background_texture = self._background_texture
         if background_texture is None:
             return
         sx = self.width / DESIGN_WIDTH
@@ -1380,15 +1370,10 @@ class ClusterUiRenderer:
             self._vehicle_model = None
 
     def _load_drive_status_textures(self) -> None:
-        if self._background_texture_day is None:
-            self._background_texture_day = self._load_icon_texture(
-                BACKGROUND_IMAGE_DAY_PATH if BACKGROUND_IMAGE_DAY_PATH.exists() else BACKGROUND_IMAGE_PATH,
-                "Cluster background (day)",
-            )
-        if self._background_texture_night is None:
-            self._background_texture_night = self._load_icon_texture(
-                BACKGROUND_IMAGE_NIGHT_PATH if BACKGROUND_IMAGE_NIGHT_PATH.exists() else BACKGROUND_IMAGE_PATH,
-                "Cluster background (night)",
+        if self._background_texture is None:
+            self._background_texture = self._load_icon_texture(
+                BACKGROUND_IMAGE_PATH,
+                "Cluster background",
             )
         if self._lfa_texture is None:
             self._lfa_texture = self._load_icon_texture(LFA_ICON_PATH, "LFA")
@@ -2674,14 +2659,13 @@ class ClusterUiRenderer:
 
         bottom_y = self._drive_status_bottom_y(state)
         gear_display = gear_text[:2] if gear_text else "-"
-        gear_color = GREEN if gear_text and gear_text != "U" else theme.muted
-        self._draw_drive_status_box(
+        self._draw_text(
             gear_display,
             GEAR_STATUS_CENTER_X,
             GEAR_STATUS_CENTER_Y,
-            GEAR_STATUS_BOX_SIZE,
             GEAR_STATUS_FONT_SIZE,
-            gear_color,
+            WHITE,
+            anchor="center",
         )
 
         self._draw_top_cruise_set(state, bottom_y)
@@ -2698,29 +2682,6 @@ class ClusterUiRenderer:
             speed_h,
         )
         return SPEED_LIMIT_SIGN_CENTER_Y - SPEED_LIMIT_SIGN_RADIUS + row_h
-
-    def _draw_drive_status_box(
-        self,
-        text: str,
-        center_x: float,
-        center_y: float,
-        box_size: float,
-        font_size: float,
-        text_color: tuple[int, int, int],
-    ) -> None:
-        box_x = center_x - box_size * 0.5
-        box_y = center_y - box_size * 0.5
-        rect = rl.Rectangle(box_x, box_y, box_size, box_size)
-        roundness = max(0.0, min(1.0, DRIVE_STATUS_BOX_RADIUS / max(1.0, box_size)))
-        rl.draw_rectangle_rounded_lines_ex(rect, roundness, 12, GEAR_STATUS_OUTLINE_WIDTH, rl_color(text_color))
-        self._draw_text(
-            text,
-            center_x,
-            center_y + 1,
-            font_size,
-            text_color,
-            anchor="center",
-        )
 
     def _draw_follow_gap_lane_icon(self, state: ClusterUiState, bottom_y: float) -> None:
         if state.cruise_gap is None:
