@@ -1,5 +1,6 @@
-dragonpilot 0.10.3 r3 (2026-09-12)
+dragonpilot 0.10.3 r3 (2026-09-13)
 =======================
+* 🛠️ UI: Cluster fixed 3-lane scene fixes - lane width no longer jitters with camera data, reverted locked-lead vehicle green coloring, added faint gray side-lane floor tint, ground grid raised above lane floor tints and drawn on top so it stays visible, ground grid scroll direction corrected to flow toward the viewer, offroad brightness dimming fixed to actually detect offroad state via deviceState (2026-09-13)
 * ✨ UI: Cluster BMW-style fixed 3-lane scene - always-on straight 3-lane layout (no confidence gating), faint scrolling ground grid for forward motion, front/front-left/front-right vehicle-only display, ego lane blue/green ACC coloring, green locked-lead vehicle coloring (2026-09-12)
 * 🛠️ UI: Cluster fixed-road refinement - road edges, all lane lines, lane highlights, and vehicle orientation are locked to a static 3-lane layout; only vehicle lane-change position transitions (2026-09-12)
 * 🛠️ UI: Cluster display switches to minimum hardware brightness (0%) while offroad (2026-09-11)

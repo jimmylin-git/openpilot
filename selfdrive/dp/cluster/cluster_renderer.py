@@ -1547,13 +1547,13 @@ class ClusterUiRenderer:
             rl.rl_translatef(scene.scene_shift_x_m, 0.0, 0.0)
         try:
             profile_stage = self._profile_start()
-            for strip in scene.ground_grid:
-                self._draw_strip(strip)
-            self._profile_add("draw_scene.ground_grid", profile_stage)
-            profile_stage = self._profile_start()
             for strip in scene.highlight_lanes:
                 self._draw_strip(strip)
             self._profile_add("draw_scene.highlight_lanes", profile_stage)
+            profile_stage = self._profile_start()
+            for strip in scene.ground_grid:
+                self._draw_strip(strip)
+            self._profile_add("draw_scene.ground_grid", profile_stage)
             profile_stage = self._profile_start()
             for strip in scene.road_edges:
                 self._draw_strip(strip)

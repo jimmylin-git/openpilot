@@ -189,7 +189,19 @@ class OpenpilotLiveSource:
         return last_update_t is not None and time.monotonic() - last_update_t <= LIVE_DATA_STALE_SECONDS
 
     def vehicle_started(self) -> bool | None:
-        """Return the current onroad state, or None until selfdriveState is available."""
+        """Return the current onroad state, or None until it can be determined.
+
+        selfdriveState is only published while openpilot is actually running
+        onroad, so relying on it alone means this always reports None while
+        offroad (its service is dead), which prevented the offroad screen
+        dimming from ever engaging. deviceState.started is published
+        continuously by thermald in both onroad and offroad states, so prefer
+        it and only fall back to selfdriveState if deviceState is unavailable.
+        """
+        if self._service_alive("deviceState") and self._service_valid("deviceState"):
+            value = safe_get(self.sm["deviceState"], "started")
+            if value is not None:
+                return bool(value)
         if not self._service_alive("selfdriveState") or not self._service_valid("selfdriveState"):
             return None
         value = safe_get(self.sm["selfdriveState"], "started")

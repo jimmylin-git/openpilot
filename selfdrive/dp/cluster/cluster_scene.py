@@ -83,8 +83,11 @@ RADAR_VEHICLE_MAX_LATERAL_LANES = 2.75
 GROUND_GRID_SPACING_M = 4.0
 GROUND_GRID_LINE_WIDTH_M = 0.05
 GROUND_GRID_HALF_WIDTH_LANES = 1.5
-GROUND_GRID_HEIGHT_M = 0.0015
-GROUND_GRID_ALPHA = 26
+# Must sit above the lane/highlight floor tints (max height 0.006 m) so it is
+# not depth-occluded by them, but stay below the lane marking/road edge
+# layers (>= 0.026 m) so it never covers the actual lane lines.
+GROUND_GRID_HEIGHT_M = 0.008
+GROUND_GRID_ALPHA = 34
 RADAR_ROAD_EDGE_HARD_CLEARANCE_M = 0.55
 RADAR_ROAD_EDGE_STATIONARY_CLEARANCE_M = 1.05
 RADAR_ROAD_EDGE_OUTSIDE_MARGIN_M = 0.25
@@ -195,6 +198,12 @@ LANE_HIGHLIGHT_ALPHA = 220
 LANE_HIGHLIGHT_ROUTE_ALPHA = 170
 EGO_LANE_CRUISE_ALPHA = 150
 EGO_LANE_CRUISE_ROUTE_ALPHA = 110
+# The two side lanes get a faint neutral-gray floor tint (distinct from both
+# the ego-lane blue/green and the gray vehicle boxes) purely so the fixed
+# 3-lane layout reads clearly even when no vehicle occupies them.
+SIDE_LANE_FILL_COLOR = (150, 158, 168)
+SIDE_LANE_FILL_ALPHA = 46
+SIDE_LANE_FILL_ROUTE_ALPHA = 34
 BSD_LANE_MARKING_MATCH_TOLERANCE = 0.45
 LANE_DASH_LENGTH_M = 5.2
 LANE_DASH_GAP_M = 4.2
@@ -481,7 +490,10 @@ def ground_grid_strips(
     half_width_m = GROUND_GRID_HALF_WIDTH_LANES * lane_width_m
     half_line_m = GROUND_GRID_LINE_WIDTH_M * 0.5
     color = rgba(theme.faint, GROUND_GRID_ALPHA)
-    scroll_offset_m = ground_scroll_m % GROUND_GRID_SPACING_M
+    # Negative offset so the tick lines march toward the camera (down the
+    # screen) as ground_scroll_m accumulates with forward travel, instead of
+    # away from the camera.
+    scroll_offset_m = -(ground_scroll_m % GROUND_GRID_SPACING_M)
     strips: list[MeshStrip] = []
     forward_m = math.floor((road_start_m - scroll_offset_m) / GROUND_GRID_SPACING_M) * GROUND_GRID_SPACING_M + scroll_offset_m
     while forward_m < road_end_m:
@@ -2559,18 +2571,6 @@ def point_in_forward_display_lanes(point: RadarPoint, lane_width_m: float) -> bo
     return abs(point.lateral_m / lane_width_m) < FRONT_VEHICLE_LANE_RANGE_LANES
 
 
-def vehicle_locked_lead_color(
-    vehicle: DetectedVehicle,
-    state: ClusterUiState,
-    theme: ClusterTheme = LIGHT_CLUSTER_THEME,
-) -> tuple[int, int, int]:
-    """The primary/leadOne vehicle turns green once ACC has locked onto it
-    (cruise engaged); otherwise vehicles keep their normal source coloring."""
-    if vehicle.primary and state.cruise_display_state == "engaged":
-        return GREEN
-    return vehicle_color_for_detection(vehicle, theme, state.radar_source_color_mode)
-
-
 def radar_vehicle_confidence(point: RadarPoint) -> float:
     if point.probability is not None:
         return clamp(0.58 + point.probability * 0.38, 0.58, 0.96)
@@ -3129,6 +3129,11 @@ def ego_lane_cruise_color(route_mode: bool) -> Color:
     return GREEN[0], GREEN[1], GREEN[2], alpha
 
 
+def side_lane_fill_color(route_mode: bool) -> Color:
+    alpha = SIDE_LANE_FILL_ROUTE_ALPHA if route_mode else SIDE_LANE_FILL_ALPHA
+    return SIDE_LANE_FILL_COLOR[0], SIDE_LANE_FILL_COLOR[1], SIDE_LANE_FILL_COLOR[2], alpha
+
+
 def bsd_lane_marking_offsets(state: ClusterUiState) -> tuple[float, ...]:
     offsets: list[float] = []
     if state.left_blindspot:
@@ -3178,7 +3183,12 @@ def build_cluster_scene(
     ground_scroll_m: float = 0.0,
 ) -> ClusterScene:
     profile_stage = profile_scene_start(profile_add)
-    lane_width_m = max(2.4, min(4.6, state.lane_width_m or DEFAULT_LANE_WIDTH_M))
+    # The displayed lane width is intentionally fixed (not derived from the
+    # camera/model's live lane_width_m) so an object's screen lane assignment
+    # never shifts just because the perceived lane width changed; only actual
+    # lateral motion moves it between the fixed front-left/front/front-right
+    # lanes. This also keeps the ego-lane highlight perfectly centered.
+    lane_width_m = DEFAULT_LANE_WIDTH_M
     display_radar_points = radar_points_for_display(state)
     display_detected_vehicles = detected_vehicles_without_zero_radar_samples(state.detected_vehicles)
     if display_radar_points is not state.radar_points or display_detected_vehicles != state.detected_vehicles:
@@ -3216,6 +3226,20 @@ def build_cluster_scene(
 
     profile_stage = profile_scene_start(profile_add)
     highlight_lanes: list[MeshStrip] = []
+    for side_offset in (FIXED_THREE_LANE_MARKING_OFFSETS[1] - 0.5, FIXED_THREE_LANE_MARKING_OFFSETS[2] + 0.5):
+        side_lane_strip = lane_floor_strip(
+            state,
+            side_offset,
+            side_lane_fill_color(route_mode),
+            lane_width_m,
+            road_start_m,
+            road_end_m,
+            road_steps,
+            route_mode,
+            0.004,
+        )
+        if side_lane_strip is not None:
+            highlight_lanes.append(side_lane_strip)
     if state.highlight_lane_offset is not None and highlight_lane_lit:
         highlight_strip = lane_floor_strip(
             state,
@@ -3349,7 +3373,7 @@ def build_cluster_scene(
                 render_scene_forward_m(detected.longitudinal_m),
                 NO_STEERING_CURVE,
                 lane_width_m,
-                vehicle_locked_lead_color(detected, state, theme),
+                vehicle_color_for_detection(detected, theme, state.radar_source_color_mode),
                 camera_active,
                 confidence=display_confidence,
                 label=detected.label,

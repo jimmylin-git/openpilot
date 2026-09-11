@@ -1,3 +1,12 @@
+Version 0.10.3 r3 (2026-09-13) -- cluster fixed 3-lane scene fixes
+===============================================================
+* Lane width is now a fixed constant instead of being derived from the live camera/model lane_width_m, so the ego lane highlight stays perfectly centered and objects no longer appear to shift lanes purely from camera-perceived lane-width noise
+* Reverted the locked/primary lead vehicle green coloring - detected vehicles now use their normal source coloring again regardless of ACC engagement
+* Added a faint gray translucent floor tint to the two side lanes (distinct from both the ego-lane blue/green and the vehicle box gray) so the fixed 3-lane layout reads clearly even when empty
+* Ground grid tick lines are now drawn above (and rendered after) the lane floor tints, and raised just high enough to avoid being depth-occluded by them, so they're actually visible
+* Ground grid now scrolls toward the viewer (down-screen) as the car drives forward, instead of the reversed direction
+* Fixed offroad screen dimming never engaging: the offroad detection relied solely on selfdriveState, which stops publishing while offroad, so it now prefers deviceState.started (published continuously in both onroad/offroad states)
+
 Version 0.10.3 r3 (2026-09-12) -- BMW-style fixed 3-lane cluster scene
 ===============================================================
 * Reverted lane-line confidence gating: lane lines now always render as a fixed straight 3-lane layout regardless of modelV2 confidence, matching a BMW-style assisted-driving cluster reference
