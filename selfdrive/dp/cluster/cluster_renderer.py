@@ -168,6 +168,10 @@ WORLD_LABEL_MIN_SCALE = 0.56
 WORLD_LABEL_TEXTURE_CACHE_LIMIT = 512
 WORLD_LABEL_TEXTURE_SIZE_GRID = 0.25
 WORLD_LABEL_TEXTURE_PADDING_PX = 4
+# Ground grid scroll: fixed slow rate while moving, no scroll while stopped
+# (not scaled by actual speed, per user request for a simple two-state feel).
+GROUND_GRID_SCROLL_SPEED_MPS = 1.2
+GROUND_GRID_MOVING_THRESHOLD_KPH = 1.0
 VEHICLE_MATERIAL_COLORS: dict[str, tuple[int, int, int, int]] = {
     "body": (156, 166, 172, 255),
     "wheel": (18, 20, 22, 255),
@@ -777,7 +781,10 @@ class ClusterUiRenderer:
         now = time.perf_counter()
         if self._ground_scroll_last_t is not None:
             dt = clamp(now - self._ground_scroll_last_t, 0.0, 0.25)
-            self._ground_scroll_m = (self._ground_scroll_m + max(0.0, state.speed_kph) / 3.6 * dt) % 100000.0
+            # Two states only: stopped (no scroll) or moving (fixed slow scroll rate),
+            # independent of actual speed so the grid doesn't race at highway speed.
+            moving_mps = GROUND_GRID_SCROLL_SPEED_MPS if state.speed_kph > GROUND_GRID_MOVING_THRESHOLD_KPH else 0.0
+            self._ground_scroll_m = (self._ground_scroll_m + moving_mps * dt) % 100000.0
         self._ground_scroll_last_t = now
         return self._ground_scroll_m
 
