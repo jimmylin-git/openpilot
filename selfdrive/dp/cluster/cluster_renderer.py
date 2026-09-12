@@ -67,6 +67,13 @@ OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
 ORBITRON_BLACK_FONT_PATH = OPENPILOT_FONT_DIR / "OrbitronBlack.ttf"
+# raylib centers text using the font's full em-box height (measure_text_ex's
+# y == the point size), but Orbitron's glyphs sit noticeably higher within
+# that box than the previous font, so anchor="center"/"left"/"right" text
+# renders visibly too high. Shift centered text down by this fraction of its
+# font size to compensate (measured from the glyph bbox vs. em-box center
+# across a range of sizes with this font, consistently ~0.11).
+TEXT_VERTICAL_CENTER_OFFSET_RATIO = 0.11
 #VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "car.obj"
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "cybertruck_cluster.obj"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "wheel.png"
@@ -85,7 +92,7 @@ DRIVE_STATUS_SCALE = DRIVE_STATUS_ROW_HEIGHT / DRIVE_STATUS_BASE_BOX_SIZE
 # text clear of the right hex panel's edges (measured solid span ~1345-1871 at y=350).
 GEAR_STATUS_CENTER_X = 1615
 GEAR_STATUS_CENTER_Y = 350
-GEAR_STATUS_FONT_SIZE = 300.0 * DRIVE_STATUS_SCALE
+GEAR_STATUS_FONT_SIZE = 150.0 * DRIVE_STATUS_SCALE
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
@@ -3044,16 +3051,13 @@ class ClusterUiRenderer:
     ) -> None:
         spacing = max(1.0, size * 0.02)
         text_width, text_height = self._measure_text(text, size, spacing)
+        vertical_correction = size * TEXT_VERTICAL_CENTER_OFFSET_RATIO
         draw_x = x
-        draw_y = y
+        draw_y = y - text_height * 0.5 + vertical_correction
         if anchor == "center":
             draw_x = x - text_width * 0.5
-            draw_y = y - text_height * 0.5
-        elif anchor == "left":
-            draw_y = y - text_height * 0.5
         elif anchor == "right":
             draw_x = x - text_width
-            draw_y = y - text_height * 0.5
         rl.draw_text_ex(self._font, text, rl.Vector2(draw_x, draw_y), size, spacing, rl_color(color))
 
     def _draw_text_with_stroke(
@@ -3100,15 +3104,12 @@ class ClusterUiRenderer:
             return
 
         draw_x = x
-        draw_y = y
+        vertical_correction = size * TEXT_VERTICAL_CENTER_OFFSET_RATIO
+        draw_y = y - cached_text.text_height * 0.5 + vertical_correction
         if anchor == "center":
             draw_x = x - cached_text.text_width * 0.5
-            draw_y = y - cached_text.text_height * 0.5
-        elif anchor == "left":
-            draw_y = y - cached_text.text_height * 0.5
         elif anchor == "right":
             draw_x = x - cached_text.text_width
-            draw_y = y - cached_text.text_height * 0.5
         draw_x -= cached_text.padding_px
         draw_y -= cached_text.padding_px
 
