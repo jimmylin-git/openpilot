@@ -66,6 +66,7 @@ OPENPILOT_FONT_DIR = SELFDRIVE_DIR / "assets" / "fonts"
 OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
+ORBITRON_BLACK_FONT_PATH = OPENPILOT_FONT_DIR / "OrbitronBlack.ttf"
 #VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "car.obj"
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "cybertruck_cluster.obj"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "wheel.png"
@@ -80,12 +81,11 @@ TURN_SIGNAL_MID_CENTER_X = (TURN_SIGNAL_LEFT_CENTER_X + TURN_SIGNAL_RIGHT_CENTER
 DRIVE_STATUS_BASE_BOX_SIZE = 46.0
 DRIVE_STATUS_ROW_HEIGHT = TURN_SIGNAL_HEAD_HALF_HEIGHT * 2.0
 DRIVE_STATUS_SCALE = DRIVE_STATUS_ROW_HEIGHT / DRIVE_STATUS_BASE_BOX_SIZE
-# Nudged left from the panel's visual mid-point (~1635) so a 5x-requested font stays
-# clear of the right hex panel's edges (measured solid span ~1345-1871 at y=350);
-# the resulting size below is capped at ~3.1x (not the full 5x) to avoid overflow.
+# Nudged left from the panel's visual mid-point (~1635) to keep the enlarged Orbitron
+# text clear of the right hex panel's edges (measured solid span ~1345-1871 at y=350).
 GEAR_STATUS_CENTER_X = 1615
 GEAR_STATUS_CENTER_Y = 350
-GEAR_STATUS_FONT_SIZE = 210.0 * DRIVE_STATUS_SCALE
+GEAR_STATUS_FONT_SIZE = 300.0 * DRIVE_STATUS_SCALE
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
@@ -1343,10 +1343,12 @@ class ClusterUiRenderer:
 
     def _font_candidates(self) -> list[Path]:
         return [
-            # 優先讀取 Inter-Bold 字型 (請依你的實際路徑調整)
+            # Preferred cluster font.
+            ORBITRON_BLACK_FONT_PATH,
+            Path("/data/openpilot/selfdrive/assets/fonts/OrbitronBlack.ttf"),
+            # 以下保留原本的候選路徑...
             OPENPILOT_FONT_DIR / "GeistMono-Light.ttf",
             Path("/data/openpilot/selfdrive/assets/fonts/GeistMono-Light.ttf"),
-            # 以下保留原本的候選路徑...
             KAIGEN_GOTHIC_KR_BOLD_FONT_PATH,
             OPENPILOT_ADDON_FONT_DIR / "KaiGenGothicKR-Bold.ttf",
             JETBRAINS_MONO_FONT_PATH,
@@ -2827,11 +2829,11 @@ class ClusterUiRenderer:
         raw_speed = state.display_speed_kph if state.display_speed_kph is not None else state.speed_kph
         display_speed_kph = raw_speed * 1.055 if raw_speed is not None else None
         speed_value = int(round(clamp(display_speed_kph, 0.0, MAX_SPEED_KPH)))
-        # Enlarged from 140/230; max is capped (not the full requested 2x) so a 3-digit
-        # value (up to MAX_SPEED_KPH) doesn't overlap the accel gauge on the left or spill
-        # past the SPEED panel's right edge at SPEED_VALUE_CENTER_X = 362.
-        base_font_size = 190
-        max_font_size = 235
+        # Orbitron renders wider per point size than the previous KaiGen font, so these
+        # were re-measured to keep a 3-digit value (up to MAX_SPEED_KPH) clear of the
+        # accel gauge on the left and the SPEED panel's right edge at center_x = 362.
+        base_font_size = 130
+        max_font_size = 165
         max_speed_ref = 100.0
         speed_ratio = min(1.0, speed_value / max_speed_ref)
         dynamic_font_size = int(base_font_size + (max_font_size - base_font_size) * speed_ratio)
