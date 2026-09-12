@@ -40,6 +40,7 @@ from cluster_config import (
     VEHICLE_LANE_CHANGE_SLOPE,
     VEHICLE_LENGTH_M,
     VEHICLE_WIDTH_M,
+    WHITE,
 )
 from cluster_models import (
     ClusterUiState,
@@ -3145,8 +3146,11 @@ def lane_highlight_color(route_mode: bool) -> Color:
 
 
 def ego_lane_default_color(route_mode: bool) -> Color:
+    # White (not the shared LANE_HIGHLIGHT_COLOR blue) so the ego lane's own
+    # floor tint is visually distinct from the lane-change target-lane
+    # highlight, which still uses that blue.
     alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
-    return LANE_HIGHLIGHT_COLOR[0], LANE_HIGHLIGHT_COLOR[1], LANE_HIGHLIGHT_COLOR[2], alpha
+    return WHITE[0], WHITE[1], WHITE[2], alpha
 
 
 def ego_lane_cruise_color(route_mode: bool) -> Color:
