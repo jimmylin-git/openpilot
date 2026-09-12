@@ -3457,7 +3457,7 @@ def build_cluster_scene(
 
     profile_stage = profile_scene_start(profile_add)
     road_surface = MeshStrip((), (), rgba(theme.road))
-    ground_grid = ground_grid_strips(lane_width_m, road_start_m, road_end_m, theme, ground_scroll_m)
+    ground_grid: tuple[MeshStrip, ...] = ()  # Ground grid removed per user request.
     profile_scene_add(profile_add, "scene.build.road_surface", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)
