@@ -80,9 +80,12 @@ TURN_SIGNAL_MID_CENTER_X = (TURN_SIGNAL_LEFT_CENTER_X + TURN_SIGNAL_RIGHT_CENTER
 DRIVE_STATUS_BASE_BOX_SIZE = 46.0
 DRIVE_STATUS_ROW_HEIGHT = TURN_SIGNAL_HEAD_HALF_HEIGHT * 2.0
 DRIVE_STATUS_SCALE = DRIVE_STATUS_ROW_HEIGHT / DRIVE_STATUS_BASE_BOX_SIZE
-GEAR_STATUS_CENTER_X = 1635
-GEAR_STATUS_CENTER_Y = 380
-GEAR_STATUS_FONT_SIZE = 68.0 * DRIVE_STATUS_SCALE
+# Nudged left from the panel's visual mid-point (~1635) so a 5x-requested font stays
+# clear of the right hex panel's edges (measured solid span ~1345-1871 at y=350);
+# the resulting size below is capped at ~3.1x (not the full 5x) to avoid overflow.
+GEAR_STATUS_CENTER_X = 1615
+GEAR_STATUS_CENTER_Y = 350
+GEAR_STATUS_FONT_SIZE = 210.0 * DRIVE_STATUS_SCALE
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
@@ -108,8 +111,11 @@ TOP_CRUISE_CENTER_X = FOLLOW_GAP_LANE_CENTER_X - 142
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
 LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
 TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
-SPEED_VALUE_CENTER_X = 285
-SPEED_VALUE_CENTER_Y = 380
+# Shifted right from the panel's SPEED label position (285) to keep the enlarged digits
+# clear of the accel gauge (right edge ~143px) while staying inside the left hex panel's
+# solid span (measured ~92-582 at y=350).
+SPEED_VALUE_CENTER_X = 362
+SPEED_VALUE_CENTER_Y = 350
 SPEED_LIMIT_SIGN_CENTER_X = 460
 SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
 SPEED_LIMIT_SIGN_RADIUS = 56.0
@@ -2698,10 +2704,12 @@ class ClusterUiRenderer:
         icon_center_y = TURN_SIGNAL_CENTER_Y
         icon_top_y = icon_center_y - icon_size * 0.5
         if self._follow_gap_lane_texture is not None:
+            # Pass icon_center_y (not bottom_y) so the texture's vertical center lands on
+            # TURN_SIGNAL_CENTER_Y, matching the gap bars drawn below and the other top-row icons.
             self._draw_bottom_aligned_texture_icon(
                 self._follow_gap_lane_texture,
                 icon_center_x,
-                bottom_y,
+                icon_center_y + icon_size * 0.5,
                 icon_size,
                 icon_size,
                 tint,
@@ -2773,10 +2781,12 @@ class ClusterUiRenderer:
         tint = WHITE if active else theme.muted
         alpha = 255 if active else 190
         rotation_deg = -float(state.steering_angle_deg or 0.0)
+        # Pass TURN_SIGNAL_CENTER_Y (not bottom_y) so the wheel.png texture's vertical center
+        # lines up with the turn signals / ACC speed / gear text on the same row.
         if self._draw_bottom_aligned_texture_icon(
             texture,
             LFA_STATUS_CENTER_X,
-            bottom_y,
+            TURN_SIGNAL_CENTER_Y + LFA_STATUS_ICON_SIZE * 0.5,
             LFA_STATUS_ICON_SIZE,
             LFA_STATUS_ICON_SIZE,
             tint,
@@ -2810,8 +2820,11 @@ class ClusterUiRenderer:
         raw_speed = state.display_speed_kph if state.display_speed_kph is not None else state.speed_kph
         display_speed_kph = raw_speed * 1.055 if raw_speed is not None else None
         speed_value = int(round(clamp(display_speed_kph, 0.0, MAX_SPEED_KPH)))
-        base_font_size = 140
-        max_font_size = 230
+        # Enlarged from 140/230; max is capped (not the full requested 2x) so a 3-digit
+        # value (up to MAX_SPEED_KPH) doesn't overlap the accel gauge on the left or spill
+        # past the SPEED panel's right edge at SPEED_VALUE_CENTER_X = 362.
+        base_font_size = 190
+        max_font_size = 235
         max_speed_ref = 100.0
         speed_ratio = min(1.0, speed_value / max_speed_ref)
         dynamic_font_size = int(base_font_size + (max_font_size - base_font_size) * speed_ratio)
