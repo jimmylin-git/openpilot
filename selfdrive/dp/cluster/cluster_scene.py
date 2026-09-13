@@ -67,7 +67,7 @@ LANE_CENTER_LOCK_END = 0.45
 # Detected front vehicle boxes below this modelV2 confidence are hidden
 # entirely instead of drawn faintly. Lane lines always render at a fixed
 # 3-lane layout regardless of confidence (see build_cluster_scene()).
-FRONT_VEHICLE_MIN_CONFIDENCE = 0.85
+FRONT_VEHICLE_MIN_CONFIDENCE = 0.80
 # Detected vehicles fade out smoothly as confidence drops toward the cutoff
 # above, instead of popping to/from full opacity.
 FRONT_VEHICLE_FADE_RANGE = 0.20
