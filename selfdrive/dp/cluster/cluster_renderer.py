@@ -79,7 +79,6 @@ VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "cybertruck_clu
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "wheel.png"
 FOLLOW_GAP_LANE_ICON_PATH = CLUSTER_DIR / "assets" / "FCD_Lane.png"
 BACKGROUND_IMAGE_PATH = CLUSTER_DIR / "assets" / "bg.png"
-ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
 TURN_SIGNAL_CENTER_Y = 120
@@ -119,9 +118,11 @@ TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
 LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
 TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 # Shifted right from the panel's SPEED label position (285) to keep the enlarged digits
-# clear of the accel gauge (right edge ~143px) while staying inside the left hex panel's
-# solid span (measured ~92-582 at y=350).
-SPEED_VALUE_CENTER_X = 362
+# clear of the accel gauge (now just a bare bar flush against the left screen edge, right
+# edge ~59px) while staying inside the left hex panel's solid span (measured ~92-582 at
+# y=350). Speed never exceeds MAX_SPEED_KPH (140), so the hundreds digit is always "1" or
+# absent, letting the block sit closer to the accel bar than a true 3-digit gauge would.
+SPEED_VALUE_CENTER_X = 300
 SPEED_VALUE_CENTER_Y = 350
 SPEED_LIMIT_SIGN_CENTER_X = 460
 SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
@@ -509,7 +510,6 @@ class ClusterUiRenderer:
         self._window_open = False
         self._font = None
         self._owns_font = False
-        self._accel_text_width = 0.0
         self._capture_target = None
         self._portrait_upload_target = None
         self._portrait_upload_target_size: tuple[int, int] | None = None
@@ -671,7 +671,6 @@ class ClusterUiRenderer:
             rl.unload_font(self._font)
         self._font = None
         self._owns_font = False
-        self._accel_text_width = 0.0
         if self._vehicle_model is not None:
             rl.unload_model(self._vehicle_model)
             self._vehicle_model = None
@@ -2882,25 +2881,28 @@ class ClusterUiRenderer:
         font_size: float,
         color: tuple[int, int, int],
     ) -> None:
-        """Draw speed_value as 3 fixed-width digit slots (hundreds/tens/ones).
+        """Draw speed_value right-aligned across 3 fixed-width digit slots.
 
         Each digit occupies the same slot width regardless of which digits are
         actually shown, so the speed readout holds a stable width/position as
         it crosses the 9->10 and 99->100 boundaries instead of re-centering.
-        Leading zero digits are simply not drawn (their slot stays empty):
-        0-9 shows only the ones digit, 10-99 shows tens+ones, 100+ shows all 3.
+        Values 0-9 draw a single digit in the tens slot, 10-99 draw two digits
+        in the tens+ones slots, and 100+ draws all three slots normally -
+        i.e. the digits stay right-aligned against the ones slot except the
+        single-digit case, which is nudged one slot left per spec.
         """
         digits = f"{speed_value:03d}"
-        show_hundreds = speed_value >= 100
-        show_tens = speed_value >= 10
-        show = (show_hundreds, show_tens, True)
+        if speed_value < 10:
+            slots = ((1, digits[2]),)
+        elif speed_value < 100:
+            slots = ((1, digits[1]), (2, digits[2]))
+        else:
+            slots = ((0, digits[0]), (1, digits[1]), (2, digits[2]))
         spacing = max(1.0, font_size * 0.02)
         digit_width = self._measure_text("0", font_size, spacing)[0]
         start_x = center_x - digit_width * 1.5
-        for i, ch in enumerate(digits):
-            if not show[i]:
-                continue
-            slot_center_x = start_x + digit_width * (i + 0.5)
+        for slot_index, ch in slots:
+            slot_center_x = start_x + digit_width * (slot_index + 0.5)
             self._draw_text(ch, slot_center_x, center_y, font_size, color, anchor="center")
 
     @staticmethod
@@ -2929,19 +2931,7 @@ class ClusterUiRenderer:
         bottom = 520
         center = (top + bottom) // 2
         gauge_width = 56
-        accel_value = 0.0 if abs(state.accel_mps2) < 0.005 else state.accel_mps2
-        accel_text = f"{accel_value:+05.2f}"
-        accel_text_x = 20
-        accel_text_size = 38
-        text_spacing = max(1.0, accel_text_size * 0.02)
-        if self._accel_text_width <= 0.0:
-            self._accel_text_width = max(
-                self._measure_text(text, accel_text_size, text_spacing)[0]
-                for text in ACCEL_TEXT_WIDTH_SAMPLES
-            )
-        text_width = self._accel_text_width
-        gauge_center_x = accel_text_x + text_width * 0.5
-        gauge_x = gauge_center_x - gauge_width * 0.5
+        gauge_x = 3
         fill_x = gauge_x + 8
         fill_width = 40
         self._rounded_rect(gauge_x, top, gauge_width, bottom - top, 18, theme.gauge_bg, theme.faint, 2)
@@ -2959,8 +2949,6 @@ class ClusterUiRenderer:
                 self._rounded_rect(fill_x, center - fill_height, fill_width, fill_height, 13, fill_color)
             else:
                 self._rounded_rect(fill_x, center, fill_width, fill_height, 13, fill_color)
-        self._draw_text(accel_text, accel_text_x, 168, accel_text_size, fill_color)
-        self._draw_text("m/s^2", gauge_center_x, 544, 21, theme.muted, anchor="center")
 
     def _turn_signal_lights(self, state: ClusterUiState) -> tuple[bool, bool]:
         now = time.perf_counter()
