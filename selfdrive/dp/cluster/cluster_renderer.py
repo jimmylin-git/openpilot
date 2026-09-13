@@ -120,8 +120,8 @@ TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 # Shifted right from the panel's SPEED label position (285) to keep the enlarged digits
 # clear of the accel gauge (now just a bare bar flush against the left screen edge, right
 # edge ~59px) while staying inside the left hex panel's solid span (measured ~92-582 at
-# y=350). Speed never exceeds MAX_SPEED_KPH (140), so the hundreds digit is always "1" or
-# absent, letting the block sit closer to the accel bar than a true 3-digit gauge would.
+# y=350). Speed never exceeds MAX_SPEED_KPH (199), so the hundreds digit is always "0" or
+# "1", letting the block sit closer to the accel bar than a wider gauge would.
 SPEED_VALUE_CENTER_X = 300
 SPEED_VALUE_CENTER_Y = 350
 SPEED_LIMIT_SIGN_CENTER_X = 460
@@ -2837,7 +2837,7 @@ class ClusterUiRenderer:
         speed_value = int(round(clamp(display_speed_kph, 0.0, MAX_SPEED_KPH)))
         # Orbitron renders wider per point size than the previous KaiGen font, so these
         # were re-measured to keep a 3-digit value (up to MAX_SPEED_KPH) clear of the
-        # accel gauge on the left and the SPEED panel's right edge at center_x = 362.
+        # accel gauge on the left and the SPEED panel's right edge at center_x = 300.
         base_font_size = 130
         max_font_size = 165
         max_speed_ref = 100.0
