@@ -2845,7 +2845,9 @@ class ClusterUiRenderer:
         speed_ratio = min(1.0, speed_value / max_speed_ref)
         dynamic_font_size = int(base_font_size + (max_font_size - base_font_size) * speed_ratio)
 
-        self._draw_text(str(speed_value), SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y, dynamic_font_size, theme.text, anchor="center")
+        self._draw_fixed_width_speed_digits(
+            speed_value, SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y, dynamic_font_size, theme.text
+        )
 
 
         if state.speed_limit_kph is not None:
@@ -2871,6 +2873,35 @@ class ClusterUiRenderer:
                     TEXT,
                     anchor="center",
                 )
+
+    def _draw_fixed_width_speed_digits(
+        self,
+        speed_value: int,
+        center_x: float,
+        center_y: float,
+        font_size: float,
+        color: tuple[int, int, int],
+    ) -> None:
+        """Draw speed_value as 3 fixed-width digit slots (hundreds/tens/ones).
+
+        Each digit occupies the same slot width regardless of which digits are
+        actually shown, so the speed readout holds a stable width/position as
+        it crosses the 9->10 and 99->100 boundaries instead of re-centering.
+        Leading zero digits are simply not drawn (their slot stays empty):
+        0-9 shows only the ones digit, 10-99 shows tens+ones, 100+ shows all 3.
+        """
+        digits = f"{speed_value:03d}"
+        show_hundreds = speed_value >= 100
+        show_tens = speed_value >= 10
+        show = (show_hundreds, show_tens, True)
+        spacing = max(1.0, font_size * 0.02)
+        digit_width = self._measure_text("0", font_size, spacing)[0]
+        start_x = center_x - digit_width * 1.5
+        for i, ch in enumerate(digits):
+            if not show[i]:
+                continue
+            slot_center_x = start_x + digit_width * (i + 0.5)
+            self._draw_text(ch, slot_center_x, center_y, font_size, color, anchor="center")
 
     @staticmethod
     def _cruise_set_visible(state: ClusterUiState) -> bool:
