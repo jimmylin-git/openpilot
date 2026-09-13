@@ -80,7 +80,14 @@ DEFAULT_H264_DIMENSION_ALIGN = 1
 THEME_PARAM_POLL_SECONDS = 1.0
 FPS_PARAM_POLL_SECONDS = 1.0
 BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
-OFFROAD_USB_BRIGHTNESS = 0
+# Not literal 0: on this TURZX hardware, sending a brightness of exactly 0
+# while the process keeps running (as opposed to the brightness-off command
+# sent right before close()/exit) has been observed to make the physical USB
+# display reset/re-enumerate, which then surfaces as a "disconnected" error
+# and crashes+relaunches the whole HUD process a few seconds after the
+# vehicle is turned off. A very low but nonzero value still reads as
+# effectively black without touching that path.
+OFFROAD_USB_BRIGHTNESS = 1
 # The offroad dim-to-black check is only trusted once the process has been
 # running this long (avoids the boot-time window where vehicle_started()
 # has not yet settled) and only after this many consecutive "offroad" polls
@@ -1064,7 +1071,16 @@ def run_demo(
                         live_source,
                         auto_enabled=usb_brightness_auto_enabled,
                     )
-                usb_display.set_brightness(next_usb_brightness)
+                try:
+                    usb_display.set_brightness(next_usb_brightness)
+                except RuntimeError as exc:
+                    # A brightness command failing (e.g. transient USB
+                    # hiccup right as the offroad dim kicks in) should not
+                    # take down the whole HUD process on its own; genuine
+                    # disconnects still surface and exit via the frame-send
+                    # path below, which autorun is designed to relaunch
+                    # after replug.
+                    print(f"Warning: set_brightness({next_usb_brightness}) failed: {exc}", flush=True)
                 next_brightness_param_read = brightness_now + BRIGHTNESS_PARAM_POLL_SECONDS
 
             if output_mode in ("window", "both"):

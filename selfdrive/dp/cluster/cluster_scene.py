@@ -1537,6 +1537,29 @@ def road_curve_m_for_state(state: ClusterUiState, forward_m: float) -> float:
     return NO_STEERING_CURVE
 
 
+def vehicle_lane_offset_from_lateral(
+    lateral_m: float,
+    longitudinal_m: float,
+    lane_width_m: float,
+    state: ClusterUiState | None,
+) -> float:
+    """Convert a sensor/model-frame lateral offset (m, measured along the
+    ego vehicle's straight-ahead axis) into a lane-relative offset (in lane
+    widths) used for lane-slot classification and locking.
+
+    On a curving road the lane itself bends away from that straight-ahead
+    axis, so a lead vehicle that is actually centered in the ego lane can
+    report a large raw lateral_m at longer distances purely from the curve,
+    which previously got it misclassified into an adjacent lane slot. This
+    subtracts the road's own curve offset at the vehicle's distance (from
+    `road_curve_m_for_state`, i.e. the live perceived model path curvature)
+    before converting to lane widths, so classification follows the actual
+    curving lane rather than a straight line.
+    """
+    curve_m = road_curve_m_for_state(state, data_scene_forward_m(longitudinal_m)) if state is not None else 0.0
+    return (lateral_m - curve_m) / lane_width_m
+
+
 def model_path_world_x(state: ClusterUiState, lane_width_m: float, forward_m: float) -> float | None:
     lateral_m = model_path_lateral_at_forward(state, scene_data_relative_forward_m(forward_m))
     if lateral_m is None:
@@ -1905,7 +1928,7 @@ def radar_point_markers(
     for point in state.radar_points:
         if radar_point_hidden_by_vehicle_box(point, vehicle_points, state):
             continue
-        if not point_in_forward_display_lanes(point, lane_width_m):
+        if not point_in_forward_display_lanes(point, lane_width_m, state):
             continue
         forward_m = render_scene_forward_m(point.longitudinal_m)
         if forward_m < min_forward_m or forward_m > max_forward_m:
@@ -2220,7 +2243,9 @@ def radar_vehicle_box(
     alpha = int(92 + 163 * confidence)
     body_color = vehicle_color_for_source("radarPoint", theme, state.radar_source_color_mode)
     forward_m = render_scene_forward_m(point.longitudinal_m)
-    locked_offset = lane_center_locked_offset(point.lateral_m / lane_width_m)
+    locked_offset = lane_center_locked_offset(
+        vehicle_lane_offset_from_lateral(point.lateral_m, point.longitudinal_m, lane_width_m, state)
+    )
     center_x_m = clamp(
         locked_offset * lane_width_m,
         -lane_width_m * FRONT_VEHICLE_LANE_RANGE_LANES,
@@ -2587,19 +2612,25 @@ def front_vehicle_display_confidence(probability: float) -> float | None:
     )
 
 
-def vehicle_in_forward_display_lanes(vehicle: DetectedVehicle, lane_width_m: float) -> bool:
+def vehicle_in_forward_display_lanes(
+    vehicle: DetectedVehicle, lane_width_m: float, state: ClusterUiState | None = None
+) -> bool:
     """Only vehicles ahead of the ego car, within its own lane or one
     adjacent lane on either side (front / front-left / front-right), are
     displayed - matching the fixed 3-lane layout."""
     if vehicle.longitudinal_m <= 0.0:
         return False
-    return abs(vehicle.lateral_m / lane_width_m) < FRONT_VEHICLE_LANE_RANGE_LANES
+    offset = vehicle_lane_offset_from_lateral(vehicle.lateral_m, vehicle.longitudinal_m, lane_width_m, state)
+    return abs(offset) < FRONT_VEHICLE_LANE_RANGE_LANES
 
 
-def point_in_forward_display_lanes(point: RadarPoint, lane_width_m: float) -> bool:
+def point_in_forward_display_lanes(
+    point: RadarPoint, lane_width_m: float, state: ClusterUiState | None = None
+) -> bool:
     if point.longitudinal_m <= 0.0:
         return False
-    return abs(point.lateral_m / lane_width_m) < FRONT_VEHICLE_LANE_RANGE_LANES
+    offset = vehicle_lane_offset_from_lateral(point.lateral_m, point.longitudinal_m, lane_width_m, state)
+    return abs(offset) < FRONT_VEHICLE_LANE_RANGE_LANES
 
 
 def radar_vehicle_confidence(point: RadarPoint) -> float:
@@ -2651,7 +2682,6 @@ def vehicle_box(
     primary: bool = False,
     annotate: bool = False,
     x_offset_m: float = 0.0,
-    model_curve_state: ClusterUiState | None = None,
     lock_lane_center: bool = True,
 ) -> VehicleBox:
     confidence = clamp(confidence, 0.0, 1.0)
@@ -3387,7 +3417,6 @@ def build_cluster_scene(
         EGO,
         camera_active,
         target_offset,
-        model_curve_state=state,
         lock_lane_center=state.lane_change_phase != "changing",
     )
     merged_radar_labels = frozenset[str]()
@@ -3404,7 +3433,7 @@ def build_cluster_scene(
         render_detected_vehicles = tuple(
             vehicle
             for vehicle in merged_detected_vehicles
-            if vehicle_in_forward_display_lanes(vehicle, lane_width_m)
+            if vehicle_in_forward_display_lanes(vehicle, lane_width_m, state)
         )
         merged_radar_labels = frozenset(
             label
@@ -3417,7 +3446,13 @@ def build_cluster_scene(
         )
         detected_vehicle_boxes = tuple(
             vehicle_box(
-                clamp(detected.lateral_m / lane_width_m, -2.2, 2.2),
+                clamp(
+                    vehicle_lane_offset_from_lateral(
+                        detected.lateral_m, detected.longitudinal_m, lane_width_m, state
+                    ),
+                    -2.2,
+                    2.2,
+                ),
                 render_scene_forward_m(detected.longitudinal_m),
                 NO_STEERING_CURVE,
                 lane_width_m,
@@ -3441,7 +3476,6 @@ def build_cluster_scene(
                 primary=detected.primary,
                 annotate=vehicle_badge_has_special_info(detected),
                 x_offset_m=relative_scene_x_offset_m,
-                model_curve_state=state,
             )
             for detected, display_confidence in detected_vehicle_boxes_with_confidence
             if display_confidence is not None
@@ -3451,7 +3485,7 @@ def build_cluster_scene(
             for point, box in zip(selected_radar_vehicle_points, selected_radar_vehicle_boxes)
             if point.label not in merged_radar_labels
             and not radar_point_hidden_by_detected_vehicle(point, render_detected_vehicles, state)
-            and point_in_forward_display_lanes(point, lane_width_m)
+            and point_in_forward_display_lanes(point, lane_width_m, state)
         )
         visible_radar_vehicle_points = tuple(point for point, _ in visible_radar_vehicle_pairs)
         visible_radar_vehicle_boxes_raw = tuple(box for _, box in visible_radar_vehicle_pairs)
