@@ -81,6 +81,12 @@ THEME_PARAM_POLL_SECONDS = 1.0
 FPS_PARAM_POLL_SECONDS = 1.0
 BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
 OFFROAD_USB_BRIGHTNESS = 0
+# The offroad dim-to-black check is only trusted once the process has been
+# running this long (avoids the boot-time window where vehicle_started()
+# has not yet settled) and only after this many consecutive "offroad" polls
+# (avoids a single transient/stale read flipping the screen dark).
+OFFROAD_DIM_BOOT_GRACE_SECONDS = 10.0
+OFFROAD_DIM_DEBOUNCE_READS = 3
 SCREEN_MODE_PARAM_POLL_SECONDS = 1.0
 CAMERA_VIEW_PARAM_POLL_SECONDS = 1.0
 RADAR_PARAM_POLL_SECONDS = 1.0
@@ -702,6 +708,7 @@ def run_demo(
     next_camera_view_param_read = start_time
     next_radar_param_read = start_time
     next_hud_mode_param_read = start_time
+    offroad_false_streak = 0
     report_frames = 0
     display_actual_fps: float | None = None
     frame_interval = 1.0 / target_fps if target_fps > 0 else 0.0
@@ -1034,12 +1041,22 @@ def run_demo(
                             else f"{active_brightness_setting}%"
                         )
                         print(f"{CLUSTER_BRIGHTNESS_PARAM} updated: {brightness_text}", flush=True)
-                # Offroad-dims-to-black is disabled for now: at boot,
-                # vehicle_started() briefly/incorrectly read False before the
-                # first onroad transition, which left the screen stuck dark.
-                # Fall back to the plain "no live data yet" dimming below
-                # instead of forcing OFFROAD_USB_BRIGHTNESS.
-                if live_source is not None and not live_source.live_data_available():
+                # Offroad dim-to-black: only trust vehicle_started() once past
+                # the boot grace window, and only after several consecutive
+                # "offroad" reads in a row, so a transient/stale reading right
+                # after boot can't get the screen stuck dark. "No live data
+                # yet" (e.g. right after startup, before the first read
+                # settles) still falls back to the dimmer MIN_USB_BRIGHTNESS
+                # instead of full black.
+                vehicle_started = live_source.vehicle_started() if live_source is not None else None
+                if vehicle_started is False:
+                    offroad_false_streak += 1
+                else:
+                    offroad_false_streak = 0
+                past_boot_grace = brightness_now - start_time >= OFFROAD_DIM_BOOT_GRACE_SECONDS
+                if past_boot_grace and offroad_false_streak >= OFFROAD_DIM_DEBOUNCE_READS:
+                    next_usb_brightness = OFFROAD_USB_BRIGHTNESS
+                elif live_source is not None and not live_source.live_data_available():
                     next_usb_brightness = MIN_USB_BRIGHTNESS
                 else:
                     next_usb_brightness = resolved_usb_brightness(
