@@ -203,6 +203,11 @@ LANE_HIGHLIGHT_ALPHA = 220
 LANE_HIGHLIGHT_ROUTE_ALPHA = 170
 EGO_LANE_CRUISE_ALPHA = 150
 EGO_LANE_CRUISE_ROUTE_ALPHA = 110
+# The white (non-ACC) ego-lane fill needs a much higher alpha than the green
+# ACC fill above, otherwise it blends into the dark road and the lead
+# vehicle box (drawn on top, in a muted gray) becomes hard to pick out.
+EGO_LANE_DEFAULT_ALPHA = 235
+EGO_LANE_DEFAULT_ROUTE_ALPHA = 200
 # The two side lanes get a faint neutral-gray floor tint (distinct from both
 # the ego-lane blue/green and the gray vehicle boxes) purely so the fixed
 # 3-lane layout reads clearly even when no vehicle occupies them.
@@ -3149,7 +3154,7 @@ def ego_lane_default_color(route_mode: bool) -> Color:
     # White (not the shared LANE_HIGHLIGHT_COLOR blue) so the ego lane's own
     # floor tint is visually distinct from the lane-change target-lane
     # highlight, which still uses that blue.
-    alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
+    alpha = EGO_LANE_DEFAULT_ROUTE_ALPHA if route_mode else EGO_LANE_DEFAULT_ALPHA
     return WHITE[0], WHITE[1], WHITE[2], alpha
 
 
