@@ -2838,16 +2838,20 @@ class ClusterUiRenderer:
         # Orbitron renders wider per point size than the previous KaiGen font, so these
         # were re-measured to keep a 3-digit value (up to MAX_SPEED_KPH) clear of the
         # accel gauge on the left and the SPEED panel's right edge at center_x = 300.
-        base_font_size = 130
-        max_font_size = 165
-        max_speed_ref = 100.0
-        speed_ratio = min(1.0, speed_value / max_speed_ref)
-        dynamic_font_size = int(base_font_size + (max_font_size - base_font_size) * speed_ratio)
+        # Font size is fixed at the previous max instead of scaling with speed, so the
+        # digit block's height/position never shifts as speed changes.
+        speed_font_size = 165
 
         self._draw_fixed_width_speed_digits(
-            speed_value, SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y, dynamic_font_size, theme.text
+            speed_value, SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y, speed_font_size, theme.text
         )
 
+        _, digit_height = self._measure_text("0", speed_font_size, max(1.0, speed_font_size * 0.02))
+        unit_font_size = 24
+        unit_spacing = max(1.0, unit_font_size * 0.02)
+        _, unit_height = self._measure_text("km/h", unit_font_size, unit_spacing)
+        unit_center_y = SPEED_VALUE_CENTER_Y + digit_height * 0.5 + 5 + unit_height * 0.5
+        self._draw_text("km/h", SPEED_VALUE_CENTER_X, unit_center_y, unit_font_size, theme.muted, anchor="center")
 
         if state.speed_limit_kph is not None:
             center = rl.Vector2(SPEED_LIMIT_SIGN_CENTER_X, SPEED_LIMIT_SIGN_CENTER_Y)
