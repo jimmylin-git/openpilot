@@ -1672,7 +1672,6 @@ class ClusterUiRenderer:
             and (not vehicle.source or vehicle.primary or vehicle.cut_in)
         )
         if use_model:
-            self._draw_vehicle_shadow(vehicle)
             self._draw_vehicle_model(vehicle)
             return
         if vehicle.source and (source_marker or (not vehicle.primary and not vehicle.cut_in)):
@@ -1802,31 +1801,6 @@ class ClusterUiRenderer:
         self._profile_add_elapsed("draw_scene.radar_labels.project", project_ms)
         self._profile_add_elapsed("draw_scene.radar_labels.layout", layout_ms)
         self._profile_add_elapsed("draw_scene.radar_labels.text", text_ms)
-
-    def _draw_vehicle_shadow(self, vehicle: VehicleBox) -> None:
-        half_width = vehicle.width_m * 0.5
-        half_length = vehicle.length_m * 0.5
-
-        def corner(local_x: float, local_y: float, z: float) -> Vec3:
-            return Vec3(
-                vehicle.center.x + vehicle.right_x * local_x + vehicle.forward_x * local_y,
-                vehicle.center.y + vehicle.right_y * local_x + vehicle.forward_y * local_y,
-                z,
-            )
-
-        shadow = (
-            corner(-half_width * 1.12, -half_length * 1.08, 0.018),
-            corner(half_width * 1.12, -half_length * 1.08, 0.018),
-            corner(half_width * 1.12, half_length * 1.08, 0.018),
-            corner(-half_width * 1.12, half_length * 1.08, 0.018),
-        )
-        self._draw_quad(
-            shadow[0],
-            shadow[1],
-            shadow[2],
-            shadow[3],
-            (0, 0, 0, int(18 + 34 * clamp(vehicle.confidence, 0.0, 1.0))),
-        )
 
     def _draw_vehicle_model(self, vehicle: VehicleBox) -> None:
         if self._vehicle_model is None:
@@ -1995,7 +1969,6 @@ class ClusterUiRenderer:
             corner(half_width, half_length, z1),
             corner(-half_width, half_length, z1),
         )
-        self._draw_vehicle_shadow(vehicle)
         self._draw_quad(base[0], base[1], top[1], top[0], vehicle.rear_color)
         self._draw_quad(base[1], base[2], top[2], top[1], vehicle.side_color)
         self._draw_quad(base[2], base[3], top[3], top[2], vehicle.body_color)
