@@ -2686,7 +2686,7 @@ def vehicle_box(
 ) -> VehicleBox:
     confidence = clamp(confidence, 0.0, 1.0)
     alpha = int(92 + 163 * confidence)
-    body_color = color
+    body_color = GREEN if primary else color
     offset = lane_center_locked_offset(offset, enabled=lock_lane_center)
     center_x_m = offset * lane_width_m + x_offset_m
     right_x, right_y, forward_x, forward_y = vehicle_heading(

@@ -1812,7 +1812,11 @@ class ClusterUiRenderer:
         try:
             rl.rl_disable_backface_culling()
             alpha = int(92 + 163 * clamp(vehicle.confidence, 0.0, 1.0))
-            tint = rl_color(vehicle.body_color) if vehicle.source == "radarPoint" else rl_color(WHITE, alpha)
+            tint = (
+                rl_color(vehicle.body_color)
+                if vehicle.primary or vehicle.source == "radarPoint"
+                else rl_color(WHITE, alpha)
+            )
             rl.draw_model_ex(self._vehicle_model, position, rotation_axis, yaw_deg, scale, tint)
         finally:
             rl.rl_enable_backface_culling()
