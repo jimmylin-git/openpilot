@@ -3493,7 +3493,30 @@ def build_cluster_scene(
             vehicle_box_with_x_offset(vehicle, relative_scene_x_offset_m)
             for vehicle in visible_radar_vehicle_boxes_raw
         )
-        vehicles = (ego_vehicle, *detected_vehicle_boxes, *visible_radar_vehicle_boxes)
+        locked_vehicle_boxes = tuple(vehicle for vehicle in detected_vehicle_boxes if vehicle.primary)
+        non_overlapping_detected_vehicle_boxes = tuple(
+            vehicle
+            for vehicle in detected_vehicle_boxes
+            if vehicle.primary or not any(
+                abs(vehicle.center.x - locked.center.x) <= max(vehicle.width_m, locked.width_m) * 0.85
+                and abs(vehicle.center.y - locked.center.y) <= max(vehicle.length_m, locked.length_m) * 0.85
+                for locked in locked_vehicle_boxes
+            )
+        )
+        non_overlapping_radar_vehicle_boxes = tuple(
+            vehicle
+            for vehicle in visible_radar_vehicle_boxes
+            if not any(
+                abs(vehicle.center.x - locked.center.x) <= max(vehicle.width_m, locked.width_m) * 0.85
+                and abs(vehicle.center.y - locked.center.y) <= max(vehicle.length_m, locked.length_m) * 0.85
+                for locked in locked_vehicle_boxes
+            )
+        )
+        vehicles = (
+            ego_vehicle,
+            *non_overlapping_detected_vehicle_boxes,
+            *non_overlapping_radar_vehicle_boxes,
+        )
     else:
         vehicles = (ego_vehicle,)
     profile_scene_add(profile_add, "scene.build.vehicles", profile_stage)
