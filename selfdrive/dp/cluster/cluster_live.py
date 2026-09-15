@@ -56,7 +56,9 @@ LIVE_SERVICES_BASE = (
 LIVE_CAN_SERVICES = ("can", "sendcan")
 LIVE_DATA_STALE_SECONDS = 2.0
 LIVE_SCENE_SMOOTHING_TAU_SECONDS = 0.16
-LIVE_VEHICLE_HOLD_SECONDS = 0.24
+LIVE_VEHICLE_HOLD_SECONDS = 0.30
+LIVE_VEHICLE_FADE_SECONDS = 0.30
+LIVE_VEHICLE_FADE_MIN_PROBABILITY = 0.8001
 
 
 class OpenpilotLiveSource:
@@ -84,7 +86,7 @@ class OpenpilotLiveSource:
         self._last_car_state_update_t: float | None = None
         self._smoothed_state: ClusterUiState | None = None
         self._smoothed_state_t: float | None = None
-        self._last_vehicle_seen_t: float | None = None
+        self._vehicle_missing_since: dict[tuple[str, str], float] = {}
         self.start_t = time.monotonic()
         self.frames = 0
         self.params: Any | None = None
@@ -223,21 +225,41 @@ class OpenpilotLiveSource:
             (vehicle.label, vehicle.source): vehicle for vehicle in previous.detected_vehicles
         }
         current_vehicle_keys = {(vehicle.label, vehicle.source) for vehicle in state.detected_vehicles}
-        if state.detected_vehicles:
-            self._last_vehicle_seen_t = now
+        for key in current_vehicle_keys:
+            self._vehicle_missing_since.pop(key, None)
         smoothed_vehicles = tuple(
             self._smooth_vehicle(vehicle, previous_vehicles.get((vehicle.label, vehicle.source)), alpha)
             for vehicle in state.detected_vehicles
         )
-        if (
-            self._last_vehicle_seen_t is not None
-            and now - self._last_vehicle_seen_t <= LIVE_VEHICLE_HOLD_SECONDS
-        ):
-            smoothed_vehicles += tuple(
-                vehicle
-                for vehicle in previous.detected_vehicles
-                if (vehicle.label, vehicle.source) not in current_vehicle_keys
+        for vehicle in previous.detected_vehicles:
+            key = (vehicle.label, vehicle.source)
+            if key in current_vehicle_keys:
+                continue
+            missing_since = self._vehicle_missing_since.setdefault(key, now)
+            missing_for = now - missing_since
+            if missing_for > LIVE_VEHICLE_HOLD_SECONDS + LIVE_VEHICLE_FADE_SECONDS:
+                continue
+            if missing_for <= LIVE_VEHICLE_HOLD_SECONDS:
+                smoothed_vehicles += (vehicle,)
+                continue
+            fade = 1.0 - (
+                (missing_for - LIVE_VEHICLE_HOLD_SECONDS) / LIVE_VEHICLE_FADE_SECONDS
             )
+            faded_probability = LIVE_VEHICLE_FADE_MIN_PROBABILITY + (
+                max(LIVE_VEHICLE_FADE_MIN_PROBABILITY, vehicle.probability)
+                - LIVE_VEHICLE_FADE_MIN_PROBABILITY
+            ) * clamp(fade, 0.0, 1.0)
+            smoothed_vehicles += (replace(vehicle, probability=faded_probability),)
+
+        active_vehicle_keys = {
+            (vehicle.label, vehicle.source)
+            for vehicle in smoothed_vehicles
+        }
+        self._vehicle_missing_since = {
+            key: missing_since
+            for key, missing_since in self._vehicle_missing_since.items()
+            if key in active_vehicle_keys
+        }
 
         smoothed = replace(
             state,
