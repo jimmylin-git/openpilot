@@ -2697,7 +2697,7 @@ class ClusterUiRenderer:
                 return
 
         self._draw_text(
-            f"STOP IN {stop_eta_s:.1f}s",
+            f"{stop_eta_s:.1f}s",
             STOP_ETA_CENTER_X,
             STOP_ETA_CENTER_Y,
             STOP_ETA_FONT_SIZE,
