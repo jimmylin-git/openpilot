@@ -115,6 +115,10 @@ FOLLOW_GAP_LANE_CENTER_X = DESIGN_WIDTH * 0.5
 LFA_STATUS_CENTER_X = FOLLOW_GAP_LANE_CENTER_X + 142
 TOP_CRUISE_CENTER_X = FOLLOW_GAP_LANE_CENTER_X - 142
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
+STOP_ETA_CENTER_X = DESIGN_WIDTH * 0.5
+STOP_ETA_CENTER_Y = 28.0
+STOP_ETA_FONT_SIZE = 24.0
+LONGITUDINAL_PLAN_STEP_SECONDS = 0.2
 LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
 TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 # Shifted right from the panel's SPEED label position (285) to keep the enlarged digits
@@ -2652,9 +2656,11 @@ class ClusterUiRenderer:
             and state.cruise_gap is None
             and not self._cruise_set_visible(state)
             and state.lfa_active is None
+            and not state.longitudinal_plan_should_stop
         ):
             return
 
+        self._draw_stop_eta(state)
         bottom_y = self._drive_status_bottom_y(state)
         gear_display = gear_text[:2] if gear_text else "-"
         self._draw_text(
@@ -2669,6 +2675,35 @@ class ClusterUiRenderer:
         self._draw_top_cruise_set(state, bottom_y)
         self._draw_follow_gap_lane_icon(state, bottom_y)
         self._draw_lfa_status_icon(state, bottom_y)
+
+    def _draw_stop_eta(self, state: ClusterUiState) -> None:
+        if not state.longitudinal_plan_should_stop:
+            return
+
+        speed_kph = max(0.0, state.speed_kph)
+        if speed_kph <= 1.0:
+            stop_eta_s = 0.0
+        else:
+            stop_eta_s = None
+            for index, planned_speed_kph in enumerate(state.longitudinal_plan_speeds_kph):
+                if planned_speed_kph <= 1.0:
+                    stop_eta_s = (index + 1) * LONGITUDINAL_PLAN_STEP_SECONDS
+                    break
+            if stop_eta_s is None and state.longitudinal_plan_accels_mps2:
+                braking_accel = min(state.longitudinal_plan_accels_mps2)
+                if braking_accel < -0.05:
+                    stop_eta_s = speed_kph / (abs(braking_accel) * 3.6)
+            if stop_eta_s is None:
+                return
+
+        self._draw_text(
+            f"STOP IN {stop_eta_s:.1f}s",
+            STOP_ETA_CENTER_X,
+            STOP_ETA_CENTER_Y,
+            STOP_ETA_FONT_SIZE,
+            RED,
+            anchor="center",
+        )
 
     def _drive_status_bottom_y(self, state: ClusterUiState) -> float:
         speed_text = self._cruise_set_speed_text(state)
