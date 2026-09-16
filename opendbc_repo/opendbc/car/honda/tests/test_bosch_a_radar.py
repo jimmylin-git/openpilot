@@ -45,6 +45,7 @@ _SWITCH.unlink(missing_ok=True)
 # Parser behavior is tested directly with an explicitly available CP. Production availability is
 # separately gated below by HONDA_BOSCH_A_RADAR_VERIFIED and the developer parameter.
 CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC_BOSCH)
+CP_SP = CarInterface.get_non_essential_params_sp(CP, CAR.HONDA_CIVIC_BOSCH)
 CP.radarUnavailable = False
 BUS = CanBus(CP).camera
 
@@ -108,7 +109,7 @@ def make_main_frames(slot, frame_idx, status, range_raw, angle_raw, life, track_
 
 
 def make_radar_interface():
-  return CarInterface.RadarInterface(CP)
+  return CarInterface.RadarInterface(CP, CP_SP)
 
 
 def sweep(slot, frame_idx, status, range_raw, angle_raw, life, t_nanos, with_aux=False, aux_frame_idx=None,
@@ -1097,8 +1098,9 @@ def test_civic_bosch_radar_dbc_wired_for_parser_unit_tests():
 
 def test_crv_5g_bosch_a_radar_dbc_wired_for_parser_unit_tests():
   cp = CarInterface.get_non_essential_params(CAR.HONDA_CRV_5G)
+  cp_sp = CarInterface.get_non_essential_params_sp(cp, CAR.HONDA_CRV_5G)
   assert cp.radarUnavailable is False
-  ri = CarInterface.RadarInterface(cp)
+  ri = CarInterface.RadarInterface(cp, cp_sp)
   assert ri.bosch_a_radar is True
   assert ri.rcp is not None
   assert ri.rcp.bus == CanBus(cp).camera
@@ -1106,8 +1108,9 @@ def test_crv_5g_bosch_a_radar_dbc_wired_for_parser_unit_tests():
 
 def test_accord_bosch_a_radar_stays_disabled_until_validated():
   cp = CarInterface.get_non_essential_params(CAR.HONDA_ACCORD)
+  cp_sp = CarInterface.get_non_essential_params_sp(cp, CAR.HONDA_ACCORD)
   assert cp.radarUnavailable is True
-  ri = CarInterface.RadarInterface(cp)
+  ri = CarInterface.RadarInterface(cp, cp_sp)
   assert ri.bosch_a_radar is False
   assert ri.rcp is None
 
