@@ -603,7 +603,7 @@ class TestVrel:
     assert len(rr.points) == 1
     assert rr.points[0].dRel == pytest.approx(1705 * BOSCH_A_RANGE_SCALE_M - 3.0)
     assert rr.points[0].vRel == pytest.approx(-2.625)
-    assert not rr.points[0].measured
+    assert not rr.points[0].deprecated.measured
     assert len(ri._tracks[1].samples) == 2
 
   def test_qualified_u11_recovers_immediately_after_high_u10_coast(self):
@@ -617,7 +617,7 @@ class TestVrel:
     rr = ri.update(sweep(0, 3, 0x7, 980, 1024, 7, 150_000_000, with_aux=True,
                    direct_vrel_raw=760, direct_vrel_uncertainty_raw=84))
     assert rr.points[0].vRel == pytest.approx((760 - 864) / 64.0)
-    assert rr.points[0].measured
+    assert rr.points[0].deprecated.measured
     assert ri._tracks[1].last_trusted_vrel == pytest.approx((760 - 864) / 64.0)
 
   def test_high_u10_coast_cannot_cross_lifecycle_incarnation(self):
@@ -724,7 +724,7 @@ class TestVrel:
                          range_sigma_raw=4, existence_raw=0))
     assert len(rr.points) == 1
     assert rr.points[0].dRel == pytest.approx(accepted_drel)
-    assert rr.points[0].measured is False
+    assert rr.points[0].deprecated.measured is False
     assert len(ri._tracks[1].samples) == 2
 
   def test_exact_peter_reset_sequence_never_rebases_on_rejected_ranges(self):
@@ -769,7 +769,7 @@ class TestFallbackNeverPublishes:
                     direct_vrel_raw=864, direct_vrel_uncertainty_raw=0))
     rr = ri.update(sweep(0, 1, 0x7, 1000, 1024, 3, 50_000_000, with_aux=True,
                          direct_vrel_raw=864, direct_vrel_uncertainty_raw=0))
-    assert rr.points[0].measured is True
+    assert rr.points[0].deprecated.measured is True
     assert rr.points[0].vRel == pytest.approx(0.0)
 
     # Third sweep: U11 sentinel (unavailable), ratio invalid, and a range jump that -- via the raw
@@ -783,7 +783,7 @@ class TestFallbackNeverPublishes:
     assert implied_fallback_vrel == pytest.approx(-17.136)  # confirms the setup would poison, if reached
     assert abs(implied_fallback_vrel) < BOSCH_A_FALLBACK_RANGE_RATE_MAX_MPS  # and clears range_rejected
     assert len(rr.points) == 1
-    assert rr.points[0].measured is False
+    assert rr.points[0].deprecated.measured is False
     assert rr.points[0].vRel == pytest.approx(0.0)  # coasted trusted value, not the -17 m/s derivative
     # The KF-facing measurement update never happened: last_trusted_vrel/age is untouched by this cycle.
     assert ri._tracks[1].last_trusted_vrel == pytest.approx(0.0)
@@ -815,7 +815,7 @@ class TestFallbackNeverPublishes:
     residual = abs(d - d * ratio)
     assert residual < 2.0  # clears innovation checking regardless of degraded status
     assert len(rr.points) == 1
-    assert rr.points[0].measured is True
+    assert rr.points[0].deprecated.measured is True
     expected = d * (1.0 - ratio) / 0.05
     assert rr.points[0].vRel == pytest.approx(expected)
 
@@ -860,7 +860,7 @@ class TestAuxiliary:
     rr = ri.update(sweep(0, 2, 0x7, 1000, 1024, 5, 100_000_000, with_aux=False))
     assert len(rr.points) == 1
     assert rr.points[0].vRel == pytest.approx(0.0)
-    assert rr.points[0].measured is False
+    assert rr.points[0].deprecated.measured is False
 
   def test_aux_param_invalid_sentinel(self):
     ri = make_radar_interface()

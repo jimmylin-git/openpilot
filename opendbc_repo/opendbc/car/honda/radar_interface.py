@@ -501,7 +501,7 @@ class RadarInterface(RadarInterfaceBase):
         accepted_fresh = previous_sample is not None and now_s - previous_sample[0] <= BOSCH_A_STALE_S
         point = self.pts.get(track_id)
         if accepted_fresh and point is not None:
-          point.measured = False
+          point.deprecated.measured = False
         else:
           self.pts.pop(track_id, None)
         track.prev_frame_idx = idx0
@@ -526,7 +526,7 @@ class RadarInterface(RadarInterfaceBase):
             point.dRel = dRel
             point.yRel = yRel
             point.vRel = track.last_trusted_vrel
-            point.measured = False
+            point.deprecated.measured = False
         else:
           track.last_trusted_vrel = None
           track.last_trusted_vrel_nanos = None
@@ -563,7 +563,7 @@ class RadarInterface(RadarInterfaceBase):
             point.dRel = dRel
             point.yRel = yRel
             point.vRel = track.last_trusted_vrel
-            point.measured = False
+            point.deprecated.measured = False
         else:
           track.last_trusted_vrel = None
           track.last_trusted_vrel_nanos = None
@@ -601,14 +601,14 @@ class RadarInterface(RadarInterfaceBase):
       if matured and track_id not in self.pts:
         self.pts[track_id] = structs.RadarData.RadarPoint()
         self.pts[track_id].trackId = track_id
-        self.pts[track_id].aRel = float('nan')
-        self.pts[track_id].yvRel = float('nan')
+        self.pts[track_id].deprecated.aRel = float('nan')
+        self.pts[track_id].deprecated.yvRel = float('nan')
 
       if matured:
         self.pts[track_id].dRel = dRel
         self.pts[track_id].yRel = yRel
         self.pts[track_id].vRel = vRel
-        self.pts[track_id].measured = True
+        self.pts[track_id].deprecated.measured = True
       else:
         self.pts.pop(track_id, None)
 
@@ -641,9 +641,9 @@ class RadarInterface(RadarInterfaceBase):
         self.pts[ii].dRel = cpt['LONG_DIST']  # from front of car
         self.pts[ii].yRel = -cpt['LAT_DIST']  # in car frame's y axis, left is positive
         self.pts[ii].vRel = cpt['REL_SPEED']
-        self.pts[ii].aRel = float('nan')
-        self.pts[ii].yvRel = float('nan')
-        self.pts[ii].measured = True
+        self.pts[ii].deprecated.aRel = float('nan')
+        self.pts[ii].deprecated.yvRel = float('nan')
+        self.pts[ii].deprecated.measured = True
       else:
         if ii in self.pts:
           del self.pts[ii]
