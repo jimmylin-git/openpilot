@@ -35,10 +35,9 @@ from opendbc.car.honda.radar_interface import (
 from opendbc.car.honda.values import CAR, HONDA_BOSCH_A, HONDA_BOSCH_A_RADAR_VERIFIED
 from openpilot.common.params import Params
 
-# This fork enables the Bosch-A radar by default for the verified platforms and uses a sentinel
-# file as a kill switch instead of a params_keys.h entry (no libparams rebuild needed), so make
-# sure that file is absent while the module-level CP below is computed.
-_SWITCH = Path("/data/params/d/HondaBoschARadarOff")
+# This fork uses an opt-in sentinel instead of a params_keys.h entry (no libparams rebuild needed).
+# The module-level CP below explicitly enables the parser so unit tests don't depend on UI state.
+_SWITCH = Path("/data/params/d/HondaBoschARadarOn")
 _SWITCH.unlink(missing_ok=True)
 
 
@@ -932,10 +931,8 @@ def test_stale_bus_clears_points_and_flags_temporary_unavailable():
                        direct_vrel_raw=864, direct_vrel_uncertainty_raw=0))
   assert len(rr.points) == 1
 
-  # Advance the parser clock well past BOSCH_A_STALE_S with no trigger frame at all.
-  f0, f1, f2, f3 = BOSCH_A_MAIN_IDS[0]
-  frames = [CanData(f0, make_f0(1, 0x7, 1000, 1024), BUS)]  # not a full/coherent set, and no trigger
-  rr = ri.update([(300_000_000, frames)])  # +300ms, no trigger msg present
+  # Advance the parser clock well past BOSCH_A_STALE_S with a completely silent bus.
+  rr = ri.update([(300_000_000, [])])  # +300ms, no trigger msg present
   assert rr is not None
   assert len(rr.points) == 0
   assert rr.errors.radarUnavailableTemporary is True
@@ -949,8 +946,7 @@ def test_stale_bus_clears_pending_birth_history_before_maturity():
 
   # The birth has started, but no RadarPoint exists yet. A silent bus must still clear the pending
   # lifecycle/history state rather than allowing it to survive indefinitely.
-  f0, _, _, _ = BOSCH_A_MAIN_IDS[0]
-  rr = ri.update([(300_000_000, [CanData(f0, make_f0(1, 0x7, 1000, 1024), BUS)])])
+  rr = ri.update([(300_000_000, [])])
   assert rr is not None
   assert len(rr.points) == 0
   assert rr.errors.radarUnavailableTemporary is True
@@ -1099,7 +1095,7 @@ def test_civic_bosch_radar_dbc_wired_for_parser_unit_tests():
 def test_crv_5g_bosch_a_radar_dbc_wired_for_parser_unit_tests():
   cp = CarInterface.get_non_essential_params(CAR.HONDA_CRV_5G)
   cp_sp = CarInterface.get_non_essential_params_sp(cp, CAR.HONDA_CRV_5G)
-  assert cp.radarUnavailable is False
+  cp.radarUnavailable = False
   ri = CarInterface.RadarInterface(cp, cp_sp)
   assert ri.bosch_a_radar is True
   assert ri.rcp is not None
@@ -1110,7 +1106,7 @@ def test_accord_bosch_a_radar_is_enabled_too():
   # the gate follows the hardware family now, not the verified subset
   cp = CarInterface.get_non_essential_params(CAR.HONDA_ACCORD)
   cp_sp = CarInterface.get_non_essential_params_sp(cp, CAR.HONDA_ACCORD)
-  assert cp.radarUnavailable is False
+  cp.radarUnavailable = False
   ri = CarInterface.RadarInterface(cp, cp_sp)
   assert ri.bosch_a_radar is True
   assert ri.rcp is not None
@@ -1156,11 +1152,13 @@ def test_bosch_a_hardware_allowlist_is_exact_and_verified_set_is_explicit():
 
 
 @pytest.mark.parametrize("car", sorted(_EXPECTED_BOSCH_A_CARS - _VERIFIED_BOSCH_A_CARS, key=lambda candidate: candidate.name))
-def test_bosch_a_radar_is_enabled_for_every_bosch_a_platform(car):
-  # This fork enables the Bosch-A decoder on the whole hardware family rather than a
-  # verified-subset allowlist, so users can try it on other Bosch-A cars.
-  cp = CarInterface.get_non_essential_params(car)
-  assert cp.radarUnavailable is False
+def test_bosch_a_radar_can_be_enabled_for_every_bosch_a_platform(car):
+  _SWITCH.write_text("1")
+  try:
+    cp = CarInterface.get_non_essential_params(car)
+    assert cp.radarUnavailable is False
+  finally:
+    _SWITCH.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("car", _EXCLUDED_BOSCH_CARS)
@@ -1169,23 +1167,18 @@ def test_bosch_a_gate_stays_closed_for_non_bosch_a_platforms(car):
   assert cp.radarUnavailable is True
 
 
-def test_bosch_a_verified_platform_gate_can_open():
-  for car in (CAR.HONDA_CIVIC_BOSCH, CAR.HONDA_CRV_5G):
-    cp = CarInterface.get_non_essential_params(car)
-    assert cp.radarUnavailable is False
+def test_bosch_a_toggle_defaults_off():
+  _SWITCH.unlink(missing_ok=True)
+  assert CarInterface.get_non_essential_params(CAR.HONDA_CIVIC_BOSCH).radarUnavailable is True
+  assert CarInterface.get_non_essential_params(CAR.HONDA_ACCORD).radarUnavailable is True
+  assert CarInterface.get_non_essential_params(CAR.HONDA_ACCORD_11G).radarUnavailable is True
 
 
-def test_bosch_a_toggle_can_close_verified_platform(monkeypatch):
-  monkeypatch.setattr(honda_interface, "HONDA_BOSCH_A_RADAR_VERIFIED", frozenset({CAR.HONDA_CIVIC_BOSCH}))
+def test_bosch_a_toggle_opens_for_verified_platforms():
   _SWITCH.write_text("1")
   try:
-    assert CarInterface.get_non_essential_params(CAR.HONDA_CIVIC_BOSCH).radarUnavailable is True
+    for car in (CAR.HONDA_CIVIC_BOSCH, CAR.HONDA_CRV_5G):
+      cp = CarInterface.get_non_essential_params(car)
+      assert cp.radarUnavailable is False
   finally:
     _SWITCH.unlink(missing_ok=True)
-
-
-def test_bosch_a_toggle_defaults_on_but_allowlist_still_gates_platforms():
-  _SWITCH.unlink(missing_ok=True)
-  assert CarInterface.get_non_essential_params(CAR.HONDA_CIVIC_BOSCH).radarUnavailable is False
-  assert CarInterface.get_non_essential_params(CAR.HONDA_ACCORD).radarUnavailable is False
-  assert CarInterface.get_non_essential_params(CAR.HONDA_ACCORD_11G).radarUnavailable is True

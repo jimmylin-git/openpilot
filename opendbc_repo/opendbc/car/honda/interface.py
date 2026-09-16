@@ -49,11 +49,11 @@ class CarInterface(CarInterfaceBase):
         cfgs.insert(0, get_safety_config(structs.CarParams.SafetyModel.noOutput))
       ret.safetyConfigs = cfgs
 
-      # Honda Bosch-A radar (RX-only 16-slot object bank, see radar_interface.py). Enabled by
-      # default for every Bosch-A platform; a sentinel file acts as a kill switch so no
-      # params_keys.h rebuild is needed. Reading radar never takes CAN authority, so the
-      # factory AEB/CMBS/FCW stay live while stock longitudinal is in control.
-      bosch_a_radar_enabled = not docs and not os.path.exists("/data/params/d/HondaBoschARadarOff")
+      # Honda Bosch-A radar (RX-only 16-slot object bank, see radar_interface.py). Disabled by
+      # default and enabled through the Honda vehicle settings UI. The sentinel file avoids a
+      # params_keys.h rebuild. Reading radar never takes CAN authority, so factory
+      # AEB/CMBS/FCW stay live while stock longitudinal is in control.
+      bosch_a_radar_enabled = not docs and os.path.exists("/data/params/d/HondaBoschARadarOn")
       ret.radarUnavailable = not (candidate in HONDA_BOSCH_A and bosch_a_radar_enabled)
       # Disable the radar and let openpilot control longitudinal
       # WARNING: THIS DISABLES AEB!

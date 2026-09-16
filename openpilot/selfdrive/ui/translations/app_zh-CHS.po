@@ -2891,3 +2891,11 @@ msgstr "准备中"
 msgid "unavailable"
 msgstr "不可用"
 
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/honda.py
+msgid "Read factory radar targets from CAN. Read-only; factory AEB and longitudinal control are unaffected. Requires a vehicle restart."
+msgstr "读取原厂 Bosch-A 雷达目标，仅接收不发送，不影响原车 AEB 和纵向控制。切换后需要重新启动车辆。"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/honda.py
+msgid "Use Bosch-A Radar Data"
+msgstr "使用雷达信息"

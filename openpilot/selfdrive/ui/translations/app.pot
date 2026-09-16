@@ -2804,3 +2804,11 @@ msgstr ""
 msgid "Reverse"
 msgstr ""
 
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/honda.py
+msgid "Read factory radar targets from CAN. Read-only; factory AEB and longitudinal control are unaffected. Requires a vehicle restart."
+msgstr ""
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/honda.py
+msgid "Use Bosch-A Radar Data"
+msgstr ""
