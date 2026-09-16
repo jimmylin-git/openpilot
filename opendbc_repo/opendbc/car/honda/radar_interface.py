@@ -39,6 +39,9 @@ BOSCH_A_MAIN_IDS = [[_bosch_a_main_base(s) + i for i in range(4)] for s in range
 BOSCH_A_AUX_IDS = [_bosch_a_aux_id(s) for s in range(BOSCH_A_NUM_SLOTS)]
 BOSCH_A_ALL_IDS = [addr for ids in BOSCH_A_MAIN_IDS for addr in ids] + BOSCH_A_AUX_IDS
 
+# Any main frame is a valid evaluation trigger (see RadarInterface.update).
+_BOSCH_A_TRIGGER_IDS = frozenset(addr for ids in BOSCH_A_MAIN_IDS for addr in ids)
+
 # Publish RadarPoints when the last MAIN object frame arrives. Passive captures prove that slot 15's
 # companion frame, 0x297, follows 0x2FF and is the final observed object-family frame in a full sweep:
 #
@@ -239,11 +242,19 @@ class RadarInterface(RadarInterfaceBase):
     vls = self.rcp.update(can_strings)
     self.updated_messages.update(vls)
 
-    if self.trigger_msg not in self.updated_messages:
-      if self.bosch_a_radar and self._last_trigger_nanos >= 0:
-        now = self.rcp._last_update_nanos
-        if (now - self._last_trigger_nanos) * 1e-9 > BOSCH_A_STALE_S:
-          return self._bosch_a_stale_radardata()
+    if self.bosch_a_radar:
+      # Upstream triggers on the slot-15 companion burst (0x2FF), but a car only broadcasts
+      # the object slots that actually hold a target: the 2018-22 Accord here never sends
+      # 0x2FF, so that trigger starved the decoder of every update. Any Bosch-A main frame
+      # now drives evaluation; the decoder still reads current signal values per slot, so
+      # triggering earlier only changes when we look, not what we see.
+      if not (self.updated_messages & _BOSCH_A_TRIGGER_IDS):
+        if self._last_trigger_nanos >= 0:
+          now = self.rcp._last_update_nanos
+          if (now - self._last_trigger_nanos) * 1e-9 > BOSCH_A_STALE_S:
+            return self._bosch_a_stale_radardata()
+        return None
+    elif self.trigger_msg not in self.updated_messages:
       return None
 
     rr = self._update(self.updated_messages)
