@@ -1155,9 +1155,11 @@ def test_bosch_a_hardware_allowlist_is_exact_and_verified_set_is_explicit():
 
 
 @pytest.mark.parametrize("car", sorted(_EXPECTED_BOSCH_A_CARS - _VERIFIED_BOSCH_A_CARS, key=lambda candidate: candidate.name))
-def test_bosch_a_radar_stays_closed_until_platform_is_verified(car):
+def test_bosch_a_radar_is_enabled_for_every_bosch_a_platform(car):
+  # This fork enables the Bosch-A decoder on the whole hardware family rather than a
+  # verified-subset allowlist, so users can try it on other Bosch-A cars.
   cp = CarInterface.get_non_essential_params(car)
-  assert cp.radarUnavailable is True
+  assert cp.radarUnavailable is False
 
 
 @pytest.mark.parametrize("car", _EXCLUDED_BOSCH_CARS)
