@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from functools import lru_cache
+import json
 import math
 import os
 import time
@@ -147,6 +148,8 @@ SYSTEM_PANEL_W = 476
 SYSTEM_STATS_REFRESH_SECONDS = 1.0
 TEXT_MEASURE_CACHE_LIMIT = 1024
 TRIANGLE_STRIP_POINT_CACHE_LIMIT = 256
+VEHICLE_OBJECT_LOG_PATH = "/data/media/0/cluster_vehicle_objects.jsonl"
+VEHICLE_OBJECT_LOG_INTERVAL_SECONDS = 1.0
 DEBUG_PLOT_MAX_SAMPLES = 360
 DEBUG_PLOT_SAMPLE_SECONDS = 0.05
 DEBUG_PLOT_MARGIN = 18.0
@@ -558,6 +561,10 @@ class ClusterUiRenderer:
         self._profile_samples: list[tuple[str, float]] = []
         self._ground_scroll_m = 0.0
         self._ground_scroll_last_t: float | None = None
+        self._vehicle_log_file = None
+        self._vehicle_log_disabled = False
+        self._vehicle_log_tracks: dict[tuple[str, str], dict[str, float]] = {}
+        self._vehicle_log_active_keys: set[tuple[str, str]] = set()
 
     def set_profile_enabled(self, enabled: bool) -> None:
         self.profile_enabled = enabled
@@ -628,6 +635,10 @@ class ClusterUiRenderer:
         self._profile_add("renderer.open.total", profile_total)
 
     def close(self) -> None:
+        self._finish_vehicle_logging(time.monotonic(), ())
+        if self._vehicle_log_file is not None:
+            self._vehicle_log_file.close()
+            self._vehicle_log_file = None
         if not self._window_open:
             return
         if self._capture_target is not None:
@@ -1585,6 +1596,7 @@ class ClusterUiRenderer:
             for vehicle in scene.vehicles:
                 self._draw_vehicle(vehicle)
             self._profile_add("draw_scene.vehicles", profile_stage)
+            self._finish_vehicle_logging(time.monotonic(), scene.vehicles)
         finally:
             rl.rl_pop_matrix()
         profile_stage = self._profile_start()
@@ -1600,6 +1612,81 @@ class ClusterUiRenderer:
         self._profile_add("draw_scene.radar_labels", profile_stage)
         profile_stage = self._profile_start()
         self._profile_add("draw_scene.vehicle_badges", profile_stage)
+
+    def _vehicle_log_write(self, event: dict[str, object]) -> None:
+        if self._vehicle_log_disabled:
+            return
+        if self._vehicle_log_file is None:
+            try:
+                path = Path(os.environ.get("CLUSTER_VEHICLE_LOG_PATH", VEHICLE_OBJECT_LOG_PATH))
+                path.parent.mkdir(parents=True, exist_ok=True)
+                self._vehicle_log_file = path.open("a", encoding="utf-8", buffering=1)
+            except OSError:
+                self._vehicle_log_disabled = True
+                return
+        try:
+            self._vehicle_log_file.write(json.dumps(event, separators=(",", ":")) + "\n")
+        except OSError:
+            self._vehicle_log_file.close()
+            self._vehicle_log_file = None
+            self._vehicle_log_disabled = True
+
+    def _record_vehicle_draw(self, vehicle: VehicleBox, now: float) -> None:
+        if not vehicle.source and not vehicle.label:
+            return
+        key = (vehicle.label, vehicle.source)
+        self._vehicle_log_active_keys.add(key)
+        track = self._vehicle_log_tracks.get(key)
+        if track is None:
+            track = {"first_seen": now, "last_seen": now, "last_logged": now}
+            self._vehicle_log_tracks[key] = track
+            self._vehicle_log_write({
+                "event": "appeared",
+                "monotonic_s": round(now, 3),
+                "label": vehicle.label,
+                "source": vehicle.source,
+                "primary": vehicle.primary,
+                "confidence": round(vehicle.confidence, 3),
+                "x_m": round(vehicle.center.x, 3),
+                "y_m": round(vehicle.center.y, 3),
+            })
+        else:
+            track["last_seen"] = now
+            if now - track["last_logged"] < VEHICLE_OBJECT_LOG_INTERVAL_SECONDS:
+                return
+            track["last_logged"] = now
+            self._vehicle_log_write({
+                "event": "state",
+                "monotonic_s": round(now, 3),
+                "duration_s": round(now - track["first_seen"], 3),
+                "label": vehicle.label,
+                "source": vehicle.source,
+                "primary": vehicle.primary,
+                "confidence": round(vehicle.confidence, 3),
+                "x_m": round(vehicle.center.x, 3),
+                "y_m": round(vehicle.center.y, 3),
+                "relative_speed_mps": (
+                    round(vehicle.relative_speed_mps, 3)
+                    if vehicle.relative_speed_mps is not None else None
+                ),
+            })
+
+    def _finish_vehicle_logging(self, now: float, vehicles: tuple[VehicleBox, ...]) -> None:
+        self._vehicle_log_active_keys.clear()
+        for vehicle in vehicles:
+            self._record_vehicle_draw(vehicle, now)
+        for key, track in tuple(self._vehicle_log_tracks.items()):
+            if key in self._vehicle_log_active_keys:
+                continue
+            self._vehicle_log_write({
+                "event": "disappeared",
+                "monotonic_s": round(now, 3),
+                "duration_s": round(track["last_seen"] - track["first_seen"], 3),
+                "missing_s": round(now - track["last_seen"], 3),
+                "label": key[0],
+                "source": key[1],
+            })
+            del self._vehicle_log_tracks[key]
 
     def _draw_strip(self, strip: MeshStrip) -> None:
         count = min(len(strip.left), len(strip.right))
@@ -1669,6 +1756,7 @@ class ClusterUiRenderer:
         return points, point_count
 
     def _draw_vehicle(self, vehicle: VehicleBox) -> None:
+        self._record_vehicle_draw(vehicle, time.monotonic())
         source_marker = vehicle.source.startswith("modelV2") or vehicle.source in ("radarState", "radarPoint")
         use_model = (
             self._vehicle_model is not None
