@@ -59,6 +59,7 @@ LIVE_SCENE_SMOOTHING_TAU_SECONDS = 0.16
 LIVE_VEHICLE_HOLD_SECONDS = 0.30
 LIVE_VEHICLE_FADE_SECONDS = 0.30
 LIVE_VEHICLE_FADE_MIN_PROBABILITY = 0.8001
+RADAR_STATE_TARGET2_STABLE_SECONDS = 0.25
 
 
 class OpenpilotLiveSource:
@@ -87,6 +88,8 @@ class OpenpilotLiveSource:
         self._smoothed_state: ClusterUiState | None = None
         self._smoothed_state_t: float | None = None
         self._vehicle_missing_since: dict[tuple[str, str], float] = {}
+        self._vehicle_seen_since: dict[tuple[str, str], float] = {}
+        self._stable_vehicle_keys: set[tuple[str, str]] = set()
         self.start_t = time.monotonic()
         self.frames = 0
         self.params: Any | None = None
@@ -211,6 +214,33 @@ class OpenpilotLiveSource:
 
     def _smooth_scene_state(self, state: ClusterUiState) -> ClusterUiState:
         now = time.monotonic()
+        current_vehicle_keys = {
+            (vehicle.label, vehicle.source) for vehicle in state.detected_vehicles
+        }
+        target2_keys = {
+            (vehicle.label, vehicle.source)
+            for vehicle in state.detected_vehicles
+            if vehicle.label == "TARGET2" and vehicle.source == "radarState"
+        }
+        for key in target2_keys:
+            self._vehicle_seen_since.setdefault(key, now)
+            if now - self._vehicle_seen_since[key] >= RADAR_STATE_TARGET2_STABLE_SECONDS:
+                self._stable_vehicle_keys.add(key)
+        for key in tuple(self._vehicle_seen_since):
+            if key not in current_vehicle_keys and key not in self._stable_vehicle_keys:
+                self._vehicle_seen_since.pop(key, None)
+        state = replace(
+            state,
+            detected_vehicles=tuple(
+                vehicle
+                for vehicle in state.detected_vehicles
+                if (
+                    vehicle.label != "TARGET2"
+                    or vehicle.source != "radarState"
+                    or (vehicle.label, vehicle.source) in self._stable_vehicle_keys
+                )
+            ),
+        )
         previous = self._smoothed_state
         previous_t = self._smoothed_state_t
         if previous is None or previous_t is None:
@@ -259,6 +289,12 @@ class OpenpilotLiveSource:
             key: missing_since
             for key, missing_since in self._vehicle_missing_since.items()
             if key in active_vehicle_keys
+        }
+        self._stable_vehicle_keys.intersection_update(active_vehicle_keys)
+        self._vehicle_seen_since = {
+            key: seen_since
+            for key, seen_since in self._vehicle_seen_since.items()
+            if key in active_vehicle_keys or key in target2_keys
         }
 
         smoothed = replace(

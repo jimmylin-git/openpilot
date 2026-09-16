@@ -257,6 +257,7 @@ class VehicleBox:
     top_highlight: Color
     outline_color: Color
     confidence: float = 1.0
+    raw_probability: float | None = None
     label: str = ""
     source: str = ""
     longitudinal_m: float | None = None
@@ -2671,6 +2672,7 @@ def vehicle_box(
     camera_active: bool,
     target_offset: float | None = None,
     confidence: float = 1.0,
+    raw_probability: float | None = None,
     label: str = "",
     source: str = "",
     longitudinal_m: float | None = None,
@@ -2720,6 +2722,7 @@ def vehicle_box(
         top_highlight=rgba(lighten(body_color, 0.16), min(235, alpha)),
         outline_color=rgba(darken(body_color, 0.42), min(235, alpha)),
         confidence=confidence,
+        raw_probability=raw_probability,
         label=label,
         source=source,
         longitudinal_m=actual_longitudinal_m,
@@ -3459,6 +3462,7 @@ def build_cluster_scene(
                 vehicle_color_for_detection(detected, theme, state.radar_source_color_mode),
                 camera_active,
                 confidence=display_confidence,
+                raw_probability=detected.probability,
                 label=detected.label,
                 source=detected.source,
                 longitudinal_m=detected.longitudinal_m,

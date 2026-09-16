@@ -150,6 +150,7 @@ TEXT_MEASURE_CACHE_LIMIT = 1024
 TRIANGLE_STRIP_POINT_CACHE_LIMIT = 256
 VEHICLE_OBJECT_LOG_PATH = "/data/media/0/cluster_vehicle_objects.jsonl"
 VEHICLE_OBJECT_LOG_INTERVAL_SECONDS = 1.0
+VEHICLE_OBJECT_LOG_VERSION = 2
 DEBUG_PLOT_MAX_SAMPLES = 360
 DEBUG_PLOT_SAMPLE_SECONDS = 0.05
 DEBUG_PLOT_MARGIN = 18.0
@@ -563,7 +564,7 @@ class ClusterUiRenderer:
         self._ground_scroll_last_t: float | None = None
         self._vehicle_log_file = None
         self._vehicle_log_disabled = False
-        self._vehicle_log_tracks: dict[tuple[str, str], dict[str, float]] = {}
+        self._vehicle_log_tracks: dict[tuple[str, str], dict[str, object]] = {}
         self._vehicle_log_active_keys: set[tuple[str, str]] = set()
 
     def set_profile_enabled(self, enabled: bool) -> None:
@@ -1631,27 +1632,61 @@ class ClusterUiRenderer:
             self._vehicle_log_file = None
             self._vehicle_log_disabled = True
 
+    @staticmethod
+    def _vehicle_log_payload(vehicle: VehicleBox) -> dict[str, object]:
+        return {
+            "log_version": VEHICLE_OBJECT_LOG_VERSION,
+            "label": vehicle.label,
+            "source": vehicle.source,
+            "source_base": vehicle.source.split("+radar:", 1)[0],
+            "primary": vehicle.primary,
+            "raw_probability": (
+                round(vehicle.raw_probability, 3)
+                if vehicle.raw_probability is not None else None
+            ),
+            "display_confidence": round(vehicle.confidence, 3),
+            "x_m": round(vehicle.center.x, 3),
+            "y_m": round(vehicle.center.y, 3),
+            "longitudinal_m": (
+                round(vehicle.longitudinal_m, 3)
+                if vehicle.longitudinal_m is not None else None
+            ),
+            "relative_speed_mps": (
+                round(vehicle.relative_speed_mps, 3)
+                if vehicle.relative_speed_mps is not None else None
+            ),
+            "absolute_speed_kph": (
+                round(vehicle.absolute_speed_kph, 3)
+                if vehicle.absolute_speed_kph is not None else None
+            ),
+            "acceleration_mps2": (
+                round(vehicle.acceleration_mps2, 3)
+                if vehicle.acceleration_mps2 is not None else None
+            ),
+            "ttc_s": round(vehicle.ttc_s, 3) if vehicle.ttc_s is not None else None,
+            "cut_in": vehicle.cut_in,
+        }
+
     def _record_vehicle_draw(self, vehicle: VehicleBox, now: float) -> None:
         if not vehicle.source and not vehicle.label:
             return
-        key = (vehicle.label, vehicle.source)
+        source_base = vehicle.source.split("+radar:", 1)[0]
+        key = (vehicle.label, source_base)
         self._vehicle_log_active_keys.add(key)
         track = self._vehicle_log_tracks.get(key)
+        payload = self._vehicle_log_payload(vehicle)
         if track is None:
-            track = {"first_seen": now, "last_seen": now, "last_logged": now}
+            track = {
+                "first_seen": now,
+                "last_seen": now,
+                "last_logged": now,
+                "last_payload": payload,
+            }
             self._vehicle_log_tracks[key] = track
-            self._vehicle_log_write({
-                "event": "appeared",
-                "monotonic_s": round(now, 3),
-                "label": vehicle.label,
-                "source": vehicle.source,
-                "primary": vehicle.primary,
-                "confidence": round(vehicle.confidence, 3),
-                "x_m": round(vehicle.center.x, 3),
-                "y_m": round(vehicle.center.y, 3),
-            })
+            self._vehicle_log_write({"event": "appeared", "monotonic_s": round(now, 3), **payload})
         else:
             track["last_seen"] = now
+            track["last_payload"] = payload
             if now - track["last_logged"] < VEHICLE_OBJECT_LOG_INTERVAL_SECONDS:
                 return
             track["last_logged"] = now
@@ -1659,16 +1694,7 @@ class ClusterUiRenderer:
                 "event": "state",
                 "monotonic_s": round(now, 3),
                 "duration_s": round(now - track["first_seen"], 3),
-                "label": vehicle.label,
-                "source": vehicle.source,
-                "primary": vehicle.primary,
-                "confidence": round(vehicle.confidence, 3),
-                "x_m": round(vehicle.center.x, 3),
-                "y_m": round(vehicle.center.y, 3),
-                "relative_speed_mps": (
-                    round(vehicle.relative_speed_mps, 3)
-                    if vehicle.relative_speed_mps is not None else None
-                ),
+                **payload,
             })
 
     def _finish_vehicle_logging(self, now: float, vehicles: tuple[VehicleBox, ...]) -> None:
@@ -1683,8 +1709,7 @@ class ClusterUiRenderer:
                 "monotonic_s": round(now, 3),
                 "duration_s": round(track["last_seen"] - track["first_seen"], 3),
                 "missing_s": round(now - track["last_seen"], 3),
-                "label": key[0],
-                "source": key[1],
+                **track["last_payload"],
             })
             del self._vehicle_log_tracks[key]
 
