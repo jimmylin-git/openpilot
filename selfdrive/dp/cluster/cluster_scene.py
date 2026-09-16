@@ -2120,11 +2120,6 @@ def vehicle_source_is_camera(source: str) -> bool:
     return vehicle_source_base(source).startswith("camera")
 
 
-def vehicle_source_is_camera_detection(source: str) -> bool:
-    base_source = vehicle_source_base(source)
-    return base_source.startswith("modelV2") or base_source.startswith("camera")
-
-
 def vehicle_source_is_front_radar(source: str) -> bool:
     return vehicle_source_base(source) == "radarState"
 
@@ -3277,6 +3272,15 @@ def build_cluster_scene(
     relative_scene_x_offset_m = 0.0
     camera = scene_camera(state, lane_width_m, anchor_x_m)
     camera_active = state.surround_view_active
+    selected_radar_vehicle_points = tuple(
+        point
+        for point in radar_vehicle_points(state, lane_width_m)
+        if radar_vehicle_confidence(point) >= FRONT_VEHICLE_MIN_CONFIDENCE
+    )
+    selected_radar_vehicle_boxes = tuple(
+        radar_vehicle_box(point, state, lane_width_m, theme)
+        for point in selected_radar_vehicle_points
+    )
     route_mode = data_geometry_mode_for_state(state)
     road_start_m = (
         SURROUND_ROAD_REAR_M if state.surround_view_active
@@ -3287,11 +3291,13 @@ def build_cluster_scene(
         else ROAD_FAR_M
     )
     road_steps = ROAD_STEPS_SURROUND if camera_active else ROAD_STEPS_MODEL if route_mode else ROAD_STEPS_SIM
-    if state.detected_vehicles and not camera_active:
+    if (state.detected_vehicles or selected_radar_vehicle_boxes) and not camera_active:
         nearest_detected_y = min(
             (render_scene_forward_m(vehicle.longitudinal_m) for vehicle in state.detected_vehicles),
             default=ROAD_FAR_M,
         )
+        nearest_radar_y = min((vehicle.center.y for vehicle in selected_radar_vehicle_boxes), default=ROAD_FAR_M)
+        nearest_detected_y = min(nearest_detected_y, nearest_radar_y)
         candidate_road_start_m = max(-35.0, nearest_detected_y - DRIVE_VIEW_REAR_ROAD_MARGIN_M)
         road_start_m = min(road_start_m, max(DRIVE_VIEW_ROAD_START_M, candidate_road_start_m))
     profile_scene_add(profile_add, "scene.build.setup", profile_stage)
@@ -3415,18 +3421,19 @@ def build_cluster_scene(
     )
     merged_radar_labels = frozenset[str]()
     if route_mode:
-        merged_detected_vehicles = detected_vehicles_with_merged_radar(
-            state.detected_vehicles,
-            state.radar_points,
-            state,
-        )
-        if state.radar_display_mode != CLUSTER_RADAR_DISPLAY_DETAIL:
+        if state.radar_display_mode == CLUSTER_RADAR_DISPLAY_DETAIL:
+            merged_detected_vehicles = state.detected_vehicles
+        else:
+            merged_detected_vehicles = detected_vehicles_with_merged_radar(
+                state.detected_vehicles,
+                state.radar_points,
+                state,
+            )
             merged_detected_vehicles = detected_vehicles_for_display(merged_detected_vehicles, state)
         render_detected_vehicles = tuple(
             vehicle
             for vehicle in merged_detected_vehicles
-            if vehicle_source_is_camera_detection(vehicle.source)
-            and vehicle_in_forward_display_lanes(vehicle, lane_width_m, state)
+            if vehicle_in_forward_display_lanes(vehicle, lane_width_m, state)
         )
         merged_radar_labels = frozenset(
             label
@@ -3473,6 +3480,19 @@ def build_cluster_scene(
             for detected, display_confidence in detected_vehicle_boxes_with_confidence
             if display_confidence is not None
         )
+        visible_radar_vehicle_pairs = tuple(
+            (point, box)
+            for point, box in zip(selected_radar_vehicle_points, selected_radar_vehicle_boxes)
+            if point.label not in merged_radar_labels
+            and not radar_point_hidden_by_detected_vehicle(point, render_detected_vehicles, state)
+            and point_in_forward_display_lanes(point, lane_width_m, state)
+        )
+        visible_radar_vehicle_points = tuple(point for point, _ in visible_radar_vehicle_pairs)
+        visible_radar_vehicle_boxes_raw = tuple(box for _, box in visible_radar_vehicle_pairs)
+        visible_radar_vehicle_boxes = tuple(
+            vehicle_box_with_x_offset(vehicle, relative_scene_x_offset_m)
+            for vehicle in visible_radar_vehicle_boxes_raw
+        )
         locked_vehicle_boxes = tuple(vehicle for vehicle in detected_vehicle_boxes if vehicle.primary)
         non_overlapping_detected_vehicle_boxes = tuple(
             vehicle
@@ -3483,9 +3503,19 @@ def build_cluster_scene(
                 for locked in locked_vehicle_boxes
             )
         )
+        non_overlapping_radar_vehicle_boxes = tuple(
+            vehicle
+            for vehicle in visible_radar_vehicle_boxes
+            if not any(
+                abs(vehicle.center.x - locked.center.x) <= max(vehicle.width_m, locked.width_m) * 0.85
+                and abs(vehicle.center.y - locked.center.y) <= max(vehicle.length_m, locked.length_m) * 0.85
+                for locked in locked_vehicle_boxes
+            )
+        )
         vehicles = (
             ego_vehicle,
             *non_overlapping_detected_vehicle_boxes,
+            *non_overlapping_radar_vehicle_boxes,
         )
     else:
         vehicles = (ego_vehicle,)
