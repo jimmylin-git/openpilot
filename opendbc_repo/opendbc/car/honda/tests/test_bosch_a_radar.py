@@ -1106,13 +1106,14 @@ def test_crv_5g_bosch_a_radar_dbc_wired_for_parser_unit_tests():
   assert ri.rcp.bus == CanBus(cp).camera
 
 
-def test_accord_bosch_a_radar_stays_disabled_until_validated():
+def test_accord_bosch_a_radar_is_enabled_too():
+  # the gate follows the hardware family now, not the verified subset
   cp = CarInterface.get_non_essential_params(CAR.HONDA_ACCORD)
   cp_sp = CarInterface.get_non_essential_params_sp(cp, CAR.HONDA_ACCORD)
-  assert cp.radarUnavailable is True
+  assert cp.radarUnavailable is False
   ri = CarInterface.RadarInterface(cp, cp_sp)
-  assert ri.bosch_a_radar is False
-  assert ri.rcp is None
+  assert ri.bosch_a_radar is True
+  assert ri.rcp is not None
 
 
 def test_civic_bosch_object_feed_uses_camera_side_acc_can():
@@ -1186,5 +1187,5 @@ def test_bosch_a_toggle_can_close_verified_platform(monkeypatch):
 def test_bosch_a_toggle_defaults_on_but_allowlist_still_gates_platforms():
   _SWITCH.unlink(missing_ok=True)
   assert CarInterface.get_non_essential_params(CAR.HONDA_CIVIC_BOSCH).radarUnavailable is False
-  assert CarInterface.get_non_essential_params(CAR.HONDA_ACCORD).radarUnavailable is True
+  assert CarInterface.get_non_essential_params(CAR.HONDA_ACCORD).radarUnavailable is False
   assert CarInterface.get_non_essential_params(CAR.HONDA_ACCORD_11G).radarUnavailable is True
