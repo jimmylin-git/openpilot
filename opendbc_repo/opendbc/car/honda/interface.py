@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+import os
 import numpy as np
 from opendbc.car import get_safety_config, structs, uds
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.honda.hondacan import CanBus
-from opendbc.car.honda.values import CarControllerParams, HondaFlags, CAR, HondaSafetyFlags, HONDA_BOSCH, HONDA_BOSCH_CANFD, HONDA_BOSCH_RADARLESS
+from opendbc.car.honda.values import (CarControllerParams, HondaFlags, CAR, HondaSafetyFlags, HONDA_BOSCH, HONDA_BOSCH_A,
+                                            HONDA_BOSCH_A_RADAR_VERIFIED, HONDA_BOSCH_CANFD, HONDA_BOSCH_RADARLESS)
 from opendbc.car.honda.carcontroller import CarController
 from opendbc.car.honda.carstate import CarState
 from opendbc.car.honda.radar_interface import RadarInterface
@@ -47,7 +49,14 @@ class CarInterface(CarInterfaceBase):
         cfgs.insert(0, get_safety_config(structs.CarParams.SafetyModel.noOutput))
       ret.safetyConfigs = cfgs
 
-      ret.radarUnavailable = True
+      # Honda Bosch-A radar (RX-only 16-slot object bank, see radar_interface.py). The
+      # verified platforms get it by default; a sentinel file acts as a kill switch so no
+      # params_keys.h rebuild is needed. Reading radar never takes CAN authority, so the
+      # factory AEB/CMBS/FCW stay live while stock longitudinal is in control.
+      bosch_a_radar_enabled = not docs and not os.path.exists("/data/params/d/HondaBoschARadarOff")
+      ret.radarUnavailable = not (candidate in HONDA_BOSCH_A and
+                                  candidate in HONDA_BOSCH_A_RADAR_VERIFIED and
+                                  bosch_a_radar_enabled)
       # Disable the radar and let openpilot control longitudinal
       # WARNING: THIS DISABLES AEB!
       # If Bosch radarless, this blocks ACC messages from the camera
