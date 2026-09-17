@@ -80,9 +80,12 @@ VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "cybertruck_clu
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "wheel.png"
 FOLLOW_GAP_LANE_ICON_PATH = CLUSTER_DIR / "assets" / "FCD_Lane.png"
 BACKGROUND_IMAGE_PATH = CLUSTER_DIR / "assets" / "bg.png"
+TURN_SIGNAL_LEFT_ICON_PATH = CLUSTER_DIR / "assets" / "cluster_turn_signal_left.png"
+TURN_SIGNAL_RIGHT_ICON_PATH = CLUSTER_DIR / "assets" / "cluster_turn_signal_right.png"
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
-TURN_SIGNAL_CENTER_Y = 120
+TURN_SIGNAL_CENTER_Y = 94
+TURN_SIGNAL_ICON_SIZE = 128.0
 TURN_SIGNAL_HEAD_HALF_HEIGHT = 38
 TURN_SIGNAL_MID_CENTER_X = (TURN_SIGNAL_LEFT_CENTER_X + TURN_SIGNAL_RIGHT_CENTER_X) * 0.5
 DRIVE_STATUS_BASE_BOX_SIZE = 46.0
@@ -118,6 +121,12 @@ TOP_CRUISE_CENTER_X = FOLLOW_GAP_LANE_CENTER_X - 142
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
 LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
 TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
+TOP_STATUS_DETAIL_FONT_SIZE = 14.0 * DRIVE_STATUS_SCALE
+TOP_STATUS_DETAIL_CENTER_Y = (
+    TURN_SIGNAL_CENTER_Y
+    + max(FOLLOW_GAP_LANE_ICON_SIZE, LFA_STATUS_ICON_SIZE) * 0.5
+    + TOP_STATUS_DETAIL_FONT_SIZE * 0.75
+)
 # Shifted right from the panel's SPEED label position (285) to keep the enlarged digits
 # clear of the accel gauge (now just a bare bar flush against the left screen edge, right
 # edge ~59px) while staying inside the left hex panel's solid span (measured ~92-582 at
@@ -530,6 +539,8 @@ class ClusterUiRenderer:
         self._lfa_texture = None
         self._lfa_active_texture = None
         self._follow_gap_lane_texture = None
+        self._left_turn_signal_texture = None
+        self._right_turn_signal_texture = None
         self._background_texture = None
         self._route_video_texture = None
         self._route_video_size: tuple[int, int] | None = None
@@ -558,6 +569,7 @@ class ClusterUiRenderer:
         self._profile_samples: list[tuple[str, float]] = []
         self._ground_scroll_m = 0.0
         self._ground_scroll_last_t: float | None = None
+        self._front_vehicle_distance_m: float | None = None
         self._vehicle_log_file = None
         self._vehicle_log_disabled = False
         self._vehicle_log_tracks: dict[tuple[str, str], dict[str, object]] = {}
@@ -676,6 +688,12 @@ class ClusterUiRenderer:
         if self._follow_gap_lane_texture is not None:
             rl.unload_texture(self._follow_gap_lane_texture)
             self._follow_gap_lane_texture = None
+        if self._left_turn_signal_texture is not None:
+            rl.unload_texture(self._left_turn_signal_texture)
+            self._left_turn_signal_texture = None
+        if self._right_turn_signal_texture is not None:
+            rl.unload_texture(self._right_turn_signal_texture)
+            self._right_turn_signal_texture = None
         if self._background_texture is not None:
             rl.unload_texture(self._background_texture)
             self._background_texture = None
@@ -817,6 +835,20 @@ class ClusterUiRenderer:
             highlight_lane_lit=self._highlight_lane_lit(state, signal_lights),
             theme=theme,
             ground_scroll_m=self._update_ground_scroll_m(state),
+        )
+        self._front_vehicle_distance_m = min(
+            (
+                vehicle.longitudinal_m
+                for vehicle in scene.vehicles
+                if (
+                    vehicle.source
+                    and vehicle.longitudinal_m is not None
+                    and math.isfinite(vehicle.longitudinal_m)
+                    and vehicle.longitudinal_m > 0.0
+                    and abs(vehicle.center.x) <= vehicle.width_m * 0.5
+                )
+            ),
+            default=None,
         )
         self._profile_add("render_world.build_scene", profile_stage)
         profile_stage = self._profile_start()
@@ -1414,6 +1446,16 @@ class ClusterUiRenderer:
             self._lfa_active_texture = self._load_lfa_active_texture()
         if self._follow_gap_lane_texture is None:
             self._follow_gap_lane_texture = self._load_icon_texture(FOLLOW_GAP_LANE_ICON_PATH, "Follow gap lane")
+        if self._left_turn_signal_texture is None:
+            self._left_turn_signal_texture = self._load_icon_texture(
+                TURN_SIGNAL_LEFT_ICON_PATH,
+                "Left turn signal",
+            )
+        if self._right_turn_signal_texture is None:
+            self._right_turn_signal_texture = self._load_icon_texture(
+                TURN_SIGNAL_RIGHT_ICON_PATH,
+                "Right turn signal",
+            )
 
     def _load_icon_texture(self, path: Path, label: str):
         if not path.exists():
@@ -2850,6 +2892,16 @@ class ClusterUiRenderer:
                 None,
                 0.0,
             )
+        distance_m = self._front_vehicle_distance_m
+        distance_text = f"{distance_m:.0f}m" if distance_m is not None else "--m"
+        self._draw_text(
+            distance_text,
+            FOLLOW_GAP_LANE_CENTER_X,
+            TOP_STATUS_DETAIL_CENTER_Y,
+            TOP_STATUS_DETAIL_FONT_SIZE,
+            tint,
+            anchor="center",
+        )
 
     def _draw_bottom_aligned_texture_icon(
         self,
@@ -2898,6 +2950,7 @@ class ClusterUiRenderer:
             alpha,
             rotation_deg,
         ):
+            self._draw_steering_angle_text(state, tint)
             return
 
         outline = GREEN if active else theme.muted
@@ -2918,6 +2971,23 @@ class ClusterUiRenderer:
             rl.Vector2(center.x, center.y + 12 * scale),
             2.2 * scale,
             rl_color(outline, 210),
+        )
+        self._draw_steering_angle_text(state, tint)
+
+    def _draw_steering_angle_text(
+        self,
+        state: ClusterUiState,
+        color: tuple[int, int, int],
+    ) -> None:
+        angle = state.steering_angle_deg
+        angle_text = f"{angle:+.1f}deg" if angle is not None and math.isfinite(angle) else "--deg"
+        self._draw_text(
+            angle_text,
+            LFA_STATUS_CENTER_X,
+            TOP_STATUS_DETAIL_CENTER_Y,
+            TOP_STATUS_DETAIL_FONT_SIZE,
+            color,
+            anchor="center",
         )
 
     def _draw_speed_block(self, state: ClusterUiState) -> None:
@@ -3089,6 +3159,20 @@ class ClusterUiRenderer:
         theme = self._current_theme()
         cx = TURN_SIGNAL_LEFT_CENTER_X if side == "left" else TURN_SIGNAL_RIGHT_CENTER_X
         cy = TURN_SIGNAL_CENTER_Y
+        texture = self._left_turn_signal_texture if side == "left" else self._right_turn_signal_texture
+        tint = WHITE if lit else theme.muted
+        alpha = 255 if lit else 100
+        if self._draw_bottom_aligned_texture_icon(
+            texture,
+            cx,
+            cy + TURN_SIGNAL_ICON_SIZE * 0.5,
+            TURN_SIGNAL_ICON_SIZE,
+            TURN_SIGNAL_ICON_SIZE,
+            tint,
+            alpha,
+        ):
+            return
+
         direction = -1 if side == "left" else 1
         fill = GREEN if lit else (*theme.muted, 42)
         outline = (8, 118, 65) if lit else (*theme.muted, 150)
