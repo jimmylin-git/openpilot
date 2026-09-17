@@ -63,6 +63,12 @@ LIVE_VEHICLE_FADE_SECONDS = 0.30
 LIVE_VEHICLE_FADE_MIN_PROBABILITY = 0.8001
 RADAR_STATE_TARGET2_STABLE_SECONDS = 0.25
 RADAR_POINT_STABLE_SECONDS = 0.10
+# radarPoint has no upstream fusion/smoothing like detected_vehicles, so a point
+# that just cleared the stability filter can still vanish on the very next liveTracks
+# sample. Hold it briefly and fade it out instead of dropping it instantly.
+RADAR_POINT_HOLD_SECONDS = 0.15
+RADAR_POINT_FADE_SECONDS = 0.15
+RADAR_POINT_FADE_MIN_PROBABILITY = 0.40
 VEHICLE_FILTER_LOG_PATH = "/data/media/0/cluster_vehicle_objects.jsonl"
 VEHICLE_FILTER_LOG_VERSION = 3
 
@@ -103,6 +109,7 @@ class OpenpilotLiveSource:
         self._radar_filter_last_payload: dict[tuple[str, str], dict[str, object]] = {}
         self._radar_filter_sample_count: dict[tuple[str, str], int] = {}
         self._last_radar_filter_update_t = -999.0
+        self._radar_missing_since: dict[tuple[str, str], float] = {}
         self._filter_log_file = None
         self._filter_log_disabled = False
         self.start_t = time.monotonic()
@@ -430,11 +437,56 @@ class OpenpilotLiveSource:
             if key in active_vehicle_keys or key in target2_keys
         }
 
+        current_radar_active_keys = {
+            (point.label, point.source) for point in state.radar_points
+        }
+        for key in current_radar_active_keys:
+            self._radar_missing_since.pop(key, None)
+        smoothed_radar_points = state.radar_points
+        for point in previous.radar_points:
+            key = (point.label, point.source)
+            if key in current_radar_active_keys:
+                continue
+            if key in current_radar_keys:
+                # The raw sensor already reports a new candidate under this key
+                # (e.g. a reused liveTracks trackId). Let it requalify through the
+                # stability filter instead of continuing to show the stale point.
+                self._radar_missing_since.pop(key, None)
+                continue
+            missing_since = self._radar_missing_since.setdefault(key, now)
+            missing_for = now - missing_since
+            if missing_for > RADAR_POINT_HOLD_SECONDS + RADAR_POINT_FADE_SECONDS:
+                continue
+            if missing_for <= RADAR_POINT_HOLD_SECONDS:
+                smoothed_radar_points += (point,)
+                continue
+            fade = 1.0 - (
+                (missing_for - RADAR_POINT_HOLD_SECONDS) / RADAR_POINT_FADE_SECONDS
+            )
+            base_probability = (
+                point.probability if point.probability is not None else RADAR_POINT_FADE_MIN_PROBABILITY
+            )
+            faded_probability = RADAR_POINT_FADE_MIN_PROBABILITY + (
+                max(RADAR_POINT_FADE_MIN_PROBABILITY, base_probability)
+                - RADAR_POINT_FADE_MIN_PROBABILITY
+            ) * clamp(fade, 0.0, 1.0)
+            smoothed_radar_points += (replace(point, probability=faded_probability),)
+
+        active_radar_keys = {
+            (point.label, point.source) for point in smoothed_radar_points
+        }
+        self._radar_missing_since = {
+            key: missing_since
+            for key, missing_since in self._radar_missing_since.items()
+            if key in active_radar_keys
+        }
+
         smoothed = replace(
             state,
             lanes=self._smooth_lanes(state.lanes, previous.lanes, alpha),
             model_path=self._smooth_model_path(state.model_path, previous.model_path, alpha),
             detected_vehicles=smoothed_vehicles,
+            radar_points=smoothed_radar_points,
         )
         self._smoothed_state = smoothed
         self._smoothed_state_t = now
@@ -507,6 +559,7 @@ class OpenpilotLiveSource:
         self._stable_radar_keys.clear()
         self._radar_filter_last_payload.clear()
         self._radar_filter_sample_count.clear()
+        self._radar_missing_since.clear()
         self._last_target2_filter_update_t = -999.0
         self._last_radar_filter_update_t = -999.0
 

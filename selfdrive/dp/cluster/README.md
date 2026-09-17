@@ -340,6 +340,14 @@ JSONL file. Stability is measured across distinct sensor updates rather than
 render frames. Each record includes a `record_type`, threshold, sample count,
 candidate duration, raw position, speed, probability, and sensor source for
 later tuning.
+Because raw `radarPoint` data has no upstream fusion/hold logic like
+`detected_vehicles`, a point that just cleared the stability delay can still
+disappear on the very next `liveTracks` sample. To avoid that residual
+flicker, radar points that just passed the stability filter are held at full
+probability for 0.15 seconds after they stop appearing in the sensor data,
+then fade their probability down to a 0.40 floor over another 0.15 seconds
+before being dropped, mirroring the hold/fade behavior already used for
+`detected_vehicles` leads.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar
