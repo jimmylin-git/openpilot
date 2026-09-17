@@ -155,7 +155,7 @@ TEXT_MEASURE_CACHE_LIMIT = 1024
 TRIANGLE_STRIP_POINT_CACHE_LIMIT = 256
 VEHICLE_OBJECT_LOG_PATH = "/data/media/0/cluster_vehicle_objects.jsonl"
 VEHICLE_OBJECT_LOG_INTERVAL_SECONDS = 1.0
-VEHICLE_OBJECT_LOG_VERSION = 2
+VEHICLE_OBJECT_LOG_VERSION = 3
 DEBUG_PLOT_MAX_SAMPLES = 360
 DEBUG_PLOT_SAMPLE_SECONDS = 0.05
 DEBUG_PLOT_MARGIN = 18.0
@@ -1674,6 +1674,7 @@ class ClusterUiRenderer:
     def _vehicle_log_payload(vehicle: VehicleBox) -> dict[str, object]:
         return {
             "log_version": VEHICLE_OBJECT_LOG_VERSION,
+            "record_type": "rendered_vehicle",
             "label": vehicle.label,
             "source": vehicle.source,
             "source_base": vehicle.source.split("+radar:", 1)[0],

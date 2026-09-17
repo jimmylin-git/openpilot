@@ -332,6 +332,14 @@ leads light blue, comma model leads dark blue, and ADAS corner detections from
 `0x162`/`0x1EA` green.
 Radar samples whose distance and left/right offset are both zero are treated as
 empty/default data and are not drawn as radar points or vehicle boxes.
+Live `radarPoint` candidates must remain present for 0.10 seconds before they
+are displayed; `radarState` `TARGET2` candidates retain their 0.25-second
+stability delay. Vehicle log version 3 records `filter_pending`,
+`filter_passed`, `filtered`, and `filter_expired` stability events in the same
+JSONL file. Stability is measured across distinct sensor updates rather than
+render frames. Each record includes a `record_type`, threshold, sample count,
+candidate duration, raw position, speed, probability, and sensor source for
+later tuning.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from cluster_models import (
     LaneMarking,
     LiveDebugInfo,
     ModelPathPoint,
+    RadarPoint,
 )
 from cluster_route_replay import RouteLogParser, finite_float, frame_to_state, safe_get, safe_optional_float
 from cluster_utils import clamp
@@ -60,6 +62,9 @@ LIVE_VEHICLE_HOLD_SECONDS = 0.30
 LIVE_VEHICLE_FADE_SECONDS = 0.30
 LIVE_VEHICLE_FADE_MIN_PROBABILITY = 0.8001
 RADAR_STATE_TARGET2_STABLE_SECONDS = 0.25
+RADAR_POINT_STABLE_SECONDS = 0.10
+VEHICLE_FILTER_LOG_PATH = "/data/media/0/cluster_vehicle_objects.jsonl"
+VEHICLE_FILTER_LOG_VERSION = 3
 
 
 class OpenpilotLiveSource:
@@ -90,6 +95,16 @@ class OpenpilotLiveSource:
         self._vehicle_missing_since: dict[tuple[str, str], float] = {}
         self._vehicle_seen_since: dict[tuple[str, str], float] = {}
         self._stable_vehicle_keys: set[tuple[str, str]] = set()
+        self._vehicle_filter_last_payload: dict[tuple[str, str], dict[str, object]] = {}
+        self._vehicle_filter_sample_count: dict[tuple[str, str], int] = {}
+        self._last_target2_filter_update_t = -999.0
+        self._radar_seen_since: dict[tuple[str, str], float] = {}
+        self._stable_radar_keys: set[tuple[str, str]] = set()
+        self._radar_filter_last_payload: dict[tuple[str, str], dict[str, object]] = {}
+        self._radar_filter_sample_count: dict[tuple[str, str], int] = {}
+        self._last_radar_filter_update_t = -999.0
+        self._filter_log_file = None
+        self._filter_log_disabled = False
         self.start_t = time.monotonic()
         self.frames = 0
         self.params: Any | None = None
@@ -186,6 +201,7 @@ class OpenpilotLiveSource:
         state = self._standby_state
         self._profile_add("source.live.standby_state", profile_stage)
 
+        self._reset_stability_filters(time.monotonic())
         self.last_state = self._with_debug_state(state)
         return self.last_state
 
@@ -217,18 +233,120 @@ class OpenpilotLiveSource:
         current_vehicle_keys = {
             (vehicle.label, vehicle.source) for vehicle in state.detected_vehicles
         }
-        target2_keys = {
-            (vehicle.label, vehicle.source)
+        target2_by_key = {
+            (vehicle.label, vehicle.source): vehicle
             for vehicle in state.detected_vehicles
             if vehicle.label == "TARGET2" and vehicle.source == "radarState"
         }
-        for key in target2_keys:
-            self._vehicle_seen_since.setdefault(key, now)
-            if now - self._vehicle_seen_since[key] >= RADAR_STATE_TARGET2_STABLE_SECONDS:
-                self._stable_vehicle_keys.add(key)
-        for key in tuple(self._vehicle_seen_since):
-            if key not in current_vehicle_keys and key not in self._stable_vehicle_keys:
+        target2_keys = set(target2_by_key)
+        target2_update_t = self.parser.radar_detection_t
+        if target2_update_t != self._last_target2_filter_update_t:
+            self._last_target2_filter_update_t = target2_update_t
+            for key, vehicle in target2_by_key.items():
+                payload = self._vehicle_filter_payload(vehicle)
+                self._vehicle_filter_last_payload[key] = payload
+                if key not in self._vehicle_seen_since:
+                    self._vehicle_seen_since[key] = target2_update_t
+                    self._vehicle_filter_sample_count[key] = 1
+                    self._write_filter_event(
+                        "filter_pending",
+                        now,
+                        RADAR_STATE_TARGET2_STABLE_SECONDS,
+                        {**payload, "sample_count": 1},
+                    )
+                else:
+                    self._vehicle_filter_sample_count[key] += 1
+                candidate_duration_s = target2_update_t - self._vehicle_seen_since[key]
+                if (
+                    self._vehicle_filter_sample_count[key] >= 2
+                    and candidate_duration_s >= RADAR_STATE_TARGET2_STABLE_SECONDS
+                    and key not in self._stable_vehicle_keys
+                ):
+                    self._stable_vehicle_keys.add(key)
+                    self._write_filter_event(
+                        "filter_passed",
+                        now,
+                        RADAR_STATE_TARGET2_STABLE_SECONDS,
+                        {**payload, "sample_count": self._vehicle_filter_sample_count[key]},
+                        candidate_duration_s,
+                    )
+            for key in tuple(self._vehicle_seen_since):
+                if key in target2_keys:
+                    continue
+                event = "filter_expired" if key in self._stable_vehicle_keys else "filtered"
+                self._write_filter_event(
+                    event,
+                    now,
+                    RADAR_STATE_TARGET2_STABLE_SECONDS,
+                    {
+                        **self._vehicle_filter_last_payload[key],
+                        "sample_count": self._vehicle_filter_sample_count[key],
+                    },
+                    max(0.0, target2_update_t - self._vehicle_seen_since[key]),
+                )
                 self._vehicle_seen_since.pop(key, None)
+                self._vehicle_filter_last_payload.pop(key, None)
+                self._vehicle_filter_sample_count.pop(key, None)
+                self._stable_vehicle_keys.discard(key)
+
+        current_radar_keys = {
+            (point.label, point.source) for point in state.radar_points
+        }
+        radar_by_key = {
+            (point.label, point.source): point for point in state.radar_points
+        }
+        radar_update_t = self.parser.live_track_radar_t
+        radar_snapshot_changed = radar_update_t != self._last_radar_filter_update_t
+        radar_snapshot_expired = not current_radar_keys and bool(self._radar_seen_since)
+        if radar_snapshot_changed or radar_snapshot_expired:
+            self._last_radar_filter_update_t = radar_update_t
+            for key, point in radar_by_key.items():
+                payload = self._radar_filter_payload(point)
+                self._radar_filter_last_payload[key] = payload
+                if key not in self._radar_seen_since:
+                    self._radar_seen_since[key] = radar_update_t
+                    self._radar_filter_sample_count[key] = 1
+                    self._write_filter_event(
+                        "filter_pending",
+                        now,
+                        RADAR_POINT_STABLE_SECONDS,
+                        {**payload, "sample_count": 1},
+                    )
+                else:
+                    self._radar_filter_sample_count[key] += 1
+                candidate_duration_s = radar_update_t - self._radar_seen_since[key]
+                if (
+                    self._radar_filter_sample_count[key] >= 2
+                    and candidate_duration_s >= RADAR_POINT_STABLE_SECONDS
+                    and key not in self._stable_radar_keys
+                ):
+                    self._stable_radar_keys.add(key)
+                    self._write_filter_event(
+                        "filter_passed",
+                        now,
+                        RADAR_POINT_STABLE_SECONDS,
+                        {**payload, "sample_count": self._radar_filter_sample_count[key]},
+                        candidate_duration_s,
+                    )
+            for key in tuple(self._radar_seen_since):
+                if key in current_radar_keys:
+                    continue
+                event = "filter_expired" if key in self._stable_radar_keys else "filtered"
+                self._write_filter_event(
+                    event,
+                    now,
+                    RADAR_POINT_STABLE_SECONDS,
+                    {
+                        **self._radar_filter_last_payload[key],
+                        "sample_count": self._radar_filter_sample_count[key],
+                    },
+                    max(0.0, radar_update_t - self._radar_seen_since[key]),
+                )
+                self._radar_seen_since.pop(key, None)
+                self._radar_filter_last_payload.pop(key, None)
+                self._radar_filter_sample_count.pop(key, None)
+                self._stable_radar_keys.discard(key)
+
         state = replace(
             state,
             detected_vehicles=tuple(
@@ -239,6 +357,11 @@ class OpenpilotLiveSource:
                     or vehicle.source != "radarState"
                     or (vehicle.label, vehicle.source) in self._stable_vehicle_keys
                 )
+            ),
+            radar_points=tuple(
+                point
+                for point in state.radar_points
+                if (point.label, point.source) in self._stable_radar_keys
             ),
         )
         previous = self._smoothed_state
@@ -296,6 +419,16 @@ class OpenpilotLiveSource:
             for key, seen_since in self._vehicle_seen_since.items()
             if key in active_vehicle_keys or key in target2_keys
         }
+        self._vehicle_filter_last_payload = {
+            key: payload
+            for key, payload in self._vehicle_filter_last_payload.items()
+            if key in active_vehicle_keys or key in target2_keys
+        }
+        self._vehicle_filter_sample_count = {
+            key: sample_count
+            for key, sample_count in self._vehicle_filter_sample_count.items()
+            if key in active_vehicle_keys or key in target2_keys
+        }
 
         smoothed = replace(
             state,
@@ -306,6 +439,117 @@ class OpenpilotLiveSource:
         self._smoothed_state = smoothed
         self._smoothed_state_t = now
         return smoothed
+
+    def _write_filter_event(
+        self,
+        event: str,
+        now: float,
+        threshold_s: float,
+        payload: dict[str, object],
+        candidate_duration_s: float | None = None,
+    ) -> None:
+        if self._filter_log_disabled:
+            return
+        record = {
+            "event": event,
+            "monotonic_s": round(now, 3),
+            "log_version": VEHICLE_FILTER_LOG_VERSION,
+            "record_type": "stability_filter",
+            "filter_reason": "stability_delay",
+            "stability_threshold_s": threshold_s,
+            **payload,
+        }
+        if candidate_duration_s is not None:
+            record["candidate_duration_s"] = round(candidate_duration_s, 3)
+        try:
+            if self._filter_log_file is None:
+                path = Path(os.environ.get("CLUSTER_VEHICLE_LOG_PATH", VEHICLE_FILTER_LOG_PATH))
+                path.parent.mkdir(parents=True, exist_ok=True)
+                self._filter_log_file = path.open("a", encoding="utf-8", buffering=1)
+            self._filter_log_file.write(json.dumps(record, separators=(",", ":")) + "\n")
+        except OSError as exc:
+            if self._filter_log_file is not None:
+                self._filter_log_file.close()
+                self._filter_log_file = None
+            print(f"Cluster vehicle filter log disabled: {exc}", file=sys.stderr)
+            self._filter_log_disabled = True
+
+    def _reset_stability_filters(self, now: float) -> None:
+        for key, seen_since in tuple(self._vehicle_seen_since.items()):
+            event = "filter_expired" if key in self._stable_vehicle_keys else "filtered"
+            self._write_filter_event(
+                event,
+                now,
+                RADAR_STATE_TARGET2_STABLE_SECONDS,
+                {
+                    **self._vehicle_filter_last_payload[key],
+                    "sample_count": self._vehicle_filter_sample_count[key],
+                },
+                max(0.0, self.parser.radar_detection_t - seen_since),
+            )
+        for key, seen_since in tuple(self._radar_seen_since.items()):
+            event = "filter_expired" if key in self._stable_radar_keys else "filtered"
+            self._write_filter_event(
+                event,
+                now,
+                RADAR_POINT_STABLE_SECONDS,
+                {
+                    **self._radar_filter_last_payload[key],
+                    "sample_count": self._radar_filter_sample_count[key],
+                },
+                max(0.0, self.parser.live_track_radar_t - seen_since),
+            )
+        self._vehicle_seen_since.clear()
+        self._stable_vehicle_keys.clear()
+        self._vehicle_filter_last_payload.clear()
+        self._vehicle_filter_sample_count.clear()
+        self._radar_seen_since.clear()
+        self._stable_radar_keys.clear()
+        self._radar_filter_last_payload.clear()
+        self._radar_filter_sample_count.clear()
+        self._last_target2_filter_update_t = -999.0
+        self._last_radar_filter_update_t = -999.0
+
+    @staticmethod
+    def _vehicle_filter_payload(vehicle: DetectedVehicle) -> dict[str, object]:
+        return {
+            "label": vehicle.label,
+            "source": vehicle.source,
+            "source_base": vehicle.source.split("+radar:", 1)[0],
+            "raw_probability": round(vehicle.probability, 3),
+            "longitudinal_m": round(vehicle.longitudinal_m, 3),
+            "lateral_m": round(vehicle.lateral_m, 3),
+            "relative_speed_mps": (
+                round(vehicle.relative_speed_mps, 3)
+                if vehicle.relative_speed_mps is not None else None
+            ),
+            "absolute_speed_kph": (
+                round(vehicle.absolute_speed_kph, 3)
+                if vehicle.absolute_speed_kph is not None else None
+            ),
+        }
+
+    @staticmethod
+    def _radar_filter_payload(point: RadarPoint) -> dict[str, object]:
+        return {
+            "label": point.label,
+            "source": "radarPoint",
+            "source_base": "radarPoint",
+            "sensor_source": point.source,
+            "raw_probability": (
+                round(point.probability, 3) if point.probability is not None else None
+            ),
+            "longitudinal_m": round(point.longitudinal_m, 3),
+            "lateral_m": round(point.lateral_m, 3),
+            "relative_speed_mps": (
+                round(point.relative_speed_mps, 3)
+                if point.relative_speed_mps is not None else None
+            ),
+            "absolute_speed_kph": (
+                round(point.absolute_speed_kph, 3)
+                if point.absolute_speed_kph is not None else None
+            ),
+        }
 
     @staticmethod
     def _smooth_lanes(
@@ -420,7 +664,10 @@ class OpenpilotLiveSource:
         return int(round(clamp(self._smoothed_ambient_brightness, 0.0, 100.0)))
 
     def close(self) -> None:
-        return None
+        self._reset_stability_filters(time.monotonic())
+        if self._filter_log_file is not None:
+            self._filter_log_file.close()
+            self._filter_log_file = None
 
     def _apply_service_update(self, service: str, event_t: float) -> None:
         data = self.sm[service]
