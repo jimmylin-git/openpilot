@@ -155,7 +155,7 @@ TEXT_MEASURE_CACHE_LIMIT = 1024
 TRIANGLE_STRIP_POINT_CACHE_LIMIT = 256
 VEHICLE_OBJECT_LOG_PATH = "/data/media/0/cluster_vehicle_objects.jsonl"
 VEHICLE_OBJECT_LOG_INTERVAL_SECONDS = 1.0
-VEHICLE_OBJECT_LOG_VERSION = 3
+VEHICLE_OBJECT_LOG_VERSION = 4
 DEBUG_PLOT_MAX_SAMPLES = 360
 DEBUG_PLOT_SAMPLE_SECONDS = 0.05
 DEBUG_PLOT_MARGIN = 18.0
@@ -1704,6 +1704,8 @@ class ClusterUiRenderer:
             ),
             "ttc_s": round(vehicle.ttc_s, 3) if vehicle.ttc_s is not None else None,
             "cut_in": vehicle.cut_in,
+            "stability_gate": vehicle.stability_gate,
+            "render_phase": vehicle.render_phase,
         }
 
     def _record_vehicle_draw(self, vehicle: VehicleBox, now: float) -> None:
@@ -1748,9 +1750,27 @@ class ClusterUiRenderer:
                 "monotonic_s": round(now, 3),
                 "duration_s": round(track["last_seen"] - track["first_seen"], 3),
                 "missing_s": round(now - track["last_seen"], 3),
+                "disappear_reason": self._disappear_reason(track["last_payload"].get("render_phase")),
                 **track["last_payload"],
             })
             del self._vehicle_log_tracks[key]
+
+    @staticmethod
+    def _disappear_reason(last_render_phase: object) -> str:
+        # last_render_phase reflects the OpenpilotLiveSource hold/fade state the
+        # object had the last time it was actually drawn. If it disappeared
+        # while still "active"/"held" (i.e. the live source was still reporting
+        # or holding it), the scene-composition step (lane filtering, merging,
+        # hidden-by-another-box, etc.) dropped it, not the stability/hold/fade
+        # logic. Only "fading" means it disappeared as designed once the
+        # hold+fade window ran out.
+        if last_render_phase == "fading":
+            return "faded_out"
+        if last_render_phase == "held":
+            return "scene_drop_while_held"
+        if last_render_phase == "active":
+            return "scene_drop_while_active"
+        return "unknown"
 
     def _draw_strip(self, strip: MeshStrip) -> None:
         count = min(len(strip.left), len(strip.right))

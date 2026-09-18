@@ -268,6 +268,10 @@ class VehicleBox:
     cut_in: bool = False
     primary: bool = False
     annotate: bool = False
+    # Diagnostic-only fields carried from DetectedVehicle/RadarPoint for the
+    # vehicle object log; see cluster_models.py for their meaning.
+    stability_gate: str | None = None
+    render_phase: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1882,7 +1886,26 @@ def merged_radar_point(points: list[RadarPoint], state: ClusterUiState) -> Radar
         in_my_lane=max_optional_int(point.in_my_lane for point in points),
         motion_consistent=merged_radar_motion_consistent(point.motion_consistent for point in points),
         promotion_held=any(point.promotion_held for point in points),
+        stability_gate=merged_radar_point_stability_gate(point.stability_gate for point in points),
+        render_phase=merged_radar_point_render_phase(point.render_phase for point in points),
     )
+
+
+def merged_radar_point_stability_gate(values: Iterable[str | None]) -> str | None:
+    # Every raw radar point that survives to this point already passed the
+    # stability filter, so "delayed" wins whenever present.
+    seen = [value for value in values if value is not None]
+    return "delayed" if "delayed" in seen else (seen[0] if seen else None)
+
+
+def merged_radar_point_render_phase(values: Iterable[str | None]) -> str | None:
+    # Prefer the most "alive" phase among the merged points so a merged box
+    # reads as held/fading only once every contributing point is missing.
+    seen = {value for value in values if value is not None}
+    for phase in ("active", "held", "fading"):
+        if phase in seen:
+            return phase
+    return None
 
 
 def average_float(values: Iterable[float]) -> float:
@@ -2274,6 +2297,8 @@ def radar_vehicle_box(
         absolute_speed_kph=radar_point_absolute_speed_kph(point, state),
         acceleration_mps2=point.relative_accel_mps2,
         annotate=False,
+        stability_gate=point.stability_gate,
+        render_phase=point.render_phase,
     )
 
 
@@ -2685,6 +2710,8 @@ def vehicle_box(
     annotate: bool = False,
     x_offset_m: float = 0.0,
     lock_lane_center: bool = True,
+    stability_gate: str | None = None,
+    render_phase: str | None = None,
 ) -> VehicleBox:
     confidence = clamp(confidence, 0.0, 1.0)
     alpha = int(92 + 163 * confidence)
@@ -2733,6 +2760,8 @@ def vehicle_box(
         cut_in=cut_in,
         primary=primary,
         annotate=annotate,
+        stability_gate=stability_gate,
+        render_phase=render_phase,
     )
 
 
@@ -3480,6 +3509,8 @@ def build_cluster_scene(
                 primary=detected.primary,
                 annotate=vehicle_badge_has_special_info(detected),
                 x_offset_m=relative_scene_x_offset_m,
+                stability_gate=detected.stability_gate,
+                render_phase=detected.render_phase,
             )
             for detected, display_confidence in detected_vehicle_boxes_with_confidence
             if display_confidence is not None

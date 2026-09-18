@@ -99,6 +99,17 @@ class DetectedVehicle:
     ttc_s: float | None = None
     x_std_m: float | None = None
     y_std_m: float | None = None
+    # Diagnostic-only fields stamped by OpenpilotLiveSource._smooth_scene_state()
+    # for the vehicle filter/log audit trail; not used for rendering decisions.
+    # stability_gate: "immediate" (no stability delay applied, e.g. TARGET/SCC
+    # radar or a radar-supported model lead) or "delayed" (had to clear a
+    # stability filter, e.g. TARGET2 or an unsupported model lead).
+    stability_gate: str | None = None
+    # render_phase: "active" (currently reported by the sensor this frame),
+    # "held" (missing this frame but still shown at full confidence during the
+    # hold window), or "fading" (missing and fading out toward the minimum
+    # displayed probability before being dropped).
+    render_phase: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +128,9 @@ class RadarPoint:
     in_my_lane: int | None = None
     motion_consistent: bool | None = None
     promotion_held: bool = False
+    # See DetectedVehicle above for the meaning of these diagnostic fields.
+    stability_gate: str | None = None
+    render_phase: str | None = None
 
 
 RADAR_ZERO_POSITION_EPS_M = 1e-3

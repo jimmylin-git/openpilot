@@ -351,6 +351,26 @@ probability for 0.15 seconds after they stop appearing in the sensor data,
 then fade their probability down to a 0.40 floor over another 0.15 seconds
 before being dropped, mirroring the hold/fade behavior already used for
 `detected_vehicles` leads.
+Vehicle log version 4 adds diagnostic-only `stability_gate` and `render_phase`
+fields to `rendered_vehicle` records (the `stability_filter` records already
+encode the same distinction implicitly via `source_base` and the
+`filter_pending`/`filter_passed`/`filtered`/`filter_expired` event names).
+`stability_gate` is `"immediate"` for objects that never needed a stability
+delay (`TARGET`, other `radarState`/`carState`/corner-radar sources, and
+radar-supported model leads) or `"delayed"` for objects that had to clear a
+stability filter (`TARGET2`, `radarPoint`, and unsupported model leads).
+`render_phase` is `"active"` while the sensor is currently reporting the
+object, `"held"` while it is missing but still shown at full confidence
+during the hold window, or `"fading"` while its probability is ramping down
+toward the minimum before being dropped. `rendered_vehicle` `disappeared`
+events also add a `disappear_reason` derived from the last known
+`render_phase`: `"faded_out"` means the object disappeared as designed once
+its hold/fade window ran out, while `"scene_drop_while_active"` or
+`"scene_drop_while_held"` mean the scene-composition step (lane filtering,
+merging, hidden-by-another-box, etc.) stopped drawing the object even though
+`OpenpilotLiveSource` was still actively reporting or holding it -- a useful
+signal for telling stability/hold-fade flicker apart from rendering-layer
+flicker.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar

@@ -71,7 +71,7 @@ RADAR_POINT_HOLD_SECONDS = 0.15
 RADAR_POINT_FADE_SECONDS = 0.15
 RADAR_POINT_FADE_MIN_PROBABILITY = 0.40
 VEHICLE_FILTER_LOG_PATH = "/data/media/0/cluster_vehicle_objects.jsonl"
-VEHICLE_FILTER_LOG_VERSION = 3
+VEHICLE_FILTER_LOG_VERSION = 4
 
 
 class OpenpilotLiveSource:
@@ -453,6 +453,32 @@ class OpenpilotLiveSource:
                 )
             ),
         )
+
+        # Stamp diagnostic-only stability_gate/render_phase fields for the
+        # vehicle object log. These do not affect rendering, only what gets
+        # written to the audit trail so flicker can be traced back to its
+        # source: a stability filter delay vs. the hold/fade below vs. a
+        # scene-composition step dropping the object outright.
+        state = replace(
+            state,
+            detected_vehicles=tuple(
+                replace(
+                    vehicle,
+                    stability_gate=(
+                        "delayed"
+                        if (vehicle.label, vehicle.source) in unsupported_model_keys
+                        or (vehicle.label == "TARGET2" and vehicle.source == "radarState")
+                        else "immediate"
+                    ),
+                    render_phase="active",
+                )
+                for vehicle in state.detected_vehicles
+            ),
+            radar_points=tuple(
+                replace(point, stability_gate="delayed", render_phase="active")
+                for point in state.radar_points
+            ),
+        )
         previous = self._smoothed_state
         previous_t = self._smoothed_state_t
         if previous is None or previous_t is None:
@@ -482,7 +508,7 @@ class OpenpilotLiveSource:
             if missing_for > LIVE_VEHICLE_HOLD_SECONDS + LIVE_VEHICLE_FADE_SECONDS:
                 continue
             if missing_for <= LIVE_VEHICLE_HOLD_SECONDS:
-                smoothed_vehicles += (vehicle,)
+                smoothed_vehicles += (replace(vehicle, render_phase="held"),)
                 continue
             fade = 1.0 - (
                 (missing_for - LIVE_VEHICLE_HOLD_SECONDS) / LIVE_VEHICLE_FADE_SECONDS
@@ -491,7 +517,7 @@ class OpenpilotLiveSource:
                 max(LIVE_VEHICLE_FADE_MIN_PROBABILITY, vehicle.probability)
                 - LIVE_VEHICLE_FADE_MIN_PROBABILITY
             ) * clamp(fade, 0.0, 1.0)
-            smoothed_vehicles += (replace(vehicle, probability=faded_probability),)
+            smoothed_vehicles += (replace(vehicle, probability=faded_probability, render_phase="fading"),)
 
         active_vehicle_keys = {
             (vehicle.label, vehicle.source)
@@ -556,7 +582,7 @@ class OpenpilotLiveSource:
             if missing_for > RADAR_POINT_HOLD_SECONDS + RADAR_POINT_FADE_SECONDS:
                 continue
             if missing_for <= RADAR_POINT_HOLD_SECONDS:
-                smoothed_radar_points += (point,)
+                smoothed_radar_points += (replace(point, render_phase="held"),)
                 continue
             fade = 1.0 - (
                 (missing_for - RADAR_POINT_HOLD_SECONDS) / RADAR_POINT_FADE_SECONDS
@@ -568,7 +594,7 @@ class OpenpilotLiveSource:
                 max(RADAR_POINT_FADE_MIN_PROBABILITY, base_probability)
                 - RADAR_POINT_FADE_MIN_PROBABILITY
             ) * clamp(fade, 0.0, 1.0)
-            smoothed_radar_points += (replace(point, probability=faded_probability),)
+            smoothed_radar_points += (replace(point, probability=faded_probability, render_phase="fading"),)
 
         active_radar_keys = {
             (point.label, point.source) for point in smoothed_radar_points
