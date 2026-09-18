@@ -63,6 +63,7 @@ LIVE_VEHICLE_FADE_SECONDS = 0.30
 LIVE_VEHICLE_FADE_MIN_PROBABILITY = 0.8001
 RADAR_STATE_TARGET2_STABLE_SECONDS = 0.25
 RADAR_POINT_STABLE_SECONDS = 0.10
+MODEL_LEAD_STABLE_SECONDS = 0.18
 # radarPoint has no upstream fusion/smoothing like detected_vehicles, so a point
 # that just cleared the stability filter can still vanish on the very next liveTracks
 # sample. Hold it briefly and fade it out instead of dropping it instantly.
@@ -104,6 +105,11 @@ class OpenpilotLiveSource:
         self._vehicle_filter_last_payload: dict[tuple[str, str], dict[str, object]] = {}
         self._vehicle_filter_sample_count: dict[tuple[str, str], int] = {}
         self._last_target2_filter_update_t = -999.0
+        self._model_vehicle_seen_since: dict[tuple[str, str], float] = {}
+        self._stable_model_vehicle_keys: set[tuple[str, str]] = set()
+        self._model_vehicle_filter_last_payload: dict[tuple[str, str], dict[str, object]] = {}
+        self._model_vehicle_filter_sample_count: dict[tuple[str, str], int] = {}
+        self._last_model_filter_update_t = -999.0
         self._radar_seen_since: dict[tuple[str, str], float] = {}
         self._stable_radar_keys: set[tuple[str, str]] = set()
         self._radar_filter_last_payload: dict[tuple[str, str], dict[str, object]] = {}
@@ -371,6 +377,82 @@ class OpenpilotLiveSource:
                 if (point.label, point.source) in self._stable_radar_keys
             ),
         )
+        unsupported_model_by_key: dict[tuple[str, str], DetectedVehicle] = {}
+        unsupported_model_keys: set[tuple[str, str]] = set()
+        for vehicle in state.detected_vehicles:
+            key = (vehicle.label, vehicle.source)
+            if not vehicle.source.startswith("modelV2"):
+                continue
+            if self._model_vehicle_supported_by_radar(vehicle, state.radar_points):
+                continue
+            unsupported_model_by_key[key] = vehicle
+            unsupported_model_keys.add(key)
+
+        model_update_t = self.parser.model_detection_t
+        if model_update_t != self._last_model_filter_update_t:
+            self._last_model_filter_update_t = model_update_t
+            for key, vehicle in unsupported_model_by_key.items():
+                payload = self._vehicle_filter_payload(vehicle)
+                self._model_vehicle_filter_last_payload[key] = payload
+                if key not in self._model_vehicle_seen_since:
+                    self._model_vehicle_seen_since[key] = model_update_t
+                    self._model_vehicle_filter_sample_count[key] = 1
+                    self._write_filter_event(
+                        "filter_pending",
+                        now,
+                        MODEL_LEAD_STABLE_SECONDS,
+                        {**payload, "sample_count": 1},
+                    )
+                else:
+                    self._model_vehicle_filter_sample_count[key] += 1
+                candidate_duration_s = model_update_t - self._model_vehicle_seen_since[key]
+                if (
+                    self._model_vehicle_filter_sample_count[key] >= 2
+                    and candidate_duration_s >= MODEL_LEAD_STABLE_SECONDS
+                    and key not in self._stable_model_vehicle_keys
+                ):
+                    self._stable_model_vehicle_keys.add(key)
+                    self._write_filter_event(
+                        "filter_passed",
+                        now,
+                        MODEL_LEAD_STABLE_SECONDS,
+                        {
+                            **payload,
+                            "sample_count": self._model_vehicle_filter_sample_count[key],
+                        },
+                        candidate_duration_s,
+                    )
+            for key in tuple(self._model_vehicle_seen_since):
+                if key in unsupported_model_keys:
+                    continue
+                event = "filter_expired" if key in self._stable_model_vehicle_keys else "filtered"
+                self._write_filter_event(
+                    event,
+                    now,
+                    MODEL_LEAD_STABLE_SECONDS,
+                    {
+                        **self._model_vehicle_filter_last_payload[key],
+                        "sample_count": self._model_vehicle_filter_sample_count[key],
+                    },
+                    max(0.0, model_update_t - self._model_vehicle_seen_since[key]),
+                )
+                self._model_vehicle_seen_since.pop(key, None)
+                self._model_vehicle_filter_last_payload.pop(key, None)
+                self._model_vehicle_filter_sample_count.pop(key, None)
+                self._stable_model_vehicle_keys.discard(key)
+
+        state = replace(
+            state,
+            detected_vehicles=tuple(
+                vehicle
+                for vehicle in state.detected_vehicles
+                if (
+                    not vehicle.source.startswith("modelV2")
+                    or (vehicle.label, vehicle.source) not in unsupported_model_keys
+                    or (vehicle.label, vehicle.source) in self._stable_model_vehicle_keys
+                )
+            ),
+        )
         previous = self._smoothed_state
         previous_t = self._smoothed_state_t
         if previous is None or previous_t is None:
@@ -435,6 +517,22 @@ class OpenpilotLiveSource:
             key: sample_count
             for key, sample_count in self._vehicle_filter_sample_count.items()
             if key in active_vehicle_keys or key in target2_keys
+        }
+        self._stable_model_vehicle_keys.intersection_update(active_vehicle_keys)
+        self._model_vehicle_seen_since = {
+            key: seen_since
+            for key, seen_since in self._model_vehicle_seen_since.items()
+            if key in active_vehicle_keys or key in unsupported_model_keys
+        }
+        self._model_vehicle_filter_last_payload = {
+            key: payload
+            for key, payload in self._model_vehicle_filter_last_payload.items()
+            if key in active_vehicle_keys or key in unsupported_model_keys
+        }
+        self._model_vehicle_filter_sample_count = {
+            key: sample_count
+            for key, sample_count in self._model_vehicle_filter_sample_count.items()
+            if key in active_vehicle_keys or key in unsupported_model_keys
         }
 
         current_radar_active_keys = {
@@ -539,6 +637,18 @@ class OpenpilotLiveSource:
                 },
                 max(0.0, self.parser.radar_detection_t - seen_since),
             )
+        for key, seen_since in tuple(self._model_vehicle_seen_since.items()):
+            event = "filter_expired" if key in self._stable_model_vehicle_keys else "filtered"
+            self._write_filter_event(
+                event,
+                now,
+                MODEL_LEAD_STABLE_SECONDS,
+                {
+                    **self._model_vehicle_filter_last_payload[key],
+                    "sample_count": self._model_vehicle_filter_sample_count[key],
+                },
+                max(0.0, self.parser.model_detection_t - seen_since),
+            )
         for key, seen_since in tuple(self._radar_seen_since.items()):
             event = "filter_expired" if key in self._stable_radar_keys else "filtered"
             self._write_filter_event(
@@ -555,12 +665,17 @@ class OpenpilotLiveSource:
         self._stable_vehicle_keys.clear()
         self._vehicle_filter_last_payload.clear()
         self._vehicle_filter_sample_count.clear()
+        self._model_vehicle_seen_since.clear()
+        self._stable_model_vehicle_keys.clear()
+        self._model_vehicle_filter_last_payload.clear()
+        self._model_vehicle_filter_sample_count.clear()
         self._radar_seen_since.clear()
         self._stable_radar_keys.clear()
         self._radar_filter_last_payload.clear()
         self._radar_filter_sample_count.clear()
         self._radar_missing_since.clear()
         self._last_target2_filter_update_t = -999.0
+        self._last_model_filter_update_t = -999.0
         self._last_radar_filter_update_t = -999.0
 
     @staticmethod
@@ -603,6 +718,28 @@ class OpenpilotLiveSource:
                 if point.absolute_speed_kph is not None else None
             ),
         }
+
+    @staticmethod
+    def _model_vehicle_supported_by_radar(
+        vehicle: DetectedVehicle,
+        radar_points: tuple[RadarPoint, ...],
+    ) -> bool:
+        if not vehicle.source.startswith("modelV2"):
+            return False
+        if "+radar:" in vehicle.source:
+            return True
+        if vehicle.longitudinal_m <= 0.0:
+            return False
+        longitudinal_tolerance = max(3.5, min(10.0, vehicle.longitudinal_m * 0.20))
+        for point in radar_points:
+            if point.longitudinal_m <= 0.0:
+                continue
+            if (
+                abs(point.longitudinal_m - vehicle.longitudinal_m) <= longitudinal_tolerance
+                and abs(point.lateral_m - vehicle.lateral_m) <= 1.4
+            ):
+                return True
+        return False
 
     @staticmethod
     def _smooth_lanes(

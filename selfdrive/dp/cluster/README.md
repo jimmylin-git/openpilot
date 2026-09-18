@@ -340,6 +340,9 @@ JSONL file. Stability is measured across distinct sensor updates rather than
 render frames. Each record includes a `record_type`, threshold, sample count,
 candidate duration, raw position, speed, probability, and sensor source for
 later tuning.
+Unverified `modelV2.leadsV3` candidates (no nearby stable radar point support)
+now also use a short 0.18-second stability delay before rendering, while
+radar-supported model leads continue rendering immediately.
 Because raw `radarPoint` data has no upstream fusion/hold logic like
 `detected_vehicles`, a point that just cleared the stability delay can still
 disappear on the very next `liveTracks` sample. To avoid that residual
