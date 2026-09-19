@@ -2712,10 +2712,14 @@ def vehicle_box(
     lock_lane_center: bool = True,
     stability_gate: str | None = None,
     render_phase: str | None = None,
+    acc_active: bool = True,
 ) -> VehicleBox:
     confidence = clamp(confidence, 0.0, 1.0)
     alpha = int(92 + 163 * confidence)
-    body_color = GREEN if primary else color
+    # The locked lead only turns green while ACC is actually engaged; radar/vision
+    # still report a lead (primary=True) even when cruise is off, so gate the
+    # highlight color on cruise_display_state == "engaged" rather than `primary` alone.
+    body_color = GREEN if primary and acc_active else color
     offset = lane_center_locked_offset(offset, enabled=lock_lane_center)
     center_x_m = offset * lane_width_m + x_offset_m
     right_x, right_y, forward_x, forward_y = vehicle_heading(
@@ -3511,6 +3515,7 @@ def build_cluster_scene(
                 x_offset_m=relative_scene_x_offset_m,
                 stability_gate=detected.stability_gate,
                 render_phase=detected.render_phase,
+                acc_active=state.cruise_display_state == "engaged",
             )
             for detected, display_confidence in detected_vehicle_boxes_with_confidence
             if display_confidence is not None

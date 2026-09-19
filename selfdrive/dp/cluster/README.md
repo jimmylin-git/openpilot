@@ -330,6 +330,13 @@ reflections merge cleanly.
 vehicles yellow, `radarState` front/SCC radar leads red, camera-sourced vehicle
 leads light blue, comma model leads dark blue, and ADAS corner detections from
 `0x162`/`0x1EA` green.
+The locked front vehicle (`radarState.leadOne`, `DetectedVehicle.primary`)
+only renders green while ACC is actually engaged
+(`state.cruise_display_state == "engaged"`); `leadOne` can be populated by
+openpilot even while cruise is off/paused, so `vehicle_box()` gates the green
+highlight on an `acc_active` flag (derived from `cruise_display_state` at the
+`build_cluster_scene()` call site) instead of `primary` alone, and falls back
+to the normal source color otherwise.
 Radar samples whose distance and left/right offset are both zero are treated as
 empty/default data and are not drawn as radar points or vehicle boxes.
 Live `radarPoint` candidates must remain present for 0.10 seconds before they
