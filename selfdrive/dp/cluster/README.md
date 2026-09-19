@@ -378,6 +378,27 @@ merging, hidden-by-another-box, etc.) stopped drawing the object even though
 `OpenpilotLiveSource` was still actively reporting or holding it -- a useful
 signal for telling stability/hold-fade flicker apart from rendering-layer
 flicker.
+Live driving logs using the fields above showed most flicker was actually
+`scene_drop_while_active`, and the dominant cause was the fixed 3-lane
+display range check (`FRONT_VEHICLE_LANE_RANGE_LANES = 1.5`,
+`vehicle_in_forward_display_lanes()`/`point_in_forward_display_lanes()` in
+`cluster_scene.py`): a hard `abs(lane_offset) < 1.5` cutoff recomputed every
+frame with no hysteresis, so an object whose lane-offset estimate hovers at
+the boundary (from road-curvature/model noise) popped in and out of the
+display every frame even though the sensor never stopped reporting it.
+`OpenpilotLiveSource._smooth_scene_state()` now resolves this with a
+hysteresis band, stamping a `DetectedVehicle`/`RadarPoint.in_display_lanes`
+flag each frame: an object must cross inward past 1.5 lanes to become
+visible, but is only removed once it crosses outward past
+`FRONT_VEHICLE_LANE_RANGE_LANES + LANE_RANGE_EXIT_HYSTERESIS_LANES` (1.65
+lanes). `vehicle_in_forward_display_lanes()`/`point_in_forward_display_lanes()`
+use this flag instead of recomputing the raw threshold whenever it is set;
+it is `None` (falls back to the original raw-threshold behavior, no
+hysteresis) for paths that bypass `OpenpilotLiveSource`, e.g. route
+replay/simulator. `merged_radar_point()` (used to fuse nearby raw radar
+points into one box outside detail mode) re-derives this flag from its
+merged/averaged position rather than blindly trusting a constituent's flag,
+since a merge group can span both sides of the boundary.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar

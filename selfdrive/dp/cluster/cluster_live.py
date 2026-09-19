@@ -20,6 +20,11 @@ from cluster_models import (
     RadarPoint,
 )
 from cluster_route_replay import RouteLogParser, finite_float, frame_to_state, safe_get, safe_optional_float
+from cluster_scene import (
+    FRONT_VEHICLE_LANE_RANGE_LANES,
+    LANE_RANGE_EXIT_HYSTERESIS_LANES,
+    vehicle_lane_offset_from_lateral,
+)
 from cluster_utils import clamp
 
 
@@ -70,6 +75,13 @@ MODEL_LEAD_STABLE_SECONDS = 0.18
 RADAR_POINT_HOLD_SECONDS = 0.15
 RADAR_POINT_FADE_SECONDS = 0.15
 RADAR_POINT_FADE_MIN_PROBABILITY = 0.40
+# The fixed 3-lane display range boundary (FRONT_VEHICLE_LANE_RANGE_LANES /
+# LANE_RANGE_EXIT_HYSTERESIS_LANES, both in cluster_scene.py) is a hard
+# cutoff recomputed every frame from the live lane-offset estimate. An object
+# hovering right at that boundary (e.g. from road-curvature noise) flickers
+# in/out every frame with no hysteresis, so a wider "stay visible" margin is
+# applied here than the "become visible" one so an object already on screen
+# has to clearly leave the display range before it drops.
 VEHICLE_FILTER_LOG_PATH = "/data/media/0/cluster_vehicle_objects.jsonl"
 VEHICLE_FILTER_LOG_VERSION = 4
 
@@ -116,6 +128,7 @@ class OpenpilotLiveSource:
         self._radar_filter_sample_count: dict[tuple[str, str], int] = {}
         self._last_radar_filter_update_t = -999.0
         self._radar_missing_since: dict[tuple[str, str], float] = {}
+        self._lane_range_visible: dict[tuple[str, str], bool] = {}
         self._filter_log_file = None
         self._filter_log_disabled = False
         self.start_t = time.monotonic()
@@ -482,6 +495,10 @@ class OpenpilotLiveSource:
         previous = self._smoothed_state
         previous_t = self._smoothed_state_t
         if previous is None or previous_t is None:
+            tagged_vehicles, tagged_radar_points = self._apply_lane_range_hysteresis(
+                state.detected_vehicles, state.radar_points, state
+            )
+            state = replace(state, detected_vehicles=tagged_vehicles, radar_points=tagged_radar_points)
             self._smoothed_state = state
             self._smoothed_state_t = now
             return state
@@ -612,9 +629,65 @@ class OpenpilotLiveSource:
             detected_vehicles=smoothed_vehicles,
             radar_points=smoothed_radar_points,
         )
+        tagged_vehicles, tagged_radar_points = self._apply_lane_range_hysteresis(
+            smoothed.detected_vehicles, smoothed.radar_points, smoothed
+        )
+        smoothed = replace(smoothed, detected_vehicles=tagged_vehicles, radar_points=tagged_radar_points)
         self._smoothed_state = smoothed
         self._smoothed_state_t = now
         return smoothed
+
+    def _apply_lane_range_hysteresis(
+        self,
+        vehicles: tuple[DetectedVehicle, ...],
+        radar_points: tuple[RadarPoint, ...],
+        state: ClusterUiState,
+    ) -> tuple[tuple[DetectedVehicle, ...], tuple[RadarPoint, ...]]:
+        tagged_vehicles = tuple(
+            replace(
+                vehicle,
+                in_display_lanes=self._lane_range_hysteresis_visible(
+                    (vehicle.label, vehicle.source), vehicle.longitudinal_m, vehicle.lateral_m, state
+                ),
+            )
+            for vehicle in vehicles
+        )
+        tagged_radar_points = tuple(
+            replace(
+                point,
+                in_display_lanes=self._lane_range_hysteresis_visible(
+                    (point.label, point.source), point.longitudinal_m, point.lateral_m, state
+                ),
+            )
+            for point in radar_points
+        )
+        active_keys = {(vehicle.label, vehicle.source) for vehicle in tagged_vehicles}
+        active_keys |= {(point.label, point.source) for point in tagged_radar_points}
+        self._lane_range_visible = {
+            key: visible for key, visible in self._lane_range_visible.items() if key in active_keys
+        }
+        return tagged_vehicles, tagged_radar_points
+
+    def _lane_range_hysteresis_visible(
+        self,
+        key: tuple[str, str],
+        longitudinal_m: float,
+        lateral_m: float,
+        state: ClusterUiState,
+    ) -> bool:
+        if longitudinal_m <= 0.0:
+            self._lane_range_visible[key] = False
+            return False
+        offset = abs(vehicle_lane_offset_from_lateral(lateral_m, longitudinal_m, DEFAULT_LANE_WIDTH_M, state))
+        was_visible = self._lane_range_visible.get(key, False)
+        threshold = (
+            FRONT_VEHICLE_LANE_RANGE_LANES + LANE_RANGE_EXIT_HYSTERESIS_LANES
+            if was_visible
+            else FRONT_VEHICLE_LANE_RANGE_LANES
+        )
+        visible = offset < threshold
+        self._lane_range_visible[key] = visible
+        return visible
 
     def _write_filter_event(
         self,
@@ -700,6 +773,7 @@ class OpenpilotLiveSource:
         self._radar_filter_last_payload.clear()
         self._radar_filter_sample_count.clear()
         self._radar_missing_since.clear()
+        self._lane_range_visible.clear()
         self._last_target2_filter_update_t = -999.0
         self._last_model_filter_update_t = -999.0
         self._last_radar_filter_update_t = -999.0

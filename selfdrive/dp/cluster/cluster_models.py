@@ -110,6 +110,18 @@ class DetectedVehicle:
     # hold window), or "fading" (missing and fading out toward the minimum
     # displayed probability before being dropped).
     render_phase: str | None = None
+    # in_display_lanes: hysteresis-resolved "is this within the fixed 3-lane
+    # display range" decision, computed once per frame by
+    # OpenpilotLiveSource._smooth_scene_state() and consulted by
+    # vehicle_in_forward_display_lanes()/point_in_forward_display_lanes()
+    # instead of recomputing a hard threshold every frame. This IS used for
+    # rendering (unlike stability_gate/render_phase above): without
+    # hysteresis, an object whose lane offset hovers near the display-range
+    # boundary flickers in and out every frame. None means no hysteresis
+    # state is available (e.g. route replay/simulator paths that bypass
+    # OpenpilotLiveSource), in which case callers fall back to the raw
+    # threshold check.
+    in_display_lanes: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +143,9 @@ class RadarPoint:
     # See DetectedVehicle above for the meaning of these diagnostic fields.
     stability_gate: str | None = None
     render_phase: str | None = None
+    # See DetectedVehicle.in_display_lanes above; this one IS used for
+    # rendering decisions, unlike stability_gate/render_phase.
+    in_display_lanes: bool | None = None
 
 
 RADAR_ZERO_POSITION_EPS_M = 1e-3

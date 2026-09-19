@@ -75,6 +75,12 @@ FRONT_VEHICLE_FADE_RANGE = 0.20
 # adjacent lane on each side (front / front-left / front-right) are drawn,
 # in lane-width units.
 FRONT_VEHICLE_LANE_RANGE_LANES = 1.5
+# OpenpilotLiveSource applies hysteresis to the display-lane boundary above:
+# an object must cross inward past FRONT_VEHICLE_LANE_RANGE_LANES to become
+# visible, but is only removed once it crosses outward past
+# FRONT_VEHICLE_LANE_RANGE_LANES + LANE_RANGE_EXIT_HYSTERESIS_LANES, so noisy
+# lane-offset estimates hovering at the boundary don't flicker every frame.
+LANE_RANGE_EXIT_HYSTERESIS_LANES = 0.15
 FIXED_THREE_LANE_MARKING_OFFSETS = (-1.5, -0.5, 0.5, 1.5)
 RADAR_VEHICLE_MIN_VALID_COUNT = 20
 RADAR_VEHICLE_MAX_DISTANCE_M = 150.0
@@ -1871,10 +1877,12 @@ def merged_radar_point(points: list[RadarPoint], state: ClusterUiState) -> Radar
     first = points[0]
     label = first.label if len(points) == 1 else f"{first.label}+{len(points) - 1}"
     source = first.source if all(point.source == first.source for point in points) else "merged"
+    merged_longitudinal_m = average_float(point.longitudinal_m for point in points)
+    merged_lateral_m = average_float(point.lateral_m for point in points)
     return RadarPoint(
         label=label,
-        longitudinal_m=average_float(point.longitudinal_m for point in points),
-        lateral_m=average_float(point.lateral_m for point in points),
+        longitudinal_m=merged_longitudinal_m,
+        lateral_m=merged_lateral_m,
         source=source,
         relative_speed_mps=average_optional_float(point.relative_speed_mps for point in points),
         absolute_speed_kph=average_optional_float(radar_point_absolute_speed_kph(point, state) for point in points),
@@ -1888,6 +1896,9 @@ def merged_radar_point(points: list[RadarPoint], state: ClusterUiState) -> Radar
         promotion_held=any(point.promotion_held for point in points),
         stability_gate=merged_radar_point_stability_gate(point.stability_gate for point in points),
         render_phase=merged_radar_point_render_phase(point.render_phase for point in points),
+        in_display_lanes=merged_radar_point_in_display_lanes(
+            (point.in_display_lanes for point in points), merged_longitudinal_m, merged_lateral_m, state
+        ),
     )
 
 
@@ -1906,6 +1917,39 @@ def merged_radar_point_render_phase(values: Iterable[str | None]) -> str | None:
         if phase in seen:
             return phase
     return None
+
+
+def merged_radar_point_in_display_lanes(
+    values: Iterable[bool | None],
+    merged_longitudinal_m: float,
+    merged_lateral_m: float,
+    state: ClusterUiState,
+) -> bool | None:
+    # The merged point gets a synthetic label, so it never accumulates its
+    # own lane-range hysteresis history in OpenpilotLiveSource. None (no
+    # constituent tagged, e.g. route replay) falls back to
+    # point_in_forward_display_lanes() recomputing from the merged position
+    # with the raw (non-hysteresis) threshold.
+    #
+    # If any constituent was already resolved visible, widen the threshold to
+    # the hysteresis exit boundary rather than trusting the tag outright: a
+    # merge group can span both sides of the boundary (e.g. one constituent
+    # at 1.4 lanes, another at 2.1 lanes, still within the lateral merge
+    # tolerance of each other), and the averaged merged position must still
+    # actually be within range or the merged box would render well outside
+    # the intended fixed 3-lane display area.
+    seen = [value for value in values if value is not None]
+    if not seen:
+        return None
+    if merged_longitudinal_m <= 0.0:
+        return False
+    offset = abs(vehicle_lane_offset_from_lateral(merged_lateral_m, merged_longitudinal_m, DEFAULT_LANE_WIDTH_M, state))
+    threshold = (
+        FRONT_VEHICLE_LANE_RANGE_LANES + LANE_RANGE_EXIT_HYSTERESIS_LANES
+        if any(seen)
+        else FRONT_VEHICLE_LANE_RANGE_LANES
+    )
+    return offset < threshold
 
 
 def average_float(values: Iterable[float]) -> float:
@@ -2643,9 +2687,18 @@ def vehicle_in_forward_display_lanes(
 ) -> bool:
     """Only vehicles ahead of the ego car, within its own lane or one
     adjacent lane on either side (front / front-left / front-right), are
-    displayed - matching the fixed 3-lane layout."""
+    displayed - matching the fixed 3-lane layout.
+
+    Prefers OpenpilotLiveSource's hysteresis-resolved `in_display_lanes` hint
+    when available so an object whose lane offset hovers right at the
+    boundary doesn't flicker in/out every frame; falls back to a raw
+    threshold check (no hysteresis) for callers that don't set the hint,
+    e.g. route replay/simulator paths.
+    """
     if vehicle.longitudinal_m <= 0.0:
         return False
+    if vehicle.in_display_lanes is not None:
+        return vehicle.in_display_lanes
     offset = vehicle_lane_offset_from_lateral(vehicle.lateral_m, vehicle.longitudinal_m, lane_width_m, state)
     return abs(offset) < FRONT_VEHICLE_LANE_RANGE_LANES
 
@@ -2653,10 +2706,14 @@ def vehicle_in_forward_display_lanes(
 def point_in_forward_display_lanes(
     point: RadarPoint, lane_width_m: float, state: ClusterUiState | None = None
 ) -> bool:
+    # See vehicle_in_forward_display_lanes() above for the hysteresis hint rationale.
     if point.longitudinal_m <= 0.0:
         return False
+    if point.in_display_lanes is not None:
+        return point.in_display_lanes
     offset = vehicle_lane_offset_from_lateral(point.lateral_m, point.longitudinal_m, lane_width_m, state)
     return abs(offset) < FRONT_VEHICLE_LANE_RANGE_LANES
+
 
 
 def radar_vehicle_confidence(point: RadarPoint) -> float:
