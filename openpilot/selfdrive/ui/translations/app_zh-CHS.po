@@ -2899,3 +2899,11 @@ msgstr "读取原厂 Bosch-A 雷达目标，仅接收不发送，不影响原车
 #: openpilot/selfdrive/ui/sunnypilot/layouts/settings/vehicle/brands/honda.py
 msgid "Use Bosch-A Radar Data"
 msgstr "使用雷达信息"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/visuals.py
+msgid "Alert Beeper"
+msgstr "提示音"
+
+#: openpilot/selfdrive/ui/sunnypilot/layouts/settings/visuals.py
+msgid "Play engage, disengage, and warning beeps using the hardware beeper."
+msgstr "使用硬件蜂鸣器播放接管、退出和警告提示音。"
