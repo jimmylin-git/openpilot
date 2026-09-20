@@ -399,6 +399,28 @@ replay/simulator. `merged_radar_point()` (used to fuse nearby raw radar
 points into one box outside detail mode) re-derives this flag from its
 merged/averaged position rather than blindly trusting a constituent's flag,
 since a merge group can span both sides of the boundary.
+A follow-up driving log showed the lane-range hysteresis above barely moved
+the overall `scene_drop_while_active` rate (62.5% vs. 63.2% before), and
+the disappearing radar points' logged positions/confidence did not actually
+cluster at the 1.5-lane display boundary or the 0.80 confidence-display
+threshold as first suspected, ruling those out as the dominant cause after
+all. Vehicle log version 5 adds more `radarPoint` classification diagnostics
+to `rendered_vehicle` (and `stability_filter`) records to narrow this down
+further: `valid`, `valid_count`, `in_my_lane`, `motion_consistent`, and
+`promotion_held` mirror the same-named `RadarPoint` fields, and
+`vehicle_candidate` mirrors `radar_point_is_vehicle_candidate()`'s live
+result for that exact point/box -- the multi-branch "is this radar point
+actually a vehicle" classifier (distance/lateral bounds, valid-count,
+motion-consistency, in-lane, probability, road-edge distance,
+stationary/moving classification) that gates whether a `radarPoint` ever
+becomes a candidate box at all. If a future log shows `vehicle_candidate`
+flipping to `false` for points logged `render_phase="active"` right before
+a `scene_drop_while_active` disappearance, that pinpoints this classifier
+(rather than the lane-range boundary) as the flicker source.
+`merged_radar_point()`'s synthetic point recomputes `vehicle_candidate`
+directly (rather than merging constituents' values) since that synthetic
+point -- not any individual raw constituent -- is what
+`radar_point_is_vehicle_candidate()` actually evaluates outside detail mode.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar

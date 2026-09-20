@@ -278,6 +278,17 @@ class VehicleBox:
     # vehicle object log; see cluster_models.py for their meaning.
     stability_gate: str | None = None
     render_phase: str | None = None
+    # Diagnostic-only raw RadarPoint classification signals (only ever set for
+    # radar-point-sourced boxes via radar_vehicle_box(); DetectedVehicle-sourced
+    # boxes leave these at their defaults). See cluster_models.RadarPoint for
+    # what each one means; vehicle_candidate additionally mirrors
+    # radar_point_is_vehicle_candidate()'s result for this exact box.
+    valid: int | None = None
+    valid_count: int | None = None
+    in_my_lane: int | None = None
+    motion_consistent: bool | None = None
+    promotion_held: bool = False
+    vehicle_candidate: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1879,7 +1890,7 @@ def merged_radar_point(points: list[RadarPoint], state: ClusterUiState) -> Radar
     source = first.source if all(point.source == first.source for point in points) else "merged"
     merged_longitudinal_m = average_float(point.longitudinal_m for point in points)
     merged_lateral_m = average_float(point.lateral_m for point in points)
-    return RadarPoint(
+    merged = RadarPoint(
         label=label,
         longitudinal_m=merged_longitudinal_m,
         lateral_m=merged_lateral_m,
@@ -1900,6 +1911,15 @@ def merged_radar_point(points: list[RadarPoint], state: ClusterUiState) -> Radar
             (point.in_display_lanes for point in points), merged_longitudinal_m, merged_lateral_m, state
         ),
     )
+    # Recompute (rather than merge) vehicle_candidate: this synthetic merged
+    # point, not any individual constituent, is what radar_vehicle_points()
+    # actually evaluates radar_point_is_vehicle_candidate() against outside
+    # detail mode, so recomputing here mirrors the real decision exactly.
+    return replace(
+        merged,
+        vehicle_candidate=radar_point_is_vehicle_candidate(merged, state, DEFAULT_LANE_WIDTH_M),
+    )
+
 
 
 def merged_radar_point_stability_gate(values: Iterable[str | None]) -> str | None:
@@ -2343,6 +2363,12 @@ def radar_vehicle_box(
         annotate=False,
         stability_gate=point.stability_gate,
         render_phase=point.render_phase,
+        valid=point.valid,
+        valid_count=point.valid_count,
+        in_my_lane=point.in_my_lane,
+        motion_consistent=point.motion_consistent,
+        promotion_held=point.promotion_held,
+        vehicle_candidate=point.vehicle_candidate,
     )
 
 

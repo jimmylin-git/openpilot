@@ -23,6 +23,7 @@ from cluster_route_replay import RouteLogParser, finite_float, frame_to_state, s
 from cluster_scene import (
     FRONT_VEHICLE_LANE_RANGE_LANES,
     LANE_RANGE_EXIT_HYSTERESIS_LANES,
+    radar_point_is_vehicle_candidate,
     vehicle_lane_offset_from_lateral,
 )
 from cluster_utils import clamp
@@ -83,7 +84,7 @@ RADAR_POINT_FADE_MIN_PROBABILITY = 0.40
 # applied here than the "become visible" one so an object already on screen
 # has to clearly leave the display range before it drops.
 VEHICLE_FILTER_LOG_PATH = "/data/media/0/cluster_vehicle_objects.jsonl"
-VEHICLE_FILTER_LOG_VERSION = 4
+VEHICLE_FILTER_LOG_VERSION = 5
 
 
 class OpenpilotLiveSource:
@@ -327,7 +328,7 @@ class OpenpilotLiveSource:
         if radar_snapshot_changed or radar_snapshot_expired:
             self._last_radar_filter_update_t = radar_update_t
             for key, point in radar_by_key.items():
-                payload = self._radar_filter_payload(point)
+                payload = self._radar_filter_payload(point, state)
                 self._radar_filter_last_payload[key] = payload
                 if key not in self._radar_seen_since:
                     self._radar_seen_since[key] = radar_update_t
@@ -471,7 +472,14 @@ class OpenpilotLiveSource:
         # vehicle object log. These do not affect rendering, only what gets
         # written to the audit trail so flicker can be traced back to its
         # source: a stability filter delay vs. the hold/fade below vs. a
-        # scene-composition step dropping the object outright.
+        # scene-composition step dropping the object outright. vehicle_candidate
+        # (see _apply_lane_range_hysteresis()) is intentionally NOT stamped
+        # here yet: radar_point_is_vehicle_candidate() also depends on
+        # state.detected_vehicles, and at this point in the function that
+        # still includes not-yet-stability-filtered TARGET2/model candidates
+        # and excludes this frame's hold/fade-retained objects, so evaluating
+        # it here could disagree with what build_cluster_scene() actually
+        # sees. It gets stamped later against the final smoothed state instead.
         state = replace(
             state,
             detected_vehicles=tuple(
@@ -488,7 +496,11 @@ class OpenpilotLiveSource:
                 for vehicle in state.detected_vehicles
             ),
             radar_points=tuple(
-                replace(point, stability_gate="delayed", render_phase="active")
+                replace(
+                    point,
+                    stability_gate="delayed",
+                    render_phase="active",
+                )
                 for point in state.radar_points
             ),
         )
@@ -652,12 +664,18 @@ class OpenpilotLiveSource:
             )
             for vehicle in vehicles
         )
+        # vehicle_candidate is stamped here (against the final smoothed state,
+        # which includes this frame's hold/fade-retained detected_vehicles/
+        # radar_points) rather than earlier in _smooth_scene_state(), so this
+        # diagnostic-only mirror of radar_point_is_vehicle_candidate() matches
+        # what build_cluster_scene() will actually see as closely as possible.
         tagged_radar_points = tuple(
             replace(
                 point,
                 in_display_lanes=self._lane_range_hysteresis_visible(
                     (point.label, point.source), point.longitudinal_m, point.lateral_m, state
                 ),
+                vehicle_candidate=radar_point_is_vehicle_candidate(point, state, DEFAULT_LANE_WIDTH_M),
             )
             for point in radar_points
         )
@@ -798,7 +816,7 @@ class OpenpilotLiveSource:
         }
 
     @staticmethod
-    def _radar_filter_payload(point: RadarPoint) -> dict[str, object]:
+    def _radar_filter_payload(point: RadarPoint, state: ClusterUiState) -> dict[str, object]:
         return {
             "label": point.label,
             "source": "radarPoint",
@@ -817,6 +835,16 @@ class OpenpilotLiveSource:
                 round(point.absolute_speed_kph, 3)
                 if point.absolute_speed_kph is not None else None
             ),
+            "valid": point.valid,
+            "valid_count": point.valid_count,
+            "in_my_lane": point.in_my_lane,
+            "motion_consistent": point.motion_consistent,
+            "promotion_held": point.promotion_held,
+            # point.vehicle_candidate isn't stamped yet at this stage of
+            # _smooth_scene_state() (it's set later, after the stability
+            # filter loops below run), so recompute it directly here instead
+            # of reading the not-yet-set field.
+            "vehicle_candidate": radar_point_is_vehicle_candidate(point, state, DEFAULT_LANE_WIDTH_M),
         }
 
     @staticmethod

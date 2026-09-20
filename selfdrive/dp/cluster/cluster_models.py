@@ -146,6 +146,14 @@ class RadarPoint:
     # See DetectedVehicle.in_display_lanes above; this one IS used for
     # rendering decisions, unlike stability_gate/render_phase.
     in_display_lanes: bool | None = None
+    # Diagnostic-only mirror of cluster_scene.radar_point_is_vehicle_candidate()
+    # (the "is this radar point a vehicle" classifier used to decide whether it
+    # gets a vehicle box at all), stamped by OpenpilotLiveSource so log
+    # consumers can see whether that classification is flip-flopping between
+    # frames independent of the stability filter / hold-fade / display-range
+    # logic. Not used for rendering; cluster_scene.py still calls the real
+    # classifier itself for the actual filtering decision.
+    vehicle_candidate: bool | None = None
 
 
 RADAR_ZERO_POSITION_EPS_M = 1e-3
