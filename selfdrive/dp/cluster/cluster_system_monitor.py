@@ -9,6 +9,7 @@ import time
 PROC_PATH = Path("/proc")
 PROC_STAT_PATH = Path("/proc/stat")
 PROC_MEMINFO_PATH = Path("/proc/meminfo")
+THERMAL_ZONE_PATH = Path("/sys/class/thermal")
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +17,7 @@ class SystemStats:
     memory_total_bytes: int | None = None
     memory_used_bytes: int | None = None
     memory_used_percent: float | None = None
+    temperature_c: float | None = None
     cpu_core_percents: tuple[float | None, ...] = ()
 
 
@@ -43,6 +45,7 @@ class SystemStatsSampler:
             return None
 
         memory_total, memory_used, memory_percent = self._read_linux_memory()
+        temperature_c = self._read_linux_temperature()
         cpu_times = self._read_linux_cpu_times()
         if cpu_times is None:
             cpu_percents: tuple[float | None, ...] = ()
@@ -54,6 +57,7 @@ class SystemStatsSampler:
             memory_total_bytes=memory_total,
             memory_used_bytes=memory_used,
             memory_used_percent=memory_percent,
+            temperature_c=temperature_c,
             cpu_core_percents=cpu_percents,
         )
 
@@ -85,6 +89,22 @@ class SystemStatsSampler:
 
         used = max(0, min(total, total - available))
         return total, used, used / total * 100.0
+
+    @staticmethod
+    def _read_linux_temperature() -> float | None:
+        temperatures: list[float] = []
+        try:
+            zones = THERMAL_ZONE_PATH.glob("thermal_zone*/temp")
+            for path in zones:
+                try:
+                    temperature_c = float(path.read_text(encoding="utf-8").strip()) / 1000.0
+                except (OSError, ValueError):
+                    continue
+                if -20.0 <= temperature_c <= 150.0:
+                    temperatures.append(temperature_c)
+        except OSError:
+            return None
+        return max(temperatures) if temperatures else None
 
     @staticmethod
     def _read_linux_cpu_times() -> tuple[tuple[int, int], ...] | None:

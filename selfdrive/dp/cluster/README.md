@@ -277,8 +277,9 @@ Changing this setting while the HUD is running makes the current HUD process
 exit so `cluster_autorun` can relaunch it with the new encoder choice.
 `ClusterHudScreenMode` controls optional debug views: `0` default, `1` shows
 the live debug panel with grouped `LIVE DELAY`, `LIVE TORQUE`, `STEERING`, and
-`LATERAL PLAN` rows, `2` shows the system information panel with memory and CPU
-core usage, `3` shows a large debug graph selected by `ShowPlotMode` with the
+`LATERAL PLAN` rows, `2` shows the system information panel with maximum
+thermal-zone temperature, memory, and CPU core usage, `3` shows a large debug
+graph selected by `ShowPlotMode` with the
 driving scene disabled, and `4`
 shows the same graph in the right-side panel while keeping the driving scene.
 Mode `3` also hides the speed, accel, clock, turn-signal, and git HUD so the

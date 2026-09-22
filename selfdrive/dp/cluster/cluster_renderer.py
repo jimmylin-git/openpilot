@@ -2473,7 +2473,7 @@ class ClusterUiRenderer:
         columns = 2 if cpu_count <= 8 else 4
         rows = max(1, math.ceil(max(1, cpu_count) / columns))
         core_row_h = 30.0 if columns == 2 else 24.0
-        header_h = 122.0
+        header_h = 156.0
         panel_h = min(DESIGN_HEIGHT - SYSTEM_PANEL_Y - 18.0, header_h + rows * core_row_h + 18.0)
         core_area_h = max(24.0, panel_h - header_h - 14.0)
         core_row_h = min(core_row_h, core_area_h / rows)
@@ -2485,27 +2485,41 @@ class ClusterUiRenderer:
         self._rounded_rect(panel_x, panel_y, panel_w, panel_h, 18, theme.route_panel_bg, theme.faint, 2)
         self._draw_text("SYSTEM", panel_x + pad_x, panel_y + 28, 18, theme.muted)
 
+        temperature = stats.temperature_c
+        temperature_color = self._system_metric_color(
+            None if temperature is None else min(100.0, temperature)
+        )
+        self._draw_text("TEMP", panel_x + pad_x, panel_y + 62, 17, theme.muted)
+        self._draw_text(
+            "-- °C" if temperature is None else f"{temperature:.1f} °C",
+            panel_x + panel_w - pad_x,
+            panel_y + 62,
+            17,
+            temperature_color if temperature is not None else theme.muted,
+            anchor="right",
+        )
+
         mem_percent = stats.memory_used_percent
         mem_color = self._system_metric_color(mem_percent)
-        self._draw_text("MEM", panel_x + pad_x, panel_y + 62, 17, theme.muted)
+        self._draw_text("MEM", panel_x + pad_x, panel_y + 86, 17, theme.muted)
         self._draw_text(
             self._memory_text(stats),
             panel_x + 86,
-            panel_y + 62,
+            panel_y + 86,
             17,
             theme.text if stats.memory_used_bytes is not None else theme.muted,
         )
         self._draw_text(
             self._percent_text(mem_percent),
             panel_x + panel_w - pad_x,
-            panel_y + 62,
+            panel_y + 86,
             17,
             mem_color,
             anchor="right",
         )
-        self._draw_percent_bar(panel_x + pad_x, panel_y + 80, panel_w - pad_x * 2, 12, mem_percent, mem_color)
+        self._draw_percent_bar(panel_x + pad_x, panel_y + 104, panel_w - pad_x * 2, 12, mem_percent, mem_color)
 
-        cpu_header_y = panel_y + 104
+        cpu_header_y = panel_y + 128
         self._draw_text("CPU CORE %", panel_x + pad_x, cpu_header_y, 15, theme.muted)
         if cpu_count == 0:
             self._draw_text("unavailable", panel_x + panel_w - pad_x, cpu_header_y, 15, theme.muted, anchor="right")
