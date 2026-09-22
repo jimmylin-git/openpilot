@@ -292,6 +292,17 @@ class VehicleBox:
 
 
 @dataclass(frozen=True, slots=True)
+class SceneVehicleDiagnostic:
+    label: str
+    source: str
+    reason: str
+    longitudinal_m: float
+    lateral_m: float
+    vehicle_candidate: bool
+    replacement_label: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RadarPointMarker:
     center: Vec3
     radius_m: float
@@ -382,6 +393,7 @@ class ClusterScene:
     planned_path: tuple[MeshStrip, ...]
     radar_points: tuple[RadarPointMarker, ...]
     vehicles: tuple[VehicleBox, ...]
+    scene_vehicle_diagnostics: tuple[SceneVehicleDiagnostic, ...] = ()
     ground_grid: tuple[MeshStrip, ...] = ()
 
 
@@ -3640,6 +3652,48 @@ def build_cluster_scene(
                 for locked in locked_vehicle_boxes
             )
         )
+        visible_radar_labels = frozenset(
+            point.label
+            for point, box in visible_radar_pairs
+            if box in non_overlapping_radar_vehicle_boxes
+        )
+        selected_radar_labels = frozenset(point.label for point in selected_radar_vehicle_points)
+        candidate_radar_labels = frozenset(
+            point.label
+            for point in state.radar_points
+            if radar_point_is_vehicle_candidate(point, state, lane_width_m)
+        )
+        scene_vehicle_diagnostics = tuple(
+            SceneVehicleDiagnostic(
+                label=point.label,
+                source=point.source,
+                reason=(
+                    "filtered_by_candidate"
+                    if point.label not in candidate_radar_labels
+                    else "deduplicated"
+                    if point.label not in selected_radar_labels
+                    else "below_confidence"
+                    if point.label not in {
+                        selected.label for selected in selected_radar_vehicle_points
+                        if radar_vehicle_confidence(selected) >= FRONT_VEHICLE_MIN_CONFIDENCE
+                    }
+                    else "merged_into_detected_vehicle"
+                    if point.label in merged_radar_labels
+                    else "hidden_by_detected_vehicle"
+                    if radar_point_hidden_by_detected_vehicle(point, visible_detected_vehicles, state)
+                    else "filtered_by_lane"
+                    if not point_in_forward_display_lanes(point, lane_width_m, state)
+                    else "locked_vehicle_overlap"
+                    if point.label not in visible_radar_labels
+                    else "visible"
+                ),
+                longitudinal_m=point.longitudinal_m,
+                lateral_m=point.lateral_m,
+                vehicle_candidate=point.label in candidate_radar_labels,
+            )
+            for point in state.radar_points
+            if point.label not in visible_radar_labels
+        )
         vehicles = (
             ego_vehicle,
             *non_overlapping_detected_vehicle_boxes,
@@ -3647,6 +3701,7 @@ def build_cluster_scene(
         )
     else:
         vehicles = (ego_vehicle,)
+        scene_vehicle_diagnostics = ()
     profile_scene_add(profile_add, "scene.build.vehicles", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)
@@ -3686,6 +3741,7 @@ def build_cluster_scene(
         planned_path=tuple(planned_path),
         radar_points=tuple(radar_points),
         vehicles=tuple(vehicles),
+        scene_vehicle_diagnostics=scene_vehicle_diagnostics,
     )
     profile_scene_add(profile_add, "scene.build.pack", profile_stage)
     return scene

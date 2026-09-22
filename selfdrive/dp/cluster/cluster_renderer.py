@@ -1635,6 +1635,21 @@ class ClusterUiRenderer:
             for vehicle in scene.vehicles:
                 self._draw_vehicle(vehicle)
             self._profile_add("draw_scene.vehicles", profile_stage)
+            for diagnostic in scene.scene_vehicle_diagnostics:
+                self._vehicle_log_write({
+                    "event": "suppressed",
+                    "monotonic_s": round(time.monotonic(), 3),
+                    "log_version": VEHICLE_OBJECT_LOG_VERSION,
+                    "record_type": "scene_vehicle",
+                    "label": diagnostic.label,
+                    "source": diagnostic.source,
+                    "source_base": diagnostic.source.split("+radar:", 1)[0],
+                    "suppression_reason": diagnostic.reason,
+                    "longitudinal_m": round(diagnostic.longitudinal_m, 3),
+                    "lateral_m": round(diagnostic.lateral_m, 3),
+                    "vehicle_candidate": diagnostic.vehicle_candidate,
+                    "replacement_label": diagnostic.replacement_label,
+                })
             self._finish_vehicle_logging(time.monotonic(), scene.vehicles)
         finally:
             rl.rl_pop_matrix()
