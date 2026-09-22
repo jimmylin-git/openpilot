@@ -3554,14 +3554,19 @@ def build_cluster_scene(
             for vehicle in merged_detected_vehicles
             if vehicle_in_forward_display_lanes(vehicle, lane_width_m, state)
         )
+        visible_detected_vehicles = tuple(
+            vehicle
+            for vehicle in render_detected_vehicles
+            if front_vehicle_display_confidence(vehicle.probability) is not None
+        )
         merged_radar_labels = frozenset(
             label
-            for label in (merged_radar_point_label(vehicle) for vehicle in render_detected_vehicles)
+            for label in (merged_radar_point_label(vehicle) for vehicle in visible_detected_vehicles)
             if label is not None
         )
         detected_vehicle_boxes_with_confidence = tuple(
             (detected, front_vehicle_display_confidence(detected.probability))
-            for detected in render_detected_vehicles
+            for detected in visible_detected_vehicles
         )
         detected_vehicle_boxes = tuple(
             vehicle_box(
@@ -3607,7 +3612,7 @@ def build_cluster_scene(
             (point, box)
             for point, box in zip(selected_radar_vehicle_points, selected_radar_vehicle_boxes)
             if point.label not in merged_radar_labels
-            and not radar_point_hidden_by_detected_vehicle(point, render_detected_vehicles, state)
+            and not radar_point_hidden_by_detected_vehicle(point, visible_detected_vehicles, state)
             and point_in_forward_display_lanes(point, lane_width_m, state)
         )
         visible_radar_vehicle_points = tuple(point for point, _ in visible_radar_vehicle_pairs)

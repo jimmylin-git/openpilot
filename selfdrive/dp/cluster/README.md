@@ -421,6 +421,14 @@ a `scene_drop_while_active` disappearance, that pinpoints this classifier
 directly (rather than merging constituents' values) since that synthetic
 point -- not any individual raw constituent -- is what
 `radar_point_is_vehicle_candidate()` actually evaluates outside detail mode.
+The v5 live log showed that most active radarPoint drops still had
+`vehicle_candidate=true`, so the scene-composition path was investigated
+separately. A low-confidence detected vehicle could be excluded from
+`detected_vehicle_boxes` (below `FRONT_VEHICLE_MIN_CONFIDENCE`) but still hide
+a nearby radarPoint before rendering. Scene composition now uses only
+confidence-qualified detected vehicles for radar hiding and merged-label
+suppression; an undrawn low-confidence model object can no longer make a valid
+radarPoint disappear without a replacement vehicle box.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar
