@@ -698,6 +698,7 @@ def rainbow_lane_floor_strips(
     road_end_m: float,
     road_steps: int,
     route_mode: bool,
+    speed_kph: float,
 ) -> tuple[MeshStrip, ...]:
     left = lane_centerline(
         lane_center_offset - 0.5,
@@ -722,7 +723,8 @@ def rainbow_lane_floor_strips(
 
     segment_count = len(left) - 1
     alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
-    flow = time.monotonic() * 0.08
+    flow_rate = 0.01 + clamp(speed_kph, 0.0, 180.0) * 0.0012
+    flow = time.monotonic() * flow_rate
     strips: list[MeshStrip] = []
     for segment_index in range(segment_count):
         start_index = round(segment_index * (len(left) - 1) / segment_count)
@@ -3548,6 +3550,7 @@ def build_cluster_scene(
                 road_end_m,
                 road_steps,
                 route_mode,
+                state.speed_kph,
             )
         )
     else:

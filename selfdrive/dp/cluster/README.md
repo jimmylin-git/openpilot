@@ -451,7 +451,9 @@ When ACC is engaged, the ego-lane floor uses a moving rainbow gradient that
 flows toward the front of the scene; outside ACC it keeps the normal white
 or non-engaged lane styling. The gradient is updated at every lane geometry
 sample rather than using a small fixed number of broad color blocks, so the
-transition appears continuous at normal HUD resolution.
+transition appears continuous at normal HUD resolution. Its flow rate follows
+the current vehicle speed: it slows at low speed and accelerates as speed
+increases, with a very slow idle motion when stopped.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar
