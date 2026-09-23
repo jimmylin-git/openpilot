@@ -238,9 +238,18 @@ class CarState(CarStateBase, CarStateExt):
     return ret, ret_sp
 
   def get_can_parsers(self, CP, CP_SP):
+    cam_messages = [
+      # This car does not broadcast these messages. Registering them with a NaN
+      # rate marks them alive-ignored, so their absence no longer forces
+      # can_valid=False. Merely reading cp_cam.vl[...] would auto-register them
+      # as alive-required instead.
+      ("ACC_HUD", float('nan')),
+      ("LKAS_HUD", float('nan')),
+    ]
+
     parsers = {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).pt),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).camera),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, CanBus(CP).camera),
     }
     if CP.enableBsm:
       parsers[Bus.body] = CANParser(DBC[CP.carFingerprint][Bus.body], [], CanBus(CP).radar)
