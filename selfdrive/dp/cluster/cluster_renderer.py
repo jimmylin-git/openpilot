@@ -3079,7 +3079,7 @@ class ClusterUiRenderer:
     def _draw_speed_block(self, state: ClusterUiState) -> None:
         theme = self._current_theme()
         raw_speed = state.display_speed_kph if state.display_speed_kph is not None else state.speed_kph
-        display_speed_kph = raw_speed * 1.052 if raw_speed is not None else None
+        display_speed_kph = raw_speed * 1.053 if raw_speed is not None else None
         speed_value = int(round(clamp(display_speed_kph, 0.0, MAX_SPEED_KPH)))
         # Orbitron renders wider per point size than the previous KaiGen font, so these
         # were re-measured to keep a 3-digit value (up to MAX_SPEED_KPH) clear of the
