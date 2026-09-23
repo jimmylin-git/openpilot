@@ -3543,7 +3543,7 @@ def build_cluster_scene(
         ego_lane_color = ego_lane_cruise_color(route_mode)
     else:
         ego_lane_color = ego_lane_default_color(route_mode)
-    if state.cruise_display_state == "engaged":
+    if state.cruise_display_state == "engaged" and state.speed_kph > 1.0:
         highlight_lanes.extend(
             rainbow_lane_floor_strips(
                 ego_lane_display_offset(state),
