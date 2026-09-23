@@ -173,6 +173,9 @@ PLANNED_PATH_STRIP_CACHE_LIMIT = 48
 ROAD_STEPS_SURROUND = 96
 ROAD_STEPS_MODEL = 48
 ROAD_STEPS_SIM = 64
+# Keep the animated lane disabled until it is implemented as one GPU mesh.
+# Multiple 3D strips can stall the device renderer when onroad starts.
+RAINBOW_LANE_FLOW_ENABLED = False
 STATIC_LINE_STEPS = 56
 ROAD_EDGE_OFFSET_STEPS = STATIC_LINE_STEPS
 PLANNED_PATH_FALLBACK_STEPS = 32
@@ -3543,7 +3546,11 @@ def build_cluster_scene(
         ego_lane_color = ego_lane_cruise_color(route_mode)
     else:
         ego_lane_color = ego_lane_default_color(route_mode)
-    if state.cruise_display_state == "engaged" and state.speed_kph > 1.0:
+    if (
+        RAINBOW_LANE_FLOW_ENABLED
+        and state.cruise_display_state == "engaged"
+        and state.speed_kph > 1.0
+    ):
         highlight_lanes.extend(
             rainbow_lane_floor_strips(
                 ego_lane_display_offset(state),

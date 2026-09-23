@@ -447,15 +447,11 @@ group visually aligned with the lane transition. The target lane floor
 highlight suppresses the overlapping fixed side-lane fill while it is active,
 preventing z-fighting and blue floor tearing during the turn-signal lane
 change animation.
-When ACC is engaged, the ego-lane floor uses a moving rainbow gradient that
-flows toward the front of the scene; outside ACC it keeps the normal white
-or non-engaged lane styling. The gradient is updated at every lane geometry
-sample rather than using a small fixed number of broad color blocks, so the
-transition appears continuous at normal HUD resolution. Its flow rate follows
-the current vehicle speed: it slows at low speed and accelerates as speed
-increases, with a very slow idle motion when stopped.
-The speed response is capped at 100 km/h, so speeds above 100 km/h use the
-same maximum flow rate.
+The animated rainbow ego-lane floor is currently disabled on the device because
+multiple 3D strips can stall the renderer when onroad starts. ACC therefore
+uses the stable single-strip ego-lane floor until the effect is reimplemented
+as one GPU mesh. The lane transition offset remains shared with vehicle boxes
+so the scene stays aligned while changing lanes.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar
