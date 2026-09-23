@@ -720,7 +720,7 @@ def rainbow_lane_floor_strips(
     if len(left) < 2 or len(left) != len(right):
         return ()
 
-    segment_count = min(24, len(left) - 1)
+    segment_count = len(left) - 1
     alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
     flow = time.monotonic() * 0.08
     strips: list[MeshStrip] = []

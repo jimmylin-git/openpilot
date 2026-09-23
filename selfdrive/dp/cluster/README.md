@@ -449,7 +449,9 @@ preventing z-fighting and blue floor tearing during the turn-signal lane
 change animation.
 When ACC is engaged, the ego-lane floor uses a moving rainbow gradient that
 flows toward the front of the scene; outside ACC it keeps the normal white
-or non-engaged lane styling.
+or non-engaged lane styling. The gradient is updated at every lane geometry
+sample rather than using a small fixed number of broad color blocks, so the
+transition appears continuous at normal HUD resolution.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar
