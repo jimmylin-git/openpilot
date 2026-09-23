@@ -53,9 +53,23 @@ class CarState(CarStateBase, CarStateExt):
     self.is_metric = False
     self.v_cruise_factor = 1.
 
+  @staticmethod
+  def _select_hud_parser(cp, cp_cam, message_name: str):
+    # Some radar-equipped 2022 Civic variants publish the camera-side HUD
+    # messages on the powertrain/ACC bus instead. Prefer the bus that is
+    # actually carrying the message so the radarless profile can still decode it.
+    if max(cp_cam.ts_nanos[message_name].values(), default=0) > 0:
+      return cp_cam
+    return cp
+
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
+    acc_hud_parser = cp_cam
+    lkas_hud_parser = cp_cam
+    if self.CP.carFingerprint == CAR.HONDA_CIVIC_2022 and self.CP.flags & HondaFlags.BOSCH_RADARLESS:
+      acc_hud_parser = self._select_hud_parser(cp, cp_cam, "ACC_HUD")
+      lkas_hud_parser = self._select_hud_parser(cp, cp_cam, "LKAS_HUD")
     if self.CP.enableBsm:
       cp_body = can_parsers[Bus.body]
 
@@ -168,11 +182,11 @@ class CarState(CarStateBase, CarStateExt):
     if self.CP.flags & HondaFlags.BOSCH:
       # The PCM always manages its own cruise control state, but doesn't publish it
       if self.CP.flags & HondaFlags.BOSCH_RADARLESS:
-        ret.cruiseState.nonAdaptive = cp_cam.vl["ACC_HUD"]["CRUISE_CONTROL_LABEL"] != 0
+        ret.cruiseState.nonAdaptive = acc_hud_parser.vl["ACC_HUD"]["CRUISE_CONTROL_LABEL"] != 0
 
       if not self.CP.openpilotLongitudinalControl:
-        # ACC_HUD is on camera bus on radarless cars
-        acc_hud = cp_cam.vl["ACC_HUD"] if self.CP.flags & HondaFlags.BOSCH_RADARLESS else cp.vl["ACC_HUD"]
+        # ACC_HUD is usually on the camera bus on radarless cars; the variant selector falls back to the powertrain/ACC bus when needed.
+        acc_hud = acc_hud_parser.vl["ACC_HUD"] if self.CP.flags & HondaFlags.BOSCH_RADARLESS else cp.vl["ACC_HUD"]
         ret.cruiseState.nonAdaptive = acc_hud["CRUISE_CONTROL_LABEL"] != 0
         ret.cruiseState.standstill = acc_hud["CRUISE_SPEED"] == 252.
 
@@ -220,7 +234,7 @@ class CarState(CarStateBase, CarStateExt):
       self.acc_hud = cp_cam.vl["ACC_HUD"]
       self.stock_brake = cp_cam.vl["BRAKE_COMMAND"]
     if self.CP.flags & HondaFlags.BOSCH_RADARLESS:
-      self.lkas_hud = cp_cam.vl["LKAS_HUD"]
+      self.lkas_hud = lkas_hud_parser.vl["LKAS_HUD"]
 
     if self.CP.enableBsm:
       # BSM messages are on B-CAN, requires a panda forwarding B-CAN messages to CAN 0
@@ -238,17 +252,22 @@ class CarState(CarStateBase, CarStateExt):
     return ret, ret_sp
 
   def get_can_parsers(self, CP, CP_SP):
-    cam_messages = [
-      # This car does not broadcast these messages. Registering them with a NaN
-      # rate marks them alive-ignored, so their absence no longer forces
-      # can_valid=False. Merely reading cp_cam.vl[...] would auto-register them
-      # as alive-required instead.
-      ("ACC_HUD", float('nan')),
-      ("LKAS_HUD", float('nan')),
-    ]
+    pt_messages = []
+    cam_messages = []
+    if CP.carFingerprint == CAR.HONDA_CIVIC_2022 and CP.flags & HondaFlags.BOSCH_RADARLESS:
+      # Some radar-equipped 2022 Civic variants move these camera-side HUD
+      # messages onto the powertrain/ACC bus. Register them on both buses with
+      # a NaN rate: this marks them alive-ignored, while CarState selects the
+      # bus that is actually carrying them at runtime.
+      hud_messages = [
+        ("ACC_HUD", float('nan')),
+        ("LKAS_HUD", float('nan')),
+      ]
+      pt_messages.extend(hud_messages)
+      cam_messages.extend(hud_messages)
 
     parsers = {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).pt),
+      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).pt),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, CanBus(CP).camera),
     }
     if CP.enableBsm:
