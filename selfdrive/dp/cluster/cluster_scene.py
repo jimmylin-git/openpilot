@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import colorsys
 import math
 import time
 from collections import OrderedDict
@@ -688,6 +689,58 @@ def lane_floor_strip(
         color,
         height_m,
     )
+
+
+def rainbow_lane_floor_strips(
+    lane_center_offset: float,
+    lane_width_m: float,
+    road_start_m: float,
+    road_end_m: float,
+    road_steps: int,
+    route_mode: bool,
+) -> tuple[MeshStrip, ...]:
+    left = lane_centerline(
+        lane_center_offset - 0.5,
+        NO_STEERING_CURVE,
+        lane_width_m,
+        road_start_m,
+        road_end_m,
+        road_steps,
+        0.005,
+    )
+    right = lane_centerline(
+        lane_center_offset + 0.5,
+        NO_STEERING_CURVE,
+        lane_width_m,
+        road_start_m,
+        road_end_m,
+        road_steps,
+        0.005,
+    )
+    if len(left) < 2 or len(left) != len(right):
+        return ()
+
+    segment_count = min(24, len(left) - 1)
+    alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
+    flow = time.monotonic() * 0.08
+    strips: list[MeshStrip] = []
+    for segment_index in range(segment_count):
+        start_index = round(segment_index * (len(left) - 1) / segment_count)
+        end_index = round((segment_index + 1) * (len(left) - 1) / segment_count)
+        if end_index <= start_index:
+            continue
+        forward_m = (left[start_index].y + left[end_index].y) * 0.5
+        hue = (flow + (forward_m - road_start_m) / max(1.0, road_end_m - road_start_m) * 0.8) % 1.0
+        red, green, blue = colorsys.hsv_to_rgb(hue, 0.72, 1.0)
+        color = int(red * 255), int(green * 255), int(blue * 255), alpha
+        strips.append(
+            MeshStrip(
+                left=(left[start_index], left[end_index]),
+                right=(right[start_index], right[end_index]),
+                color=color,
+            )
+        )
+    return tuple(strips)
 
 
 def strip_from_centerline(points: tuple[Vec3, ...], width_m: float, color: Color) -> MeshStrip:
@@ -3486,19 +3539,31 @@ def build_cluster_scene(
         ego_lane_color = ego_lane_cruise_color(route_mode)
     else:
         ego_lane_color = ego_lane_default_color(route_mode)
-    ego_lane_strip = lane_floor_strip(
-        state,
-        ego_lane_display_offset(state),
-        ego_lane_color,
-        lane_width_m,
-        road_start_m,
-        road_end_m,
-        road_steps,
-        route_mode,
-        0.005,
-    )
-    if ego_lane_strip is not None:
-        highlight_lanes.append(ego_lane_strip)
+    if state.cruise_display_state == "engaged":
+        highlight_lanes.extend(
+            rainbow_lane_floor_strips(
+                ego_lane_display_offset(state),
+                lane_width_m,
+                road_start_m,
+                road_end_m,
+                road_steps,
+                route_mode,
+            )
+        )
+    else:
+        ego_lane_strip = lane_floor_strip(
+            state,
+            ego_lane_display_offset(state),
+            ego_lane_color,
+            lane_width_m,
+            road_start_m,
+            road_end_m,
+            road_steps,
+            route_mode,
+            0.005,
+        )
+        if ego_lane_strip is not None:
+            highlight_lanes.append(ego_lane_strip)
     profile_scene_add(profile_add, "scene.build.highlight_lanes", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)

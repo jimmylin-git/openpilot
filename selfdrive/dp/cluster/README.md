@@ -447,6 +447,9 @@ group visually aligned with the lane transition. The target lane floor
 highlight suppresses the overlapping fixed side-lane fill while it is active,
 preventing z-fighting and blue floor tearing during the turn-signal lane
 change animation.
+When ACC is engaged, the ego-lane floor uses a moving rainbow gradient that
+flows toward the front of the scene; outside ACC it keeps the normal white
+or non-engaged lane styling.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar
