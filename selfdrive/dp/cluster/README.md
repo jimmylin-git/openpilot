@@ -454,6 +454,8 @@ sample rather than using a small fixed number of broad color blocks, so the
 transition appears continuous at normal HUD resolution. Its flow rate follows
 the current vehicle speed: it slows at low speed and accelerates as speed
 increases, with a very slow idle motion when stopped.
+The speed response is capped at 100 km/h, so speeds above 100 km/h use the
+same maximum flow rate.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar
