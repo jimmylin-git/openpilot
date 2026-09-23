@@ -441,6 +441,12 @@ points that do not reach a vehicle box. `suppression_reason` identifies
 `filtered_by_lane`, or `locked_vehicle_overlap`. These records are emitted
 only for points suppressed by the scene compositor, so the next live log can
 show which stage dominates without changing the display behavior.
+During an ACC lane change, detected and radar vehicle boxes receive the same
+lane-transition display offset as the ego vehicle, keeping the front-vehicle
+group visually aligned with the lane transition. The target lane floor
+highlight suppresses the overlapping fixed side-lane fill while it is active,
+preventing z-fighting and blue floor tearing during the turn-signal lane
+change animation.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar

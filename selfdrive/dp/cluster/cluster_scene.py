@@ -3401,6 +3401,14 @@ def build_cluster_scene(
     anchor_x_m = 0.0
     scene_shift_x_m = 0.0
     relative_scene_x_offset_m = 0.0
+    if (
+        state.cruise_display_state == "engaged"
+        and state.lane_change_phase in ("preparing", "changing", "recentering")
+    ):
+        relative_scene_x_offset_m = (
+            lane_center_locked_offset(clamp(state.ego_lane_offset, -1.25, 1.25))
+            * lane_width_m
+        )
     camera = scene_camera(state, lane_width_m, anchor_x_m)
     camera_active = state.surround_view_active
     selected_radar_vehicle_points = tuple(
@@ -3435,7 +3443,18 @@ def build_cluster_scene(
 
     profile_stage = profile_scene_start(profile_add)
     highlight_lanes: list[MeshStrip] = []
-    for side_offset in (FIXED_THREE_LANE_MARKING_OFFSETS[1] - 0.5, FIXED_THREE_LANE_MARKING_OFFSETS[2] + 0.5):
+    side_lane_offsets = (
+        FIXED_THREE_LANE_MARKING_OFFSETS[1] - 0.5,
+        FIXED_THREE_LANE_MARKING_OFFSETS[2] + 0.5,
+    )
+    for side_offset in side_lane_offsets:
+        if (
+            highlight_lane_lit
+            and
+            state.highlight_lane_offset is not None
+            and abs(side_offset - state.highlight_lane_offset) <= 0.1
+        ):
+            continue
         side_lane_strip = lane_floor_strip(
             state,
             side_offset,
