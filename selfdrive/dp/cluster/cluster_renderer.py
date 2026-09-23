@@ -2550,7 +2550,7 @@ class ClusterUiRenderer:
         stats = self._system_stats.sample()
         temperature = stats.temperature_c
         memory_percent = stats.memory_used_percent
-        temperature_text = "--" if temperature is None else f"{temperature:.0f}°C"
+        temperature_text = "--" if temperature is None else f"{temperature:.0f}C"
         memory_text = "--" if memory_percent is None else f"{memory_percent:.0f}%"
         self._draw_text(
             f"TEMP {temperature_text}",
