@@ -721,7 +721,9 @@ def rainbow_lane_floor_strips(
     if len(left) < 2 or len(left) != len(right):
         return ()
 
-    segment_count = len(left) - 1
+    # Keep the animated lane highlight bounded to avoid a draw call per road
+    # sample; the latter can stall the cluster render loop on the device GPU.
+    segment_count = min(16, len(left) - 1)
     alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
     flow_rate = 0.01 + clamp(speed_kph, 0.0, 100.0) * 0.0012
     flow = time.monotonic() * flow_rate
