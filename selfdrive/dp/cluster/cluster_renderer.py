@@ -96,13 +96,10 @@ DRIVE_STATUS_SCALE = DRIVE_STATUS_ROW_HEIGHT / DRIVE_STATUS_BASE_BOX_SIZE
 GEAR_STATUS_CENTER_X = 1615
 GEAR_STATUS_CENTER_Y = 350
 GEAR_STATUS_FONT_SIZE = 150.0 * DRIVE_STATUS_SCALE
-TOP_SYSTEM_METRIC_LEFT_X = 340.0
-TOP_SYSTEM_METRIC_RIGHT_X = 1570.0
-TOP_SYSTEM_METRIC_Y = 100.0
+TOP_SYSTEM_METRIC_LEFT_X = 250.0
+TOP_SYSTEM_METRIC_RIGHT_X = 1200.0
+TOP_SYSTEM_METRIC_Y = 72.0
 TOP_SYSTEM_METRIC_FONT_SIZE = 24.0
-TOP_SYSTEM_METRICS_ENABLED = True
-DRIVING_SCENE_ENABLED = True
-DRIVING_SCENE_DRAW_ENABLED = False
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
@@ -835,16 +832,6 @@ class ClusterUiRenderer:
         if signal_lights is None:
             signal_lights = self._turn_signal_lights(state)
         theme = self._current_theme()
-        if not DRIVING_SCENE_ENABLED:
-            self._front_vehicle_distance_m = None
-            profile_stage = self._profile_start()
-            rl.clear_background(rl_color(theme.bg))
-            self._profile_add("render_world.clear_background", profile_stage)
-            profile_stage = self._profile_start()
-            self._draw_background_image(theme)
-            self._profile_add("render_world.background_image", profile_stage)
-            return
-
         profile_stage = self._profile_start()
         scene = build_cluster_scene(
             state,
@@ -874,8 +861,6 @@ class ClusterUiRenderer:
         profile_stage = self._profile_start()
         self._draw_background_image(theme)
         self._profile_add("render_world.background_image", profile_stage)
-        if not DRIVING_SCENE_DRAW_ENABLED:
-            return
         profile_stage = self._profile_start()
         self._draw_scene(scene, state)
         self._profile_add("render_world.draw_scene", profile_stage)
@@ -2279,10 +2264,9 @@ class ClusterUiRenderer:
             profile_stage = self._profile_start()
             self._draw_drive_status(state)
             self._profile_add("hud.drive_status", profile_stage)
-            if TOP_SYSTEM_METRICS_ENABLED:
-                profile_stage = self._profile_start()
-                self._draw_system_top_metrics()
-                self._profile_add("hud.system_top_metrics", profile_stage)
+            profile_stage = self._profile_start()
+            self._draw_system_top_metrics()
+            self._profile_add("hud.system_top_metrics", profile_stage)
             profile_stage = self._profile_start()
             self._draw_turn_signal("right", right_signal_lit, show_inactive=state.debug_ui_visible)
             self._profile_add("hud.turn_signal_right", profile_stage)
@@ -2563,18 +2547,17 @@ class ClusterUiRenderer:
             self._draw_percent_bar(cell_x, line_y + 19, cell_w, 6, percent, color)
 
     def _draw_system_top_metrics(self) -> None:
-        theme = self._current_theme()
         stats = self._system_stats.sample()
         temperature = stats.temperature_c
         memory_percent = stats.memory_used_percent
-        temperature_text = "--" if temperature is None else f"{temperature:.0f}C"
+        temperature_text = "--" if temperature is None else f"{temperature:.0f}°C"
         memory_text = "--" if memory_percent is None else f"{memory_percent:.0f}%"
         self._draw_text(
             f"TEMP {temperature_text}",
             TOP_SYSTEM_METRIC_RIGHT_X,
             TOP_SYSTEM_METRIC_Y,
             TOP_SYSTEM_METRIC_FONT_SIZE,
-            theme.text,
+            GREEN,
             anchor="center",
         )
         self._draw_text(
@@ -2582,7 +2565,7 @@ class ClusterUiRenderer:
             TOP_SYSTEM_METRIC_LEFT_X,
             TOP_SYSTEM_METRIC_Y,
             TOP_SYSTEM_METRIC_FONT_SIZE,
-            theme.text,
+            RED,
             anchor="center",
         )
 
@@ -3096,7 +3079,7 @@ class ClusterUiRenderer:
     def _draw_speed_block(self, state: ClusterUiState) -> None:
         theme = self._current_theme()
         raw_speed = state.display_speed_kph if state.display_speed_kph is not None else state.speed_kph
-        display_speed_kph = raw_speed * 1.053 if raw_speed is not None else None
+        display_speed_kph = raw_speed * 1.052 if raw_speed is not None else None
         speed_value = int(round(clamp(display_speed_kph, 0.0, MAX_SPEED_KPH)))
         # Orbitron renders wider per point size than the previous KaiGen font, so these
         # were re-measured to keep a 3-digit value (up to MAX_SPEED_KPH) clear of the

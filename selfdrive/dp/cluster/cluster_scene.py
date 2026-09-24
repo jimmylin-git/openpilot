@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import colorsys
 import math
 import time
 from collections import OrderedDict
@@ -173,14 +172,6 @@ PLANNED_PATH_STRIP_CACHE_LIMIT = 48
 ROAD_STEPS_SURROUND = 96
 ROAD_STEPS_MODEL = 48
 ROAD_STEPS_SIM = 64
-# Keep the animated lane disabled until it is implemented as one GPU mesh.
-# Multiple 3D strips can stall the device renderer when onroad starts.
-RAINBOW_LANE_FLOW_ENABLED = False
-# Temporarily disable lane-change scene animation while investigating onroad
-# renderer stalls; this keeps the scene on the stable centered-lane path.
-LANE_CHANGE_SCENE_ANIMATION_ENABLED = False
-# build_cluster_scene() isolation stages: "minimal", "lanes", "ego_vehicle", "road_edges", then "full".
-SCENE_BUILD_ISOLATION_STAGE = "road_edges"
 STATIC_LINE_STEPS = 56
 ROAD_EDGE_OFFSET_STEPS = STATIC_LINE_STEPS
 PLANNED_PATH_FALLBACK_STEPS = 32
@@ -197,7 +188,7 @@ ROAD_EDGE_OUTSIDE_SHADOW_OFFSET_M = 0.13
 ROAD_EDGE_BODY_OFFSET_M = 0.055
 ROAD_EDGE_CREST_OFFSET_M = -0.045
 ROAD_EDGE_BACKING_COLOR = LIGHT_CLUSTER_THEME.road_edge_backing
-ROAD_EDGE_MODEL_POINT_LIMIT = 24
+ROAD_EDGE_MODEL_POINT_LIMIT = 0
 STYLE_MESH_STRIP_GROUP_CACHE_LIMIT = 128
 MERGED_MESH_STRIP_CACHE_LIMIT = 128
 PATH_SHADOW_LAYER_M = 0.024
@@ -697,62 +688,6 @@ def lane_floor_strip(
         color,
         height_m,
     )
-
-
-def rainbow_lane_floor_strips(
-    lane_center_offset: float,
-    lane_width_m: float,
-    road_start_m: float,
-    road_end_m: float,
-    road_steps: int,
-    route_mode: bool,
-    speed_kph: float,
-) -> tuple[MeshStrip, ...]:
-    left = lane_centerline(
-        lane_center_offset - 0.5,
-        NO_STEERING_CURVE,
-        lane_width_m,
-        road_start_m,
-        road_end_m,
-        road_steps,
-        0.005,
-    )
-    right = lane_centerline(
-        lane_center_offset + 0.5,
-        NO_STEERING_CURVE,
-        lane_width_m,
-        road_start_m,
-        road_end_m,
-        road_steps,
-        0.005,
-    )
-    if len(left) < 2 or len(left) != len(right):
-        return ()
-
-    # Keep the animated lane highlight bounded to avoid a draw call per road
-    # sample; the latter can stall the cluster render loop on the device GPU.
-    segment_count = min(16, len(left) - 1)
-    alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
-    flow_rate = 0.01 + clamp(speed_kph, 0.0, 100.0) * 0.0012
-    flow = time.monotonic() * flow_rate
-    strips: list[MeshStrip] = []
-    for segment_index in range(segment_count):
-        start_index = round(segment_index * (len(left) - 1) / segment_count)
-        end_index = round((segment_index + 1) * (len(left) - 1) / segment_count)
-        if end_index <= start_index:
-            continue
-        forward_m = (left[start_index].y + left[end_index].y) * 0.5
-        hue = (flow + (forward_m - road_start_m) / max(1.0, road_end_m - road_start_m) * 0.8) % 1.0
-        red, green, blue = colorsys.hsv_to_rgb(hue, 0.72, 1.0)
-        color = int(red * 255), int(green * 255), int(blue * 255), alpha
-        strips.append(
-            MeshStrip(
-                left=(left[start_index], left[end_index]),
-                right=(right[start_index], right[end_index]),
-                color=color,
-            )
-        )
-    return tuple(strips)
 
 
 def strip_from_centerline(points: tuple[Vec3, ...], width_m: float, color: Color) -> MeshStrip:
@@ -1358,13 +1293,12 @@ def cached_model_line_strip_groups(
     extend_before_model: bool,
     profile_add: ProfileAdd | None = None,
     profile_prefix: str = "scene.model_line",
-    point_limit: int = MODEL_LINE_RENDER_POINT_LIMIT,
 ) -> ModelLineStripGroups:
     cache_start_m = model_line_cache_start_m(start_m)
     cache_end_m = model_line_cache_end_m(end_m)
     geometry_specs = model_line_geometry_specs(specs)
     profile_stage = profile_scene_start(profile_add)
-    render_points, point_key = model_line_render_points_and_key(model_points, point_limit)
+    render_points, point_key = model_line_render_points_and_key(model_points, MODEL_LINE_RENDER_POINT_LIMIT)
     profile_scene_add(profile_add, f"{profile_prefix}.key", profile_stage)
     key = (
         point_key,
@@ -1577,8 +1511,6 @@ def model_line_strip_groups(
 
 
 def planned_path_lane_offset(state: ClusterUiState, forward_m: float) -> float:
-    if not LANE_CHANGE_SCENE_ANIMATION_ENABLED:
-        return 0.0
     start_offset = 0.0
     target_offset = 0.0
     if state.lane_change is not None:
@@ -3236,7 +3168,6 @@ def road_edge_model_strips(
         True,
         profile_add,
         "scene.road_model",
-        ROAD_EDGE_MODEL_POINT_LIMIT,
     )
     if groups is None:
         return ()
@@ -3396,8 +3327,7 @@ def ego_lane_cruise_color(route_mode: bool) -> Color:
 def ego_lane_display_offset(state: ClusterUiState) -> float:
     """Keep the ego-lane floor centered except during an ACC lane change."""
     if (
-        LANE_CHANGE_SCENE_ANIMATION_ENABLED
-        and state.cruise_display_state == "engaged"
+        state.cruise_display_state == "engaged"
         and state.lane_change_phase in ("preparing", "changing", "recentering")
     ):
         return clamp(state.ego_lane_offset, -1.25, 1.25)
@@ -3464,23 +3394,6 @@ def build_cluster_scene(
     # lateral motion moves it between the fixed front-left/front/front-right
     # lanes. This also keeps the ego-lane highlight perfectly centered.
     lane_width_m = DEFAULT_LANE_WIDTH_M
-    camera = scene_camera(state, lane_width_m, 0.0)
-    if SCENE_BUILD_ISOLATION_STAGE == "minimal":
-        profile_scene_add(profile_add, "scene.build.minimal", profile_stage)
-        return ClusterScene(
-            camera=camera,
-            scene_shift_x_m=0.0,
-            road_surface=MeshStrip((), (), rgba(theme.road)),
-            ground_grid=(),
-            road_edges=(),
-            highlight_lanes=(),
-            lane_markings=(),
-            planned_path=(),
-            radar_points=(),
-            vehicles=(),
-            scene_vehicle_diagnostics=(),
-        )
-
     display_radar_points = radar_points_for_display(state)
     display_detected_vehicles = detected_vehicles_without_zero_radar_samples(state.detected_vehicles)
     if display_radar_points is not state.radar_points or display_detected_vehicles != state.detected_vehicles:
@@ -3489,14 +3402,14 @@ def build_cluster_scene(
     scene_shift_x_m = 0.0
     relative_scene_x_offset_m = 0.0
     if (
-        LANE_CHANGE_SCENE_ANIMATION_ENABLED
-        and state.cruise_display_state == "engaged"
+        state.cruise_display_state == "engaged"
         and state.lane_change_phase in ("preparing", "changing", "recentering")
     ):
         relative_scene_x_offset_m = (
             lane_center_locked_offset(clamp(state.ego_lane_offset, -1.25, 1.25))
             * lane_width_m
         )
+    camera = scene_camera(state, lane_width_m, anchor_x_m)
     camera_active = state.surround_view_active
     selected_radar_vehicle_points = tuple(
         point
@@ -3530,14 +3443,13 @@ def build_cluster_scene(
 
     profile_stage = profile_scene_start(profile_add)
     highlight_lanes: list[MeshStrip] = []
-    lane_change_highlight_lit = LANE_CHANGE_SCENE_ANIMATION_ENABLED and highlight_lane_lit
     side_lane_offsets = (
         FIXED_THREE_LANE_MARKING_OFFSETS[1] - 0.5,
         FIXED_THREE_LANE_MARKING_OFFSETS[2] + 0.5,
     )
     for side_offset in side_lane_offsets:
         if (
-            lane_change_highlight_lit
+            highlight_lane_lit
             and
             state.highlight_lane_offset is not None
             and abs(side_offset - state.highlight_lane_offset) <= 0.1
@@ -3556,7 +3468,7 @@ def build_cluster_scene(
         )
         if side_lane_strip is not None:
             highlight_lanes.append(side_lane_strip)
-    if state.highlight_lane_offset is not None and lane_change_highlight_lit:
+    if state.highlight_lane_offset is not None and highlight_lane_lit:
         highlight_strip = lane_floor_strip(
             state,
             state.highlight_lane_offset,
@@ -3574,36 +3486,19 @@ def build_cluster_scene(
         ego_lane_color = ego_lane_cruise_color(route_mode)
     else:
         ego_lane_color = ego_lane_default_color(route_mode)
-    if (
-        RAINBOW_LANE_FLOW_ENABLED
-        and state.cruise_display_state == "engaged"
-        and state.speed_kph > 1.0
-    ):
-        highlight_lanes.extend(
-            rainbow_lane_floor_strips(
-                ego_lane_display_offset(state),
-                lane_width_m,
-                road_start_m,
-                road_end_m,
-                road_steps,
-                route_mode,
-                state.speed_kph,
-            )
-        )
-    else:
-        ego_lane_strip = lane_floor_strip(
-            state,
-            ego_lane_display_offset(state),
-            ego_lane_color,
-            lane_width_m,
-            road_start_m,
-            road_end_m,
-            road_steps,
-            route_mode,
-            0.005,
-        )
-        if ego_lane_strip is not None:
-            highlight_lanes.append(ego_lane_strip)
+    ego_lane_strip = lane_floor_strip(
+        state,
+        ego_lane_display_offset(state),
+        ego_lane_color,
+        lane_width_m,
+        road_start_m,
+        road_end_m,
+        road_steps,
+        route_mode,
+        0.005,
+    )
+    if ego_lane_strip is not None:
+        highlight_lanes.append(ego_lane_strip)
     profile_scene_add(profile_add, "scene.build.highlight_lanes", profile_stage)
 
     profile_stage = profile_scene_start(profile_add)
@@ -3657,57 +3552,13 @@ def build_cluster_scene(
     lane_markings = merge_mesh_strips_by_style(lane_strips)
     profile_scene_add(profile_add, "scene.build.lane_markings.merge", profile_merge)
     profile_scene_add(profile_add, "scene.build.lane_markings", profile_stage)
-    if SCENE_BUILD_ISOLATION_STAGE == "lanes":
-        profile_stage = profile_scene_start(profile_add)
-        scene = ClusterScene(
-            camera=camera,
-            scene_shift_x_m=scene_shift_x_m,
-            road_surface=MeshStrip((), (), rgba(theme.road)),
-            ground_grid=(),
-            road_edges=(),
-            highlight_lanes=tuple(highlight_lanes),
-            lane_markings=lane_markings,
-            planned_path=(),
-            radar_points=(),
-            vehicles=(),
-            scene_vehicle_diagnostics=(),
-        )
-        profile_scene_add(profile_add, "scene.build.pack_lanes", profile_stage)
-        return scene
-    if SCENE_BUILD_ISOLATION_STAGE == "road_edges":
-        profile_stage = profile_scene_start(profile_add)
-        profile_geometry = profile_scene_start(profile_add)
-        road_edges_raw = road_edge_strips(state, route_mode, lane_width_m, road_start_m, road_end_m, theme, profile_add)
-        profile_scene_add(profile_add, "scene.build.road_edges.geometry", profile_geometry)
-        profile_merge = profile_scene_start(profile_add)
-        road_edges = merge_mesh_strips_by_style(road_edges_raw)
-        profile_scene_add(profile_add, "scene.build.road_edges.merge", profile_merge)
-        scene = ClusterScene(
-            camera=camera,
-            scene_shift_x_m=scene_shift_x_m,
-            road_surface=MeshStrip((), (), rgba(theme.road)),
-            ground_grid=(),
-            road_edges=road_edges,
-            highlight_lanes=tuple(highlight_lanes),
-            lane_markings=lane_markings,
-            planned_path=(),
-            radar_points=(),
-            vehicles=(),
-            scene_vehicle_diagnostics=(),
-        )
-        profile_scene_add(profile_add, "scene.build.pack_road_edges", profile_stage)
-        return scene
 
     profile_stage = profile_scene_start(profile_add)
     ego_offset = lane_center_locked_offset(
         ego_lane_display_offset(state),
-        enabled=not LANE_CHANGE_SCENE_ANIMATION_ENABLED or state.lane_change_phase != "changing",
+        enabled=state.lane_change_phase != "changing",
     )
-    target_offset = (
-        state.highlight_lane_offset
-        if LANE_CHANGE_SCENE_ANIMATION_ENABLED and state.lane_change_phase == "changing"
-        else None
-    )
+    target_offset = state.highlight_lane_offset if state.lane_change_phase == "changing" else None
     ego_vehicle = vehicle_box(
         ego_offset,
         EGO_VEHICLE_CENTER_FORWARD_M,
@@ -3716,26 +3567,8 @@ def build_cluster_scene(
         EGO,
         camera_active,
         target_offset,
-        lock_lane_center=not LANE_CHANGE_SCENE_ANIMATION_ENABLED or state.lane_change_phase != "changing",
+        lock_lane_center=state.lane_change_phase != "changing",
     )
-    if SCENE_BUILD_ISOLATION_STAGE == "ego_vehicle":
-        profile_stage = profile_scene_start(profile_add)
-        scene = ClusterScene(
-            camera=camera,
-            scene_shift_x_m=scene_shift_x_m,
-            road_surface=MeshStrip((), (), rgba(theme.road)),
-            ground_grid=(),
-            road_edges=(),
-            highlight_lanes=tuple(highlight_lanes),
-            lane_markings=lane_markings,
-            planned_path=(),
-            radar_points=(),
-            vehicles=(ego_vehicle,),
-            scene_vehicle_diagnostics=(),
-        )
-        profile_scene_add(profile_add, "scene.build.pack_ego_vehicle", profile_stage)
-        return scene
-
     merged_radar_labels = frozenset[str]()
     if route_mode:
         if state.radar_display_mode == CLUSTER_RADAR_DISPLAY_DETAIL:

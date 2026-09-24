@@ -213,7 +213,8 @@ When `--usb-brightness` is omitted, USB launches follow `ClusterHudBrightness`:
 using the same ambient-light estimate as the main UI and smoothing changes over
 time. The resolved brightness is limited to `10..60`; `1` through `100` are
 fixed brightness percentages, also limited to `10..60`.
-After the boot grace period, live USB output dims to `5` while offroad.
+Once the process has been running past the boot grace period and the vehicle is
+not started, live USB output dims to `5` instead of the resolved brightness.
 Brightness commands use no-ACK command `14` during USB initialization and when
 the resolved brightness changes.
 
@@ -276,16 +277,10 @@ Native hardware H264 always uses the direct GPU NV12 render/submit path. If
 backend `auto` falls back to ffmpeg, the run uses the software RGBA pipe.
 Changing this setting while the HUD is running makes the current HUD process
 exit so `cluster_autorun` can relaunch it with the new encoder choice.
-The main HUD compact system metrics show memory usage and the highest available
-thermal-zone temperature using the one-second system sampler; the SYSTEM panel
-also shows those values with CPU core usage.
-The 3D driving scene draw pass is also temporarily disabled for the same
-onroad-stall isolation pass. The renderer still builds the scene and keeps the
-background/HUD, but skips Raylib 3D drawing so build-time stalls can be
-separated from draw-time stalls.
-Road-edge scene building is being retested with model road-edge points capped
-before the shared model-line cache key/path is built, after unrestricted road
-edge geometry reproduced the onroad stall during isolation.
+The main HUD also shows compact system metrics in the upper status panels:
+the left red metric is memory usage percentage, and the right green metric is
+the highest available thermal-zone temperature. A missing sensor is shown as
+`--`; these metrics use the same one-second system sampler as the SYSTEM panel.
 `ClusterHudScreenMode` controls optional debug views: `0` default, `1` shows
 the live debug panel with grouped `LIVE DELAY`, `LIVE TORQUE`, `STEERING`, and
 `LATERAL PLAN` rows, `2` shows the system information panel with maximum
@@ -448,14 +443,12 @@ points that do not reach a vehicle box. `suppression_reason` identifies
 `filtered_by_lane`, or `locked_vehicle_overlap`. These records are emitted
 only for points suppressed by the scene compositor, so the next live log can
 show which stage dominates without changing the display behavior.
-The ACC lane-change scene animation is currently disabled while investigating
-onroad renderer stalls. During lane-change states, the planned path, ego-lane
-floor, target-lane floor highlight, ego vehicle box, and detected/radar vehicle
-boxes stay on the stable centered-lane rendering path.
-The animated rainbow ego-lane floor is currently disabled on the device because
-multiple 3D strips can stall the renderer when onroad starts. ACC therefore
-uses the stable single-strip ego-lane floor until the effect is reimplemented
-as one GPU mesh.
+During an ACC lane change, detected and radar vehicle boxes receive the same
+lane-transition display offset as the ego vehicle, keeping the front-vehicle
+group visually aligned with the lane transition. The target lane floor
+highlight suppresses the overlapping fixed side-lane fill while it is active,
+preventing z-fighting and blue floor tearing during the turn-signal lane
+change animation.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar
