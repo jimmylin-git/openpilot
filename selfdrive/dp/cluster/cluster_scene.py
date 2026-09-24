@@ -179,9 +179,8 @@ RAINBOW_LANE_FLOW_ENABLED = False
 # Temporarily disable lane-change scene animation while investigating onroad
 # renderer stalls; this keeps the scene on the stable centered-lane path.
 LANE_CHANGE_SCENE_ANIMATION_ENABLED = False
-# Build only the minimal scene shell while isolating onroad stalls inside
-# build_cluster_scene().
-MINIMAL_SCENE_BUILD_ENABLED = True
+# build_cluster_scene() isolation stages: "minimal", "lanes", then "full".
+SCENE_BUILD_ISOLATION_STAGE = "lanes"
 STATIC_LINE_STEPS = 56
 ROAD_EDGE_OFFSET_STEPS = STATIC_LINE_STEPS
 PLANNED_PATH_FALLBACK_STEPS = 32
@@ -3464,7 +3463,7 @@ def build_cluster_scene(
     # lanes. This also keeps the ego-lane highlight perfectly centered.
     lane_width_m = DEFAULT_LANE_WIDTH_M
     camera = scene_camera(state, lane_width_m, 0.0)
-    if MINIMAL_SCENE_BUILD_ENABLED:
+    if SCENE_BUILD_ISOLATION_STAGE == "minimal":
         profile_scene_add(profile_add, "scene.build.minimal", profile_stage)
         return ClusterScene(
             camera=camera,
@@ -3656,6 +3655,23 @@ def build_cluster_scene(
     lane_markings = merge_mesh_strips_by_style(lane_strips)
     profile_scene_add(profile_add, "scene.build.lane_markings.merge", profile_merge)
     profile_scene_add(profile_add, "scene.build.lane_markings", profile_stage)
+    if SCENE_BUILD_ISOLATION_STAGE == "lanes":
+        profile_stage = profile_scene_start(profile_add)
+        scene = ClusterScene(
+            camera=camera,
+            scene_shift_x_m=scene_shift_x_m,
+            road_surface=MeshStrip((), (), rgba(theme.road)),
+            ground_grid=(),
+            road_edges=(),
+            highlight_lanes=tuple(highlight_lanes),
+            lane_markings=lane_markings,
+            planned_path=(),
+            radar_points=(),
+            vehicles=(),
+            scene_vehicle_diagnostics=(),
+        )
+        profile_scene_add(profile_add, "scene.build.pack_lanes", profile_stage)
+        return scene
 
     profile_stage = profile_scene_start(profile_add)
     ego_offset = lane_center_locked_offset(
