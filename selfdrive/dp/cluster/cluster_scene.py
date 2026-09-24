@@ -184,6 +184,7 @@ MODEL_PATH_METRIC_SEGMENT_LIMIT = 14
 RAINBOW_FLOW_BASE_RATE = 0.03
 RAINBOW_FLOW_SPEED_MAX_KPH = 120.0
 RAINBOW_FLOW_SPEED_GAIN = 0.0045
+RAINBOW_FLOW_MAX_FRAME_S = 0.5
 LANE_MARKING_SHADOW_HEIGHT_M = 0.026
 LANE_MARKING_HEIGHT_M = 0.044
 LANE_MARKING_BORDER_EXTRA_WIDTH_PX = 3
@@ -686,6 +687,28 @@ def lane_floor_strip(
     )
 
 
+_rainbow_flow_phase = 0.0
+_rainbow_flow_last_s: float | None = None
+
+
+def advance_rainbow_flow_phase(flow_rate: float) -> float:
+    """Integrate hue phase over real elapsed time.
+
+    Scaling absolute monotonic time by a speed-dependent rate would make the
+    on-screen flow track acceleration instead of speed, because the derivative
+    picks up an ``elapsed * d(rate)/dt`` term that grows without bound as the
+    device stays up. Accumulating per-frame keeps the flow proportional to the
+    current speed alone.
+    """
+    global _rainbow_flow_phase, _rainbow_flow_last_s
+    now = time.monotonic()
+    previous = _rainbow_flow_last_s
+    _rainbow_flow_last_s = now
+    elapsed = 0.0 if previous is None else clamp(now - previous, 0.0, RAINBOW_FLOW_MAX_FRAME_S)
+    _rainbow_flow_phase = (_rainbow_flow_phase + elapsed * flow_rate) % 1.0
+    return _rainbow_flow_phase
+
+
 def rainbow_lane_floor_strips(
     lane_center_offset: float,
     lane_width_m: float,
@@ -721,7 +744,7 @@ def rainbow_lane_floor_strips(
     segment_count = min(16, len(left) - 1)
     alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
     flow_rate = RAINBOW_FLOW_BASE_RATE + clamp(speed_kph, 0.0, RAINBOW_FLOW_SPEED_MAX_KPH) * RAINBOW_FLOW_SPEED_GAIN
-    flow = time.monotonic() * flow_rate
+    flow = advance_rainbow_flow_phase(flow_rate)
     strips: list[MeshStrip] = []
     for segment_index in range(segment_count):
         start_index = round(segment_index * (len(left) - 1) / segment_count)
