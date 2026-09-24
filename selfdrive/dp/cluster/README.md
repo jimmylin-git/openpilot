@@ -283,9 +283,9 @@ The 3D driving scene draw pass is also temporarily disabled for the same
 onroad-stall isolation pass. The renderer still builds the scene and keeps the
 background/HUD, but skips Raylib 3D drawing so build-time stalls can be
 separated from draw-time stalls.
-Road-edge scene building is currently skipped after it reproduced the onroad
-stall during isolation. Scene building is reduced to static lanes plus the ego
-vehicle box while the next build stage is tested.
+Road-edge scene building is being retested with model road-edge points capped
+before the shared model-line cache key/path is built, after unrestricted road
+edge geometry reproduced the onroad stall during isolation.
 `ClusterHudScreenMode` controls optional debug views: `0` default, `1` shows
 the live debug panel with grouped `LIVE DELAY`, `LIVE TORQUE`, `STEERING`, and
 `LATERAL PLAN` rows, `2` shows the system information panel with maximum

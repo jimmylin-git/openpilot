@@ -180,7 +180,7 @@ RAINBOW_LANE_FLOW_ENABLED = False
 # renderer stalls; this keeps the scene on the stable centered-lane path.
 LANE_CHANGE_SCENE_ANIMATION_ENABLED = False
 # build_cluster_scene() isolation stages: "minimal", "lanes", "ego_vehicle", "road_edges", then "full".
-SCENE_BUILD_ISOLATION_STAGE = "ego_vehicle"
+SCENE_BUILD_ISOLATION_STAGE = "road_edges"
 STATIC_LINE_STEPS = 56
 ROAD_EDGE_OFFSET_STEPS = STATIC_LINE_STEPS
 PLANNED_PATH_FALLBACK_STEPS = 32
@@ -197,7 +197,7 @@ ROAD_EDGE_OUTSIDE_SHADOW_OFFSET_M = 0.13
 ROAD_EDGE_BODY_OFFSET_M = 0.055
 ROAD_EDGE_CREST_OFFSET_M = -0.045
 ROAD_EDGE_BACKING_COLOR = LIGHT_CLUSTER_THEME.road_edge_backing
-ROAD_EDGE_MODEL_POINT_LIMIT = 0
+ROAD_EDGE_MODEL_POINT_LIMIT = 24
 STYLE_MESH_STRIP_GROUP_CACHE_LIMIT = 128
 MERGED_MESH_STRIP_CACHE_LIMIT = 128
 PATH_SHADOW_LAYER_M = 0.024
@@ -1358,12 +1358,13 @@ def cached_model_line_strip_groups(
     extend_before_model: bool,
     profile_add: ProfileAdd | None = None,
     profile_prefix: str = "scene.model_line",
+    point_limit: int = MODEL_LINE_RENDER_POINT_LIMIT,
 ) -> ModelLineStripGroups:
     cache_start_m = model_line_cache_start_m(start_m)
     cache_end_m = model_line_cache_end_m(end_m)
     geometry_specs = model_line_geometry_specs(specs)
     profile_stage = profile_scene_start(profile_add)
-    render_points, point_key = model_line_render_points_and_key(model_points, MODEL_LINE_RENDER_POINT_LIMIT)
+    render_points, point_key = model_line_render_points_and_key(model_points, point_limit)
     profile_scene_add(profile_add, f"{profile_prefix}.key", profile_stage)
     key = (
         point_key,
@@ -3235,6 +3236,7 @@ def road_edge_model_strips(
         True,
         profile_add,
         "scene.road_model",
+        ROAD_EDGE_MODEL_POINT_LIMIT,
     )
     if groups is None:
         return ()
