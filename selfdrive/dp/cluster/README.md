@@ -280,6 +280,9 @@ The main HUD compact system metrics are currently disabled while investigating
 onroad renderer stalls; the SYSTEM panel still shows the highest available
 thermal-zone temperature, memory usage, and CPU core usage using the
 one-second system sampler.
+The 3D driving scene is also temporarily disabled for the same onroad-stall
+isolation pass, so the renderer keeps the background and HUD while skipping
+scene construction and 3D drawing.
 `ClusterHudScreenMode` controls optional debug views: `0` default, `1` shows
 the live debug panel with grouped `LIVE DELAY`, `LIVE TORQUE`, `STEERING`, and
 `LATERAL PLAN` rows, `2` shows the system information panel with maximum

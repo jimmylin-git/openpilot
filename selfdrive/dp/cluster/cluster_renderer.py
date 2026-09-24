@@ -101,6 +101,7 @@ TOP_SYSTEM_METRIC_RIGHT_X = 1570.0
 TOP_SYSTEM_METRIC_Y = 100.0
 TOP_SYSTEM_METRIC_FONT_SIZE = 24.0
 TOP_SYSTEM_METRICS_ENABLED = False
+DRIVING_SCENE_ENABLED = False
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
@@ -833,6 +834,16 @@ class ClusterUiRenderer:
         if signal_lights is None:
             signal_lights = self._turn_signal_lights(state)
         theme = self._current_theme()
+        if not DRIVING_SCENE_ENABLED:
+            self._front_vehicle_distance_m = None
+            profile_stage = self._profile_start()
+            rl.clear_background(rl_color(theme.bg))
+            self._profile_add("render_world.clear_background", profile_stage)
+            profile_stage = self._profile_start()
+            self._draw_background_image(theme)
+            self._profile_add("render_world.background_image", profile_stage)
+            return
+
         profile_stage = self._profile_start()
         scene = build_cluster_scene(
             state,
