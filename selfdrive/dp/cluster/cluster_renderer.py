@@ -101,7 +101,8 @@ TOP_SYSTEM_METRIC_RIGHT_X = 1570.0
 TOP_SYSTEM_METRIC_Y = 100.0
 TOP_SYSTEM_METRIC_FONT_SIZE = 24.0
 TOP_SYSTEM_METRICS_ENABLED = False
-DRIVING_SCENE_ENABLED = False
+DRIVING_SCENE_ENABLED = True
+DRIVING_SCENE_DRAW_ENABLED = False
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
@@ -873,6 +874,8 @@ class ClusterUiRenderer:
         profile_stage = self._profile_start()
         self._draw_background_image(theme)
         self._profile_add("render_world.background_image", profile_stage)
+        if not DRIVING_SCENE_DRAW_ENABLED:
+            return
         profile_stage = self._profile_start()
         self._draw_scene(scene, state)
         self._profile_add("render_world.draw_scene", profile_stage)
