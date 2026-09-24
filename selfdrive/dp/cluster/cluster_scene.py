@@ -179,8 +179,8 @@ RAINBOW_LANE_FLOW_ENABLED = False
 # Temporarily disable lane-change scene animation while investigating onroad
 # renderer stalls; this keeps the scene on the stable centered-lane path.
 LANE_CHANGE_SCENE_ANIMATION_ENABLED = False
-# build_cluster_scene() isolation stages: "minimal", "lanes", then "full".
-SCENE_BUILD_ISOLATION_STAGE = "lanes"
+# build_cluster_scene() isolation stages: "minimal", "lanes", "road_edges", then "full".
+SCENE_BUILD_ISOLATION_STAGE = "road_edges"
 STATIC_LINE_STEPS = 56
 ROAD_EDGE_OFFSET_STEPS = STATIC_LINE_STEPS
 PLANNED_PATH_FALLBACK_STEPS = 32
@@ -3671,6 +3671,29 @@ def build_cluster_scene(
             scene_vehicle_diagnostics=(),
         )
         profile_scene_add(profile_add, "scene.build.pack_lanes", profile_stage)
+        return scene
+    if SCENE_BUILD_ISOLATION_STAGE == "road_edges":
+        profile_stage = profile_scene_start(profile_add)
+        profile_geometry = profile_scene_start(profile_add)
+        road_edges_raw = road_edge_strips(state, route_mode, lane_width_m, road_start_m, road_end_m, theme, profile_add)
+        profile_scene_add(profile_add, "scene.build.road_edges.geometry", profile_geometry)
+        profile_merge = profile_scene_start(profile_add)
+        road_edges = merge_mesh_strips_by_style(road_edges_raw)
+        profile_scene_add(profile_add, "scene.build.road_edges.merge", profile_merge)
+        scene = ClusterScene(
+            camera=camera,
+            scene_shift_x_m=scene_shift_x_m,
+            road_surface=MeshStrip((), (), rgba(theme.road)),
+            ground_grid=(),
+            road_edges=road_edges,
+            highlight_lanes=tuple(highlight_lanes),
+            lane_markings=lane_markings,
+            planned_path=(),
+            radar_points=(),
+            vehicles=(),
+            scene_vehicle_diagnostics=(),
+        )
+        profile_scene_add(profile_add, "scene.build.pack_road_edges", profile_stage)
         return scene
 
     profile_stage = profile_scene_start(profile_add)

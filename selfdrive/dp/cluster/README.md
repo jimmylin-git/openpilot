@@ -276,16 +276,15 @@ Native hardware H264 always uses the direct GPU NV12 render/submit path. If
 backend `auto` falls back to ffmpeg, the run uses the software RGBA pipe.
 Changing this setting while the HUD is running makes the current HUD process
 exit so `cluster_autorun` can relaunch it with the new encoder choice.
-The main HUD compact system metrics are currently disabled while investigating
-onroad renderer stalls; the SYSTEM panel still shows the highest available
-thermal-zone temperature, memory usage, and CPU core usage using the
-one-second system sampler.
+The main HUD compact system metrics show memory usage and the highest available
+thermal-zone temperature using the one-second system sampler; the SYSTEM panel
+also shows those values with CPU core usage.
 The 3D driving scene draw pass is also temporarily disabled for the same
 onroad-stall isolation pass. The renderer still builds the scene and keeps the
 background/HUD, but skips Raylib 3D drawing so build-time stalls can be
 separated from draw-time stalls.
-Scene building is currently reduced to the static lane stage to isolate which
-build stage stalls after onroad.
+Scene building is currently reduced to the static lane plus road-edge stage to
+isolate which build stage stalls after onroad.
 `ClusterHudScreenMode` controls optional debug views: `0` default, `1` shows
 the live debug panel with grouped `LIVE DELAY`, `LIVE TORQUE`, `STEERING`, and
 `LATERAL PLAN` rows, `2` shows the system information panel with maximum
