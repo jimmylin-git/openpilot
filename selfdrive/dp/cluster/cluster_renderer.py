@@ -96,10 +96,6 @@ DRIVE_STATUS_SCALE = DRIVE_STATUS_ROW_HEIGHT / DRIVE_STATUS_BASE_BOX_SIZE
 GEAR_STATUS_CENTER_X = 1615
 GEAR_STATUS_CENTER_Y = 350
 GEAR_STATUS_FONT_SIZE = 150.0 * DRIVE_STATUS_SCALE
-TOP_SYSTEM_METRIC_LEFT_X = 250.0
-TOP_SYSTEM_METRIC_RIGHT_X = 1200.0
-TOP_SYSTEM_METRIC_Y = 72.0
-TOP_SYSTEM_METRIC_FONT_SIZE = 24.0
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
@@ -2265,9 +2261,6 @@ class ClusterUiRenderer:
             self._draw_drive_status(state)
             self._profile_add("hud.drive_status", profile_stage)
             profile_stage = self._profile_start()
-            self._draw_system_top_metrics()
-            self._profile_add("hud.system_top_metrics", profile_stage)
-            profile_stage = self._profile_start()
             self._draw_turn_signal("right", right_signal_lit, show_inactive=state.debug_ui_visible)
             self._profile_add("hud.turn_signal_right", profile_stage)
             profile_stage = self._profile_start()
@@ -2545,29 +2538,6 @@ class ClusterUiRenderer:
             self._draw_text(f"C{index}", cell_x, line_y + 8, text_size, theme.muted)
             self._draw_text(self._percent_text(percent), cell_x + cell_w, line_y + 8, text_size, color, anchor="right")
             self._draw_percent_bar(cell_x, line_y + 19, cell_w, 6, percent, color)
-
-    def _draw_system_top_metrics(self) -> None:
-        stats = self._system_stats.sample()
-        temperature = stats.temperature_c
-        memory_percent = stats.memory_used_percent
-        temperature_text = "--" if temperature is None else f"{temperature:.0f}°C"
-        memory_text = "--" if memory_percent is None else f"{memory_percent:.0f}%"
-        self._draw_text(
-            f"TEMP {temperature_text}",
-            TOP_SYSTEM_METRIC_RIGHT_X,
-            TOP_SYSTEM_METRIC_Y,
-            TOP_SYSTEM_METRIC_FONT_SIZE,
-            GREEN,
-            anchor="center",
-        )
-        self._draw_text(
-            f"MEM {memory_text}",
-            TOP_SYSTEM_METRIC_LEFT_X,
-            TOP_SYSTEM_METRIC_Y,
-            TOP_SYSTEM_METRIC_FONT_SIZE,
-            RED,
-            anchor="center",
-        )
 
     def _draw_live_debug_panel(self, state: ClusterUiState) -> None:
         sections = self._live_debug_sections(state)

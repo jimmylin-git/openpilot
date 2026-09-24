@@ -277,10 +277,6 @@ Native hardware H264 always uses the direct GPU NV12 render/submit path. If
 backend `auto` falls back to ffmpeg, the run uses the software RGBA pipe.
 Changing this setting while the HUD is running makes the current HUD process
 exit so `cluster_autorun` can relaunch it with the new encoder choice.
-The main HUD also shows compact system metrics in the upper status panels:
-the left red metric is memory usage percentage, and the right green metric is
-the highest available thermal-zone temperature. A missing sensor is shown as
-`--`; these metrics use the same one-second system sampler as the SYSTEM panel.
 `ClusterHudScreenMode` controls optional debug views: `0` default, `1` shows
 the live debug panel with grouped `LIVE DELAY`, `LIVE TORQUE`, `STEERING`, and
 `LATERAL PLAN` rows, `2` shows the system information panel with maximum
