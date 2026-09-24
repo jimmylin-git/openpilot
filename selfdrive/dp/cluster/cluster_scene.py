@@ -180,6 +180,11 @@ ROAD_EDGE_OFFSET_STEPS = STATIC_LINE_STEPS
 PLANNED_PATH_FALLBACK_STEPS = 32
 MODEL_PATH_METRIC_SEGMENT_LIMIT = 14
 PATH_METRIC_SPEED_MAX_KPH = 120.0
+# Rainbow ego-lane flow speed tracks vehicle speed: hue cycles per second go
+# from a slow idle crawl at a standstill to a brisk sweep at highway speed.
+RAINBOW_FLOW_BASE_RATE = 0.03
+RAINBOW_FLOW_SPEED_MAX_KPH = 120.0
+RAINBOW_FLOW_SPEED_GAIN = 0.0045
 LANE_MARKING_SHADOW_HEIGHT_M = 0.026
 LANE_MARKING_HEIGHT_M = 0.044
 LANE_MARKING_BORDER_EXTRA_WIDTH_PX = 3
@@ -716,7 +721,7 @@ def rainbow_lane_floor_strips(
     # sample; the latter can stall the cluster render loop on the device GPU.
     segment_count = min(16, len(left) - 1)
     alpha = EGO_LANE_CRUISE_ROUTE_ALPHA if route_mode else EGO_LANE_CRUISE_ALPHA
-    flow_rate = 0.01 + clamp(speed_kph, 0.0, 100.0) * 0.0012
+    flow_rate = RAINBOW_FLOW_BASE_RATE + clamp(speed_kph, 0.0, RAINBOW_FLOW_SPEED_MAX_KPH) * RAINBOW_FLOW_SPEED_GAIN
     flow = time.monotonic() * flow_rate
     strips: list[MeshStrip] = []
     for segment_index in range(segment_count):
