@@ -434,14 +434,10 @@ a nearby radarPoint before rendering. Scene composition now uses only
 confidence-qualified detected vehicles for radar hiding and merged-label
 suppression; an undrawn low-confidence model object can no longer make a valid
 radarPoint disappear without a replacement vehicle box.
-The ACC lane-change scene animation is currently disabled while investigating
-onroad renderer stalls. During lane-change states, the planned path, ego-lane
-floor, target-lane floor highlight, ego vehicle box, and detected/radar vehicle
-boxes stay on the stable centered-lane rendering path.
-The animated rainbow ego-lane floor is currently disabled on the device because
-multiple 3D strips can stall the renderer when onroad starts. ACC therefore
-uses the stable single-strip ego-lane floor until the effect is reimplemented
-as one GPU mesh.
+During ACC lane-change states the planned path, ego-lane floor, target-lane
+floor highlight, ego vehicle box, and detected/radar vehicle boxes follow the
+animated lane-change offset. When ACC is engaged above 1 km/h the ego-lane
+floor uses the animated rainbow flow strips.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar

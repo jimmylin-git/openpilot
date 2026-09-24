@@ -173,12 +173,8 @@ PLANNED_PATH_STRIP_CACHE_LIMIT = 48
 ROAD_STEPS_SURROUND = 96
 ROAD_STEPS_MODEL = 48
 ROAD_STEPS_SIM = 64
-# Keep the animated lane disabled until it is implemented as one GPU mesh.
-# Multiple 3D strips can stall the device renderer when onroad starts.
-RAINBOW_LANE_FLOW_ENABLED = False
-# Temporarily disable lane-change scene animation while investigating onroad
-# renderer stalls; this keeps the scene on the stable centered-lane path.
-LANE_CHANGE_SCENE_ANIMATION_ENABLED = False
+RAINBOW_LANE_FLOW_ENABLED = True
+LANE_CHANGE_SCENE_ANIMATION_ENABLED = True
 STATIC_LINE_STEPS = 56
 ROAD_EDGE_OFFSET_STEPS = STATIC_LINE_STEPS
 PLANNED_PATH_FALLBACK_STEPS = 32
