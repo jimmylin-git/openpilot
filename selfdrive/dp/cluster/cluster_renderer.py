@@ -100,6 +100,7 @@ TOP_SYSTEM_METRIC_LEFT_X = 340.0
 TOP_SYSTEM_METRIC_RIGHT_X = 1570.0
 TOP_SYSTEM_METRIC_Y = 100.0
 TOP_SYSTEM_METRIC_FONT_SIZE = 24.0
+TOP_SYSTEM_METRICS_ENABLED = False
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
@@ -2264,9 +2265,10 @@ class ClusterUiRenderer:
             profile_stage = self._profile_start()
             self._draw_drive_status(state)
             self._profile_add("hud.drive_status", profile_stage)
-            profile_stage = self._profile_start()
-            self._draw_system_top_metrics()
-            self._profile_add("hud.system_top_metrics", profile_stage)
+            if TOP_SYSTEM_METRICS_ENABLED:
+                profile_stage = self._profile_start()
+                self._draw_system_top_metrics()
+                self._profile_add("hud.system_top_metrics", profile_stage)
             profile_stage = self._profile_start()
             self._draw_turn_signal("right", right_signal_lit, show_inactive=state.debug_ui_visible)
             self._profile_add("hud.turn_signal_right", profile_stage)
