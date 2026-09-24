@@ -179,6 +179,9 @@ RAINBOW_LANE_FLOW_ENABLED = False
 # Temporarily disable lane-change scene animation while investigating onroad
 # renderer stalls; this keeps the scene on the stable centered-lane path.
 LANE_CHANGE_SCENE_ANIMATION_ENABLED = False
+# Build only the minimal scene shell while isolating onroad stalls inside
+# build_cluster_scene().
+MINIMAL_SCENE_BUILD_ENABLED = True
 STATIC_LINE_STEPS = 56
 ROAD_EDGE_OFFSET_STEPS = STATIC_LINE_STEPS
 PLANNED_PATH_FALLBACK_STEPS = 32
@@ -3460,6 +3463,23 @@ def build_cluster_scene(
     # lateral motion moves it between the fixed front-left/front/front-right
     # lanes. This also keeps the ego-lane highlight perfectly centered.
     lane_width_m = DEFAULT_LANE_WIDTH_M
+    camera = scene_camera(state, lane_width_m, 0.0)
+    if MINIMAL_SCENE_BUILD_ENABLED:
+        profile_scene_add(profile_add, "scene.build.minimal", profile_stage)
+        return ClusterScene(
+            camera=camera,
+            scene_shift_x_m=0.0,
+            road_surface=MeshStrip((), (), rgba(theme.road)),
+            ground_grid=(),
+            road_edges=(),
+            highlight_lanes=(),
+            lane_markings=(),
+            planned_path=(),
+            radar_points=(),
+            vehicles=(),
+            scene_vehicle_diagnostics=(),
+        )
+
     display_radar_points = radar_points_for_display(state)
     display_detected_vehicles = detected_vehicles_without_zero_radar_samples(state.detected_vehicles)
     if display_radar_points is not state.radar_points or display_detected_vehicles != state.detected_vehicles:
@@ -3476,7 +3496,6 @@ def build_cluster_scene(
             lane_center_locked_offset(clamp(state.ego_lane_offset, -1.25, 1.25))
             * lane_width_m
         )
-    camera = scene_camera(state, lane_width_m, anchor_x_m)
     camera_active = state.surround_view_active
     selected_radar_vehicle_points = tuple(
         point
