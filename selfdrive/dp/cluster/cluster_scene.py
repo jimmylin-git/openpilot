@@ -179,7 +179,6 @@ STATIC_LINE_STEPS = 56
 ROAD_EDGE_OFFSET_STEPS = STATIC_LINE_STEPS
 PLANNED_PATH_FALLBACK_STEPS = 32
 MODEL_PATH_METRIC_SEGMENT_LIMIT = 14
-PATH_METRIC_SPEED_MAX_KPH = 120.0
 # Rainbow ego-lane flow speed tracks vehicle speed: hue cycles per second go
 # from a slow idle crawl at a standstill to a brisk sweep at highway speed.
 RAINBOW_FLOW_BASE_RATE = 0.03
@@ -1853,10 +1852,10 @@ def model_path_metric_strips(state: ClusterUiState, points: tuple[Vec3, ...]) ->
             len(state.model_path) - 1,
             round(index * (len(state.model_path) - 1) / max(1, metric_count - 1)),
         )
-        speed_mps = state.model_path[model_index].speed_mps
-        if speed_mps is None:
+        accel = state.model_path[model_index].accel_mps2
+        if accel is None:
             continue
-        color = path_metric_color(speed_mps * 3.6)
+        color = path_metric_color(accel)
         segment = (
             Vec3(points[index].x, points[index].y, PATH_METRIC_LAYER_M),
             Vec3(points[index + 1].x, points[index + 1].y, PATH_METRIC_LAYER_M),
@@ -1865,11 +1864,14 @@ def model_path_metric_strips(state: ClusterUiState, points: tuple[Vec3, ...]) ->
     return tuple(strips)
 
 
-def path_metric_color(speed_kph: float) -> Color:
-    # Sweep red -> yellow -> green -> cyan -> blue as the predicted speed rises.
-    ratio = clamp(speed_kph, 0.0, PATH_METRIC_SPEED_MAX_KPH) / PATH_METRIC_SPEED_MAX_KPH
-    red, green, blue = colorsys.hsv_to_rgb(ratio * 0.68, 0.78, 1.0)
-    return int(red * 255), int(green * 255), int(blue * 255), 190
+def path_metric_color(accel_mps2: float) -> Color:
+    if accel_mps2 <= -2.4:
+        return RED[0], RED[1], RED[2], 210
+    if accel_mps2 <= -0.7:
+        return AMBER[0], AMBER[1], AMBER[2], 190
+    if accel_mps2 >= 0.7:
+        return 18, 184, 108, 170
+    return 70, 152, 255, 145
 
 
 def radar_points_for_display(state: ClusterUiState) -> tuple[RadarPoint, ...]:
