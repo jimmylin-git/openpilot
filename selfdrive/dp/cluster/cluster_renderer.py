@@ -2547,6 +2547,7 @@ class ClusterUiRenderer:
             self._draw_percent_bar(cell_x, line_y + 19, cell_w, 6, percent, color)
 
     def _draw_system_top_metrics(self) -> None:
+        theme = self._current_theme()
         stats = self._system_stats.sample()
         temperature = stats.temperature_c
         memory_percent = stats.memory_used_percent
@@ -2557,7 +2558,7 @@ class ClusterUiRenderer:
             TOP_SYSTEM_METRIC_RIGHT_X,
             TOP_SYSTEM_METRIC_Y,
             TOP_SYSTEM_METRIC_FONT_SIZE,
-            GREEN,
+            theme.text,
             anchor="center",
         )
         self._draw_text(
@@ -2565,7 +2566,7 @@ class ClusterUiRenderer:
             TOP_SYSTEM_METRIC_LEFT_X,
             TOP_SYSTEM_METRIC_Y,
             TOP_SYSTEM_METRIC_FONT_SIZE,
-            RED,
+            theme.text,
             anchor="center",
         )
 
