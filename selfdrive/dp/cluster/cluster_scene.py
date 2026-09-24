@@ -176,6 +176,9 @@ ROAD_STEPS_SIM = 64
 # Keep the animated lane disabled until it is implemented as one GPU mesh.
 # Multiple 3D strips can stall the device renderer when onroad starts.
 RAINBOW_LANE_FLOW_ENABLED = False
+# Temporarily disable lane-change scene animation while investigating onroad
+# renderer stalls; this keeps the scene on the stable centered-lane path.
+LANE_CHANGE_SCENE_ANIMATION_ENABLED = False
 STATIC_LINE_STEPS = 56
 ROAD_EDGE_OFFSET_STEPS = STATIC_LINE_STEPS
 PLANNED_PATH_FALLBACK_STEPS = 32
@@ -1571,6 +1574,8 @@ def model_line_strip_groups(
 
 
 def planned_path_lane_offset(state: ClusterUiState, forward_m: float) -> float:
+    if not LANE_CHANGE_SCENE_ANIMATION_ENABLED:
+        return 0.0
     start_offset = 0.0
     target_offset = 0.0
     if state.lane_change is not None:
@@ -3387,7 +3392,8 @@ def ego_lane_cruise_color(route_mode: bool) -> Color:
 def ego_lane_display_offset(state: ClusterUiState) -> float:
     """Keep the ego-lane floor centered except during an ACC lane change."""
     if (
-        state.cruise_display_state == "engaged"
+        LANE_CHANGE_SCENE_ANIMATION_ENABLED
+        and state.cruise_display_state == "engaged"
         and state.lane_change_phase in ("preparing", "changing", "recentering")
     ):
         return clamp(state.ego_lane_offset, -1.25, 1.25)
@@ -3462,7 +3468,8 @@ def build_cluster_scene(
     scene_shift_x_m = 0.0
     relative_scene_x_offset_m = 0.0
     if (
-        state.cruise_display_state == "engaged"
+        LANE_CHANGE_SCENE_ANIMATION_ENABLED
+        and state.cruise_display_state == "engaged"
         and state.lane_change_phase in ("preparing", "changing", "recentering")
     ):
         relative_scene_x_offset_m = (
@@ -3503,13 +3510,14 @@ def build_cluster_scene(
 
     profile_stage = profile_scene_start(profile_add)
     highlight_lanes: list[MeshStrip] = []
+    lane_change_highlight_lit = LANE_CHANGE_SCENE_ANIMATION_ENABLED and highlight_lane_lit
     side_lane_offsets = (
         FIXED_THREE_LANE_MARKING_OFFSETS[1] - 0.5,
         FIXED_THREE_LANE_MARKING_OFFSETS[2] + 0.5,
     )
     for side_offset in side_lane_offsets:
         if (
-            highlight_lane_lit
+            lane_change_highlight_lit
             and
             state.highlight_lane_offset is not None
             and abs(side_offset - state.highlight_lane_offset) <= 0.1
@@ -3528,7 +3536,7 @@ def build_cluster_scene(
         )
         if side_lane_strip is not None:
             highlight_lanes.append(side_lane_strip)
-    if state.highlight_lane_offset is not None and highlight_lane_lit:
+    if state.highlight_lane_offset is not None and lane_change_highlight_lit:
         highlight_strip = lane_floor_strip(
             state,
             state.highlight_lane_offset,
@@ -3633,9 +3641,13 @@ def build_cluster_scene(
     profile_stage = profile_scene_start(profile_add)
     ego_offset = lane_center_locked_offset(
         ego_lane_display_offset(state),
-        enabled=state.lane_change_phase != "changing",
+        enabled=not LANE_CHANGE_SCENE_ANIMATION_ENABLED or state.lane_change_phase != "changing",
     )
-    target_offset = state.highlight_lane_offset if state.lane_change_phase == "changing" else None
+    target_offset = (
+        state.highlight_lane_offset
+        if LANE_CHANGE_SCENE_ANIMATION_ENABLED and state.lane_change_phase == "changing"
+        else None
+    )
     ego_vehicle = vehicle_box(
         ego_offset,
         EGO_VEHICLE_CENTER_FORWARD_M,
@@ -3644,7 +3656,7 @@ def build_cluster_scene(
         EGO,
         camera_active,
         target_offset,
-        lock_lane_center=state.lane_change_phase != "changing",
+        lock_lane_center=not LANE_CHANGE_SCENE_ANIMATION_ENABLED or state.lane_change_phase != "changing",
     )
     merged_radar_labels = frozenset[str]()
     if route_mode:
