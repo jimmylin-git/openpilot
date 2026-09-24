@@ -37,5 +37,6 @@
     "system/**",
     "third_party/**",
     "tools/**",
-  ]
+  ],
+  "chat.viewSessions.orientation": "stacked"
 }
