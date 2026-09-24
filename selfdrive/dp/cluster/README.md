@@ -279,9 +279,8 @@ Changing this setting while the HUD is running makes the current HUD process
 exit so `cluster_autorun` can relaunch it with the new encoder choice.
 `ClusterHudScreenMode` controls optional debug views: `0` default, `1` shows
 the live debug panel with grouped `LIVE DELAY`, `LIVE TORQUE`, `STEERING`, and
-`LATERAL PLAN` rows, `2` shows the system information panel with maximum
-thermal-zone temperature, memory, and CPU core usage, `3` shows a large debug
-graph selected by `ShowPlotMode` with the
+`LATERAL PLAN` rows, `2` shows the system information panel with memory and CPU
+core usage, `3` shows a large debug graph selected by `ShowPlotMode` with the
 driving scene disabled, and `4`
 shows the same graph in the right-side panel while keeping the driving scene.
 Mode `3` also hides the speed, accel, clock, turn-signal, and git HUD so the
@@ -424,21 +423,6 @@ a `scene_drop_while_active` disappearance, that pinpoints this classifier
 directly (rather than merging constituents' values) since that synthetic
 point -- not any individual raw constituent -- is what
 `radar_point_is_vehicle_candidate()` actually evaluates outside detail mode.
-The v5 live log showed that most active radarPoint drops still had
-`vehicle_candidate=true`, so the scene-composition path was investigated
-separately. A low-confidence detected vehicle could be excluded from
-`detected_vehicle_boxes` (below `FRONT_VEHICLE_MIN_CONFIDENCE`) but still hide
-a nearby radarPoint before rendering. Scene composition now uses only
-confidence-qualified detected vehicles for radar hiding and merged-label
-suppression; an undrawn low-confidence model object can no longer make a valid
-radarPoint disappear without a replacement vehicle box.
-The renderer now also writes `scene_vehicle` suppression records for radar
-points that do not reach a vehicle box. `suppression_reason` identifies
-`filtered_by_candidate`, `deduplicated`, `below_confidence`,
-`merged_into_detected_vehicle`, `hidden_by_detected_vehicle`,
-`filtered_by_lane`, or `locked_vehicle_overlap`. These records are emitted
-only for points suppressed by the scene compositor, so the next live log can
-show which stage dominates without changing the display behavior.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar
