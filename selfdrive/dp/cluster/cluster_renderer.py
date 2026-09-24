@@ -96,6 +96,10 @@ DRIVE_STATUS_SCALE = DRIVE_STATUS_ROW_HEIGHT / DRIVE_STATUS_BASE_BOX_SIZE
 GEAR_STATUS_CENTER_X = 1615
 GEAR_STATUS_CENTER_Y = 350
 GEAR_STATUS_FONT_SIZE = 150.0 * DRIVE_STATUS_SCALE
+TOP_SYSTEM_METRIC_LEFT_X = 340.0
+TOP_SYSTEM_METRIC_RIGHT_X = 1570.0
+TOP_SYSTEM_METRIC_Y = 100.0
+TOP_SYSTEM_METRIC_FONT_SIZE = 24.0
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
@@ -828,6 +832,7 @@ class ClusterUiRenderer:
         if signal_lights is None:
             signal_lights = self._turn_signal_lights(state)
         theme = self._current_theme()
+
         profile_stage = self._profile_start()
         scene = build_cluster_scene(
             state,
@@ -2246,6 +2251,9 @@ class ClusterUiRenderer:
             self._draw_drive_status(state)
             self._profile_add("hud.drive_status", profile_stage)
             profile_stage = self._profile_start()
+            self._draw_system_top_metrics()
+            self._profile_add("hud.system_top_metrics", profile_stage)
+            profile_stage = self._profile_start()
             self._draw_turn_signal("right", right_signal_lit, show_inactive=state.debug_ui_visible)
             self._profile_add("hud.turn_signal_right", profile_stage)
             profile_stage = self._profile_start()
@@ -2458,7 +2466,7 @@ class ClusterUiRenderer:
         columns = 2 if cpu_count <= 8 else 4
         rows = max(1, math.ceil(max(1, cpu_count) / columns))
         core_row_h = 30.0 if columns == 2 else 24.0
-        header_h = 122.0
+        header_h = 156.0
         panel_h = min(DESIGN_HEIGHT - SYSTEM_PANEL_Y - 18.0, header_h + rows * core_row_h + 18.0)
         core_area_h = max(24.0, panel_h - header_h - 14.0)
         core_row_h = min(core_row_h, core_area_h / rows)
@@ -2470,27 +2478,41 @@ class ClusterUiRenderer:
         self._rounded_rect(panel_x, panel_y, panel_w, panel_h, 18, theme.route_panel_bg, theme.faint, 2)
         self._draw_text("SYSTEM", panel_x + pad_x, panel_y + 28, 18, theme.muted)
 
+        temperature = stats.temperature_c
+        temperature_color = self._system_metric_color(
+            None if temperature is None else min(100.0, temperature)
+        )
+        self._draw_text("TEMP", panel_x + pad_x, panel_y + 62, 17, theme.muted)
+        self._draw_text(
+            "-- °C" if temperature is None else f"{temperature:.1f} °C",
+            panel_x + panel_w - pad_x,
+            panel_y + 62,
+            17,
+            temperature_color if temperature is not None else theme.muted,
+            anchor="right",
+        )
+
         mem_percent = stats.memory_used_percent
         mem_color = self._system_metric_color(mem_percent)
-        self._draw_text("MEM", panel_x + pad_x, panel_y + 62, 17, theme.muted)
+        self._draw_text("MEM", panel_x + pad_x, panel_y + 86, 17, theme.muted)
         self._draw_text(
             self._memory_text(stats),
             panel_x + 86,
-            panel_y + 62,
+            panel_y + 86,
             17,
             theme.text if stats.memory_used_bytes is not None else theme.muted,
         )
         self._draw_text(
             self._percent_text(mem_percent),
             panel_x + panel_w - pad_x,
-            panel_y + 62,
+            panel_y + 86,
             17,
             mem_color,
             anchor="right",
         )
-        self._draw_percent_bar(panel_x + pad_x, panel_y + 80, panel_w - pad_x * 2, 12, mem_percent, mem_color)
+        self._draw_percent_bar(panel_x + pad_x, panel_y + 104, panel_w - pad_x * 2, 12, mem_percent, mem_color)
 
-        cpu_header_y = panel_y + 104
+        cpu_header_y = panel_y + 128
         self._draw_text("CPU CORE %", panel_x + pad_x, cpu_header_y, 15, theme.muted)
         if cpu_count == 0:
             self._draw_text("unavailable", panel_x + panel_w - pad_x, cpu_header_y, 15, theme.muted, anchor="right")
@@ -2509,6 +2531,30 @@ class ClusterUiRenderer:
             self._draw_text(f"C{index}", cell_x, line_y + 8, text_size, theme.muted)
             self._draw_text(self._percent_text(percent), cell_x + cell_w, line_y + 8, text_size, color, anchor="right")
             self._draw_percent_bar(cell_x, line_y + 19, cell_w, 6, percent, color)
+
+    def _draw_system_top_metrics(self) -> None:
+        theme = self._current_theme()
+        stats = self._system_stats.sample()
+        temperature = stats.temperature_c
+        memory_percent = stats.memory_used_percent
+        temperature_text = "--" if temperature is None else f"{temperature:.0f}C"
+        memory_text = "--" if memory_percent is None else f"{memory_percent:.0f}%"
+        self._draw_text(
+            f"TEMP {temperature_text}",
+            TOP_SYSTEM_METRIC_RIGHT_X,
+            TOP_SYSTEM_METRIC_Y,
+            TOP_SYSTEM_METRIC_FONT_SIZE,
+            theme.text,
+            anchor="center",
+        )
+        self._draw_text(
+            f"MEM {memory_text}",
+            TOP_SYSTEM_METRIC_LEFT_X,
+            TOP_SYSTEM_METRIC_Y,
+            TOP_SYSTEM_METRIC_FONT_SIZE,
+            theme.text,
+            anchor="center",
+        )
 
     def _draw_live_debug_panel(self, state: ClusterUiState) -> None:
         sections = self._live_debug_sections(state)
@@ -3020,7 +3066,7 @@ class ClusterUiRenderer:
     def _draw_speed_block(self, state: ClusterUiState) -> None:
         theme = self._current_theme()
         raw_speed = state.display_speed_kph if state.display_speed_kph is not None else state.speed_kph
-        display_speed_kph = raw_speed * 1.052 if raw_speed is not None else None
+        display_speed_kph = raw_speed * 1.053 if raw_speed is not None else None
         speed_value = int(round(clamp(display_speed_kph, 0.0, MAX_SPEED_KPH)))
         # Orbitron renders wider per point size than the previous KaiGen font, so these
         # were re-measured to keep a 3-digit value (up to MAX_SPEED_KPH) clear of the
