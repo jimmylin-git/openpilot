@@ -29,6 +29,9 @@ FINALIZED = os.path.join(STAGING_ROOT, "finalized")
 
 OVERLAY_INIT = Path(os.path.join(BASEDIR, ".overlay_init"))
 
+UPDATER_REMOTE_URL = os.getenv("UPDATER_REMOTE_URL", "https://github.com/jimmylin-git/openpilot.git")
+UPDATER_DEFAULT_BRANCH = os.getenv("UPDATER_DEFAULT_BRANCH", "c3xl-dev-cluster")
+
 # do not allow to engage after this many hours onroad and this many routes
 HOURS_NO_CONNECTIVITY_MAX = 27
 ROUTES_NO_CONNECTIVITY_MAX = 84
@@ -114,6 +117,17 @@ def setup_git_options(cwd: str) -> None:
   ]
   for option, value in git_cfg:
     run(["git", "config", option, value], cwd)
+
+
+def setup_git_remote(cwd: str) -> None:
+  try:
+    current_url = run(["git", "remote", "get-url", "origin"], cwd).strip()
+  except subprocess.CalledProcessError:
+    run(["git", "remote", "add", "origin", UPDATER_REMOTE_URL], cwd)
+    return
+  if current_url != UPDATER_REMOTE_URL:
+    cloudlog.info(f"updater: switching origin {current_url} -> {UPDATER_REMOTE_URL}")
+    run(["git", "remote", "set-url", "origin", UPDATER_REMOTE_URL], cwd)
 
 
 def dismount_overlay() -> None:
@@ -227,7 +241,7 @@ class Updater:
   def target_branch(self) -> str:
     b: str | None = self.params.get("UpdaterTargetBranch")
     if b is None:
-      b = self.get_branch(BASEDIR)
+      b = UPDATER_DEFAULT_BRANCH
     b = SP_BRANCH_MIGRATIONS.get((HARDWARE.get_device_type(), b), b)
     return b
 
@@ -330,6 +344,7 @@ class Updater:
 
     excluded_branches = ('release2', 'release2-staging')
 
+    setup_git_remote(OVERLAY_MERGED)
     try:
       run(["git", "ls-remote", "origin", "HEAD"], OVERLAY_MERGED)
       self._has_internet = True
@@ -345,6 +360,10 @@ class Updater:
       x = re.fullmatch(ls_remotes_re, line.strip())
       if x is not None and x.group('branch_name') not in excluded_branches:
         self.branches[x.group('branch_name')] = x.group('commit_sha')
+
+    if self.branches and self.target_branch not in self.branches and UPDATER_DEFAULT_BRANCH in self.branches:
+      cloudlog.info(f"updater: {self.target_branch} not on {UPDATER_REMOTE_URL}, using {UPDATER_DEFAULT_BRANCH}")
+      self.params.put("UpdaterTargetBranch", UPDATER_DEFAULT_BRANCH, block=True)
 
     cur_branch = self.get_branch(OVERLAY_MERGED)
     cur_commit = self.get_commit_hash(OVERLAY_MERGED)
@@ -365,6 +384,7 @@ class Updater:
     self.params.put_bool("UpdateAvailable", False, block=True)
 
     setup_git_options(OVERLAY_MERGED)
+    setup_git_remote(OVERLAY_MERGED)
 
     run(["git", "config", "--replace-all", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], OVERLAY_MERGED)
 
