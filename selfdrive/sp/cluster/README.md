@@ -1,26 +1,26 @@
-# Carrot Cluster
+# Sunnypilot Cluster
 
 Standalone raylib cluster UI bundle for openpilot devices.
 
 Run from the openpilot root:
 
 ```bash
-python selfdrive/carrot/cluster_run.py --output usb
+python selfdrive/sp/cluster_run.py --output usb
 
-python selfdrive/carrot/cluster_run.py --output usb --profile-render
+python selfdrive/sp/cluster_run.py --output usb --profile-render
 ```
 
 Useful options:
 
 ```bash
-python selfdrive/carrot/cluster_run.py --output window --width 1920 --height 480
-python selfdrive/carrot/cluster_run.py --output usb --live-no-can
-python selfdrive/carrot/cluster_run.py --output usb --usb-codec jpeg --usb-jpeg-quality 68
-python selfdrive/carrot/cluster_run.py --output usb --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay compact --usb-codec h264 --usb-h264-fps 30 --profile-render
-python selfdrive/carrot/cluster_run.py --output usb --usb-codec h264 --usb-h264-test-pattern-nv12 --duration 20 --fps 10 --usb-h264-debug --usb-h264-slice-max-bytes 4096
-python selfdrive/carrot/cluster_run.py --output usb --usb-codec h264 --usb-h264-backend ffmpeg --usb-h264-ffmpeg-encoder libx264 --usb-h264-test-pattern --duration 20 --fps 10 --usb-h264-debug
-python selfdrive/carrot/cluster_run.py --output usb --fps 10 --usb-jpeg-quality 55 --route-overlay off
-python selfdrive/carrot/cluster_run.py --output usb --profile-render --profile-interval 2
+python selfdrive/sp/cluster_run.py --output window --width 1920 --height 480
+python selfdrive/sp/cluster_run.py --output usb --live-no-can
+python selfdrive/sp/cluster_run.py --output usb --usb-codec jpeg --usb-jpeg-quality 68
+python selfdrive/sp/cluster_run.py --output usb --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay compact --usb-codec h264 --usb-h264-fps 30 --profile-render
+python selfdrive/sp/cluster_run.py --output usb --usb-codec h264 --usb-h264-test-pattern-nv12 --duration 20 --fps 10 --usb-h264-debug --usb-h264-slice-max-bytes 4096
+python selfdrive/sp/cluster_run.py --output usb --usb-codec h264 --usb-h264-backend ffmpeg --usb-h264-ffmpeg-encoder libx264 --usb-h264-test-pattern --duration 20 --fps 10 --usb-h264-debug
+python selfdrive/sp/cluster_run.py --output usb --fps 10 --usb-jpeg-quality 55 --route-overlay off
+python selfdrive/sp/cluster_run.py --output usb --profile-render --profile-interval 2
 ```
 
 `--usb-jpeg-encoder auto` tries optional `turbojpeg` first and falls back to
@@ -113,7 +113,7 @@ is left off to match the working software path.
 For a quick H264 transport smoke test, run:
 
 ```bash
-python selfdrive/carrot/cluster_run.py --output usb --usb-codec h264 --usb-h264-test-pattern-nv12 --duration 20 --fps 10 --usb-h264-debug --usb-h264-slice-max-bytes 4096
+python selfdrive/sp/cluster_run.py --output usb --usb-codec h264 --usb-h264-test-pattern-nv12 --duration 20 --fps 10 --usb-h264-debug --usb-h264-slice-max-bytes 4096
 ```
 
 The panel should show red/green/blue/white quadrants on the default NV12
@@ -141,31 +141,31 @@ the selected H264 FPS and the libx264-style no-reorder DPB metadata.
 For route replay against a saved device route, run:
 
 ```bash
-python selfdrive/carrot/cluster_run.py --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay compact --output usb --usb-codec h264 --duration 60 --fps 30 --profile-render --profile-interval 2
-python selfdrive/carrot/cluster_run.py --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay off --output usb --usb-codec h264 --duration 60 --fps 30
-python selfdrive/carrot/cluster_run.py --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay off --output usb --usb-codec h264 --duration 60 --fps 30 --usb-h264-bitrate 6M
+python selfdrive/sp/cluster_run.py --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay compact --output usb --usb-codec h264 --duration 60 --fps 30 --profile-render --profile-interval 2
+python selfdrive/sp/cluster_run.py --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay off --output usb --usb-codec h264 --duration 60 --fps 30
+python selfdrive/sp/cluster_run.py --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay off --output usb --usb-codec h264 --duration 60 --fps 30 --usb-h264-bitrate 6M
 ```
 
 To compare native hardware output against ffmpeg/libx264 with the same USB
 transport diagnostics, use:
 
 ```bash
-python selfdrive/carrot/cluster_run.py --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay compact --output usb --usb-codec h264 --duration 30 --fps 30 --profile-render --profile-interval 2 --usb-h264-diagnose-interval 1
-python selfdrive/carrot/cluster_run.py --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay compact --output usb --usb-codec h264 --usb-h264-backend ffmpeg --usb-h264-ffmpeg-encoder libx264 --duration 30 --fps 30 --profile-render --profile-interval 2 --usb-h264-diagnose-interval 1
+python selfdrive/sp/cluster_run.py --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay compact --output usb --usb-codec h264 --duration 30 --fps 30 --profile-render --profile-interval 2 --usb-h264-diagnose-interval 1
+python selfdrive/sp/cluster_run.py --input route --route /data/media/0/realdata/0000012e--f190807d64--36 --route-overlay compact --output usb --usb-codec h264 --usb-h264-backend ffmpeg --usb-h264-ffmpeg-encoder libx264 --duration 30 --fps 30 --profile-render --profile-interval 2 --usb-h264-diagnose-interval 1
 ```
 
 The ffmpeg/libx264 path is the known-good H264 comparison mode. To make that
 explicit while testing, run:
 
 ```bash
-python selfdrive/carrot/cluster_run.py --output usb --usb-codec h264 --usb-h264-backend ffmpeg --usb-h264-ffmpeg-encoder libx264 --usb-h264-test-pattern --duration 20 --fps 10 --usb-h264-debug
+python selfdrive/sp/cluster_run.py --output usb --usb-codec h264 --usb-h264-backend ffmpeg --usb-h264-ffmpeg-encoder libx264 --usb-h264-test-pattern --duration 20 --fps 10 --usb-h264-debug
 ```
 
 When the panel still shows a corrupted picture, dump the outgoing stream and
 compare it separately:
 
 ```bash
-python selfdrive/carrot/cluster_run.py --output usb --usb-codec h264 --usb-h264-test-pattern-nv12 --duration 20 --fps 10 --usb-h264-debug --usb-h264-dump /tmp/cluster_hw_nv12.h264
+python selfdrive/sp/cluster_run.py --output usb --usb-codec h264 --usb-h264-test-pattern-nv12 --duration 20 --fps 10 --usb-h264-debug --usb-h264-dump /tmp/cluster_hw_nv12.h264
 ffprobe -show_streams /tmp/cluster_hw_nv12.h264
 ```
 

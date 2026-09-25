@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-CLUSTER_DIR = Path("/data/openpilot/selfdrive/dp/cluster")
+CLUSTER_DIR = Path(__file__).resolve().parent / "cluster"
 
 
 def main() -> None:
