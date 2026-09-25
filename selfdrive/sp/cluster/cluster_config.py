@@ -85,6 +85,59 @@ CLUSTER_RADAR_DISPLAY_DETAIL = 1
 CLUSTER_RADAR_SOURCE_COLOR_DEFAULT = 0
 CLUSTER_RADAR_SOURCE_COLOR_BY_SOURCE = 1
 SHOW_PLOT_MODE_PARAM = "ShowPlotMode"
+
+
+CLUSTER_PARAMS_DIR_ENV = "CLUSTER_PARAMS_DIR"
+CLUSTER_PARAMS_DIR_DEFAULT = "/data/cluster_params"
+
+
+def read_param_value(params: object, key: str) -> object | None:
+    """Return a param value. Keys the prebuilt libparams does not register raise
+    UnknownKeyName on sunnypilot and are wiped from /data/params at manager start,
+    so fall back to a cluster-owned directory (one file per key), then the params dir."""
+    import os
+
+    try:
+        return params.get(key)  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    candidates = [os.environ.get(CLUSTER_PARAMS_DIR_ENV) or CLUSTER_PARAMS_DIR_DEFAULT]
+    try:
+        candidates.append(params.get_param_path())  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    for param_dir in candidates:
+        try:
+            with open(os.path.join(param_dir, key), "rb") as f:
+                return f.read()
+        except Exception:
+            continue
+    return None
+
+
+def _param_text(params: object, key: str) -> str:
+    value = read_param_value(params, key)
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", "ignore")
+    if value is None or (isinstance(value, str) and not value.strip()):
+        raise KeyError(key)
+    return value.strip() if isinstance(value, str) else value  # type: ignore[return-value]
+
+
+def read_int_param(params: object, key: str) -> int:
+    """Read an int param on dp (get_int) or sunnypilot. Raises KeyError when unset."""
+    getter = getattr(params, "get_int", None)
+    if callable(getter):
+        return int(getter(key))
+    return int(float(_param_text(params, key)))
+
+
+def read_float_param(params: object, key: str) -> float:
+    """Read a float param on dp (get_float) or sunnypilot. Raises KeyError when unset."""
+    getter = getattr(params, "get_float", None)
+    if callable(getter):
+        return float(getter(key))
+    return float(_param_text(params, key))
 AUTO_DARK_START_HOUR = 18
 AUTO_LIGHT_START_HOUR = 6
 CLUSTER_LIVE_FPS_BY_MODE = {

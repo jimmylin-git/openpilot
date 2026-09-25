@@ -1045,8 +1045,8 @@ class RouteLogParser:
                 self._update_camera_odometry(event.cameraOdometry, bool(safe_get(event, "valid", True)))
             elif event_type == "radarState":
                 self._update_radar_state(event.radarState, event_t)
-            elif event_type == "liveTracks":
-                self._update_live_tracks(event.liveTracks, event_t)
+            elif event_type in ("liveTracks", "radarTracks"):
+                self._update_live_tracks(getattr(event, event_type), event_t)
             elif event_type in ("can", "sendcan"):
                 self._update_can_detections(getattr(event, event_type), event_t, event_type)
 
@@ -1160,7 +1160,7 @@ class RouteLogParser:
             lane_change_recenter_start_progress=lane_change_recenter_start_progress,
             lane_change_continuation=lane_change_continuation,
             throttle=clamp(safe_float(car_state, "gas", 0.0), 0.0, 1.0),
-            brake=clamp(safe_float(car_state, "brake", 0.0), 0.0, 1.0),
+            brake=clamp(car_state_brake(car_state), 0.0, 1.0),
             detected_vehicles=detected_vehicles,
             radar_points=radar_points,
             display_speed_kph=display_speed_kph,
@@ -1436,7 +1436,11 @@ class RouteLogParser:
         detections: list[DetectedVehicle] = []
         for label, lead_name in (("TARGET", "leadOne"), ("TARGET2", "leadTwo")):
             lead = safe_get(radar_state, lead_name)
-            if lead is None or not bool(safe_get(lead, "status", False)):
+            # sunnypilot renamed radarState lead "status" to "present".
+            lead_present = safe_get(lead, "status") if lead is not None else None
+            if lead_present is None and lead is not None:
+                lead_present = safe_get(lead, "present", False)
+            if lead is None or not bool(lead_present):
                 continue
             d_rel = safe_float(lead, "dRel", 0.0)
             if not RADAR_MIN_LONGITUDINAL_M <= d_rel <= RADAR_FRONT_MAX_LONGITUDINAL_M:
@@ -3327,6 +3331,14 @@ def finite_float(value: Any) -> float | None:
 def safe_optional_float(obj: Any, name: str) -> float | None:
     value = safe_float(obj, name, math.nan)
     return None if math.isnan(value) else value
+
+
+def car_state_brake(car_state: Any) -> float:
+    # carState.brake was removed upstream; fall back to brakePressed.
+    brake = safe_optional_float(car_state, "brake")
+    if brake is not None:
+        return brake
+    return 1.0 if bool(safe_get(car_state, "brakePressed", False)) else 0.0
 
 
 def safe_optional_int(obj: Any, name: str) -> int | None:

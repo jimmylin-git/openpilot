@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 
 from cluster_config import (
+    read_int_param,
+    read_param_value,
     CLUSTER_BRIGHTNESS_PARAM,
     CLUSTER_CAMERA_VIEW_MODE_PARAM,
     CLUSTER_ENCODER_AUTO,
@@ -184,7 +186,7 @@ class ClusterThemeParamReader:
         if self._params is None:
             return "auto"
         try:
-            return normalize_cluster_theme_mode(self._params.get_int(CLUSTER_THEME_PARAM))
+            return normalize_cluster_theme_mode(read_int_param(self._params, CLUSTER_THEME_PARAM))
         except Exception:
             return "auto"
 
@@ -203,7 +205,7 @@ class ClusterLiveFpsParamReader:
         if self._params is None:
             return 0.0
         try:
-            return normalize_cluster_live_fps(self._params.get_int(CLUSTER_LIVE_FPS_PARAM))
+            return normalize_cluster_live_fps(read_int_param(self._params, CLUSTER_LIVE_FPS_PARAM))
         except Exception:
             return 0.0
 
@@ -222,7 +224,7 @@ class ClusterHudBrightnessParamReader:
         if self._params is None:
             return 0
         try:
-            return normalize_cluster_brightness_percent(self._params.get_int(CLUSTER_BRIGHTNESS_PARAM))
+            return normalize_cluster_brightness_percent(read_int_param(self._params, CLUSTER_BRIGHTNESS_PARAM))
         except Exception:
             return 0
 
@@ -241,7 +243,7 @@ class ClusterScreenModeParamReader:
         if self._params is None:
             return 0
         try:
-            return normalize_cluster_screen_mode(self._params.get_int(CLUSTER_SCREEN_MODE_PARAM))
+            return normalize_cluster_screen_mode(read_int_param(self._params, CLUSTER_SCREEN_MODE_PARAM))
         except Exception:
             return 0
 
@@ -260,7 +262,7 @@ class ClusterCameraViewModeParamReader:
         if self._params is None:
             return 0
         try:
-            return normalize_cluster_camera_view_mode(self._params.get_int(CLUSTER_CAMERA_VIEW_MODE_PARAM))
+            return normalize_cluster_camera_view_mode(read_int_param(self._params, CLUSTER_CAMERA_VIEW_MODE_PARAM))
         except Exception:
             return 0
 
@@ -279,7 +281,7 @@ class ClusterRadarInfoParamReader:
         if self._params is None:
             return 4
         try:
-            value = self._params.get(CLUSTER_RADAR_INFO_PARAM)
+            value = read_param_value(self._params, CLUSTER_RADAR_INFO_PARAM)
             if value is None:
                 return 4
             if isinstance(value, bytes):
@@ -303,7 +305,7 @@ class ClusterRadarDisplayParamReader:
         if self._params is None:
             return 0
         try:
-            value = self._params.get(CLUSTER_RADAR_DISPLAY_PARAM)
+            value = read_param_value(self._params, CLUSTER_RADAR_DISPLAY_PARAM)
             if value is None:
                 return 0
             if isinstance(value, bytes):
@@ -327,7 +329,7 @@ class ClusterRadarSourceColorParamReader:
         if self._params is None:
             return 0
         try:
-            value = self._params.get(CLUSTER_RADAR_SOURCE_COLOR_PARAM)
+            value = read_param_value(self._params, CLUSTER_RADAR_SOURCE_COLOR_PARAM)
             if value is None:
                 return 0
             if isinstance(value, bytes):
@@ -351,7 +353,7 @@ class ClusterHudModeParamReader:
         if self._params is None:
             return None
         try:
-            return int(self._params.get_int(CLUSTER_HUD_PARAM))
+            return int(read_int_param(self._params, CLUSTER_HUD_PARAM))
         except Exception:
             return None
 
@@ -370,7 +372,7 @@ class ClusterHudOutputGateParamReader:
         if self._params is None:
             return 0
         try:
-            return max(0, min(3, int(self._params.get_int(CLUSTER_HUD_DEBUG_PARAM))))
+            return max(0, min(3, int(read_int_param(self._params, CLUSTER_HUD_DEBUG_PARAM))))
         except Exception:
             return 0
 
@@ -397,7 +399,7 @@ class ClusterHudEncoderParamReader:
         if self._params is None:
             return None
         try:
-            return normalize_cluster_encoder_mode(self._params.get_int(CLUSTER_ENCODER_PARAM))
+            return normalize_cluster_encoder_mode(read_int_param(self._params, CLUSTER_ENCODER_PARAM))
         except Exception:
             return None
 
@@ -416,7 +418,7 @@ class ClusterHudCoreModeParamReader:
         if self._params is None:
             return None
         try:
-            return normalize_cluster_core_mode(self._params.get_int(CLUSTER_CORE_MODE_PARAM))
+            return normalize_cluster_core_mode(read_int_param(self._params, CLUSTER_CORE_MODE_PARAM))
         except Exception:
             return None
 
@@ -435,7 +437,7 @@ class ClusterHudPriorityParamReader:
         if self._params is None:
             return None
         try:
-            return normalize_cluster_priority(self._params.get_int(CLUSTER_PRIORITY_PARAM))
+            return normalize_cluster_priority(read_int_param(self._params, CLUSTER_PRIORITY_PARAM))
         except Exception:
             return None
 

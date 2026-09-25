@@ -14,6 +14,11 @@ from cluster_utils import clamp
 
 VENDOR_ROOT = Path(__file__).resolve().parent / ".vendor" / "turing-smart-screen-python-main"
 VENDOR_LIBRARY = VENDOR_ROOT / "library"
+# Pure-python pyusb/pyserial fallback for device images whose venv lacks them.
+# Appended so system-installed versions take precedence.
+VENDOR_PYDEPS = Path(__file__).resolve().parent / ".vendor" / "pydeps"
+if VENDOR_PYDEPS.is_dir() and str(VENDOR_PYDEPS) not in sys.path:
+    sys.path.append(str(VENDOR_PYDEPS))
 TURZX_USB_VENDOR_ID = 0x1CBE
 TURZX_USB_PRODUCT_IDS = {
     0x0123: "TURZX 12.3",

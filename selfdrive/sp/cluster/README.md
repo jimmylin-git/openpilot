@@ -208,6 +208,20 @@ launcher resets `ClusterHudBrightness` to `0` at startup, then passes
 `ClusterHudLiveFps`, `ClusterHudEncoder`, `ClusterHudTheme`, and
 `ClusterHudBrightness` names are currently read-only integration points unless
 another component writes those Params; they are not settings UI by themselves.
+
+On sunnypilot the `ClusterHud*` / `ShowPlotMode` keys are not registered in the
+prebuilt `libparams_c.so` (so `Params().get` rejects them and manager start wipes
+unregistered files from `/data/params/d`). The cluster therefore also reads them
+from `/data/cluster_params/<key>` (override with `CLUSTER_PARAMS_DIR`), one plain
+text value per file, which survives reboots, e.g.:
+
+```bash
+mkdir -p /data/cluster_params
+echo -n 1 > /data/cluster_params/ClusterHudTheme      # 0 auto, 1 dark, 2 light
+echo -n 4 > /data/cluster_params/ClusterHudLiveFps    # 40 FPS
+```
+
+Unset keys keep the built-in defaults.
 When `--usb-brightness` is omitted, USB launches follow `ClusterHudBrightness`:
 `0` auto follows the wide-road camera exposure after samples are available,
 using the same ambient-light estimate as the main UI and smoothing changes over
@@ -218,9 +232,11 @@ Brightness commands use no-ACK command `14` during USB initialization and when
 the resolved brightness changes.
 
 The launcher defaults to `--input live`, subscribes to openpilot cereal services,
-and renders live `carState`, `modelV2`, `radarState`, `liveTracks`,
+and renders live `carState`, `modelV2`, `radarState`, `radarTracks`,
 `controlsState`, `selfdriveState`, `carControl`, and `deviceState`. Front radar
-tracks come from `liveTracks`; the cluster does not directly parse A-CAN CAN-FD
+tracks come from `radarTracks` (named `liveTracks` on older cereal trees; the
+old `liveDelay`/`liveParameters`/`liveTorqueParameters` names map to
+`lateralDelay`/`vehicleParameters`/`lateralTorqueParameters`); the cluster does not directly parse A-CAN CAN-FD
 radar track frames for display. Manager/autostart leaves
 the live CAN/sendcan subscriptions enabled, but exact LF/RF/LR/RR corner radar
 distance now comes only from received Hyundai camera-bus `can` `0x162`/`0x1EA`
@@ -467,7 +483,16 @@ launcher in non-exiting mode so the error returns to the watcher loop, letting
 `cluster_autorun` wait for the same PID and relaunch after replug.
 
 The bundled TURZX code includes only the Python vendor library. The openpilot
-device uses the system `libusb-1.0.so` through `pyusb`.
+device uses the system `libusb-1.0.so` through `pyusb`. Pure-python `pyusb`
+1.3.1 and `pyserial` 3.5 (BSD) are vendored in `.vendor/pydeps` and appended to
+`sys.path`, so they are only used when the device venv lacks them.
+
+`cluster_autorun` launches the HUD with `RAYLIB_BACKEND=headless`: sunnypilot's
+`comma-deps-raylib` 6.0 would otherwise pick its DRM `comma` backend on device
+and contend with the openpilot UI for `/dev/dri/card0`. The headless backend
+renders through EGL surfaceless/llvmpipe (CPU). Set
+`CLUSTER_RAYLIB_BACKEND=comma` (or `desktop`) in the manager environment to
+override.
 
 The renderer loads the fonts bundled in `selfdrive/sp/cluster/assets/fonts`
 (OrbitronBlack, then GeistMono-Light, then KaiGenGothicKR-Bold), falling back to

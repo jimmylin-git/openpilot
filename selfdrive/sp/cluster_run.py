@@ -22,6 +22,7 @@ from cluster_config import (
     CLUSTER_PRIORITY_PARAM,
     normalize_cluster_core_mode,
     normalize_cluster_priority,
+    read_int_param,
 )
 
 DEFAULT_REALTIME_CORES = [1, 2, 3, 4]
@@ -51,7 +52,7 @@ def _read_int_param(param_name: str, default: int) -> int:
     try:
         from openpilot.common.params import Params
 
-        return int(Params().get_int(param_name))
+        return int(read_int_param(Params(), param_name))
     except Exception:
         return default
 

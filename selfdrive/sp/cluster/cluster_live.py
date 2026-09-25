@@ -9,7 +9,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from cluster_config import BLUE, DEFAULT_LANE_WIDTH_M, MAX_SPEED_KPH, SHOW_PLOT_MODE_PARAM
+from cluster_config import (
+    BLUE,
+    DEFAULT_LANE_WIDTH_M,
+    MAX_SPEED_KPH,
+    SHOW_PLOT_MODE_PARAM,
+    read_float_param,
+    read_int_param,
+)
 from cluster_models import (
     ClusterUiState,
     DebugPlotSnapshot,
@@ -38,7 +45,7 @@ LIVE_SERVICES_BASE = (
     "carState",
     "modelV2",
     "radarState",
-    "liveTracks",
+    "radarTracks",
     "longitudinalPlan",
     #"lateralPlan",
     "controlsState",
@@ -47,11 +54,38 @@ LIVE_SERVICES_BASE = (
     "deviceState",
     "cameraOdometry",
     "drivingModelData",
-    "liveDelay",
-    "liveParameters",
-    "liveTorqueParameters",
+    "lateralDelay",
+    "vehicleParameters",
+    "lateralTorqueParameters",
     "wideRoadCameraState",
 )
+# sunnypilot renamed these services; the old names are kept for older cereal trees.
+LIVE_SERVICE_LEGACY_NAMES = {
+    "radarTracks": "liveTracks",
+    "lateralDelay": "liveDelay",
+    "vehicleParameters": "liveParameters",
+    "lateralTorqueParameters": "liveTorqueParameters",
+}
+
+
+def resolve_live_services(services: tuple[str, ...], service_list: Any) -> list[str]:
+    resolved: list[str] = []
+    for service in services:
+        if service_list is None or service in service_list:
+            resolved.append(service)
+            continue
+        legacy = LIVE_SERVICE_LEGACY_NAMES.get(service)
+        if legacy is not None and legacy in service_list:
+            resolved.append(legacy)
+        else:
+            print(f"[cluster_live] service {service} not available; skipping", flush=True)
+    return resolved
+
+
+def torque_params_valid(torque_params: Any) -> Any | None:
+    # sunnypilot renamed liveTorqueParameters.liveValid to lateralTorqueParameters.valid.
+    value = safe_get(torque_params, "liveValid")
+    return value if value is not None else safe_get(torque_params, "valid")
 LIVE_CAN_SERVICES = ("can", "sendcan")
 LIVE_DATA_STALE_SECONDS = 2.0
 LIVE_SCENE_SMOOTHING_TAU_SECONDS = 0.16
@@ -101,7 +135,18 @@ class OpenpilotLiveSource:
             self.log: Any | None = log
         except Exception:
             self.log = None
-        self.services = list(LIVE_SERVICES_BASE + (LIVE_CAN_SERVICES if include_can else ()))
+        try:
+            try:
+                from openpilot.cereal.services import SERVICE_LIST
+            except ImportError:
+                from cereal.services import SERVICE_LIST
+        except Exception:
+            SERVICE_LIST = None
+        self.services = resolve_live_services(
+            LIVE_SERVICES_BASE + (LIVE_CAN_SERVICES if include_can else ()),
+            SERVICE_LIST,
+        )
+        self._service_aliases = {legacy: new for new, legacy in LIVE_SERVICE_LEGACY_NAMES.items()}
         self.sm = messaging.SubMaster(self.services)
         self.parser = RouteLogParser()
         self.timeout_ms = max(0, int(timeout_ms))
@@ -986,6 +1031,7 @@ class OpenpilotLiveSource:
 
     def _apply_service_update(self, service: str, event_t: float) -> None:
         data = self.sm[service]
+        service = self._service_aliases.get(service, service)
         if service == "drivingModelData":
             self.parser._update_driving_model(data)
         elif service == "modelV2":
@@ -1004,7 +1050,7 @@ class OpenpilotLiveSource:
             self.parser._update_camera_odometry(data, self._service_valid(service))
         elif service == "radarState":
             self.parser._update_radar_state(data, event_t)
-        elif service == "liveTracks":
+        elif service == "radarTracks":
             self.parser._update_live_tracks(data, event_t)
         elif service in ("can", "sendcan"):
             self.parser._update_can_detections(data, event_t, service)
@@ -1036,8 +1082,8 @@ class OpenpilotLiveSource:
 
         live_delay_calibration_percent = cached.live_delay_calibration_percent if cached is not None else None
         live_delay_lateral_s = cached.live_delay_lateral_s if cached is not None else None
-        if self._service_alive("liveDelay"):
-            live_delay = self.sm["liveDelay"]
+        if self._service_alive("lateralDelay"):
+            live_delay = self._service_data("lateralDelay")
             live_delay_calibration_percent = self._first_present(
                 safe_optional_float(live_delay, "calPerc"),
                 live_delay_calibration_percent,
@@ -1052,13 +1098,13 @@ class OpenpilotLiveSource:
         live_torque_valid = cached.live_torque_valid if cached is not None else None
         live_torque_lat_accel_factor = cached.live_torque_lat_accel_factor if cached is not None else None
         live_torque_friction = cached.live_torque_friction if cached is not None else None
-        if self._service_alive("liveTorqueParameters"):
-            live_torque = self.sm["liveTorqueParameters"]
+        if self._service_alive("lateralTorqueParameters"):
+            live_torque = self._service_data("lateralTorqueParameters")
             live_torque_calibration_percent = self._first_present(
                 safe_optional_float(live_torque, "calPerc"),
                 live_torque_calibration_percent,
             )
-            live_valid = safe_get(live_torque, "liveValid")
+            live_valid = torque_params_valid(live_torque)
             live_torque_valid = bool(live_valid) if live_valid is not None else live_torque_valid
             live_torque_lat_accel_factor = self._first_present(
                 safe_optional_float(live_torque, "latAccelFactorFiltered"),
@@ -1074,9 +1120,9 @@ class OpenpilotLiveSource:
                 live_torque_friction = safe_optional_float(live_torque, "frictionCoefficient")
 
         live_steer_ratio = cached.live_steer_ratio if cached is not None else None
-        if self._service_alive("liveParameters"):
+        if self._service_alive("vehicleParameters"):
             live_steer_ratio = self._first_present(
-                safe_optional_float(self.sm["liveParameters"], "steerRatio"),
+                safe_optional_float(self._service_data("vehicleParameters"), "steerRatio"),
                 live_steer_ratio,
             )
 
@@ -1131,7 +1177,7 @@ class OpenpilotLiveSource:
         controls_state = self._service_data("controlsState")
         model = self._service_data("modelV2")
         radar = self._service_data("radarState")
-        live_params = self._service_data("liveParameters")
+        live_params = self._service_data("vehicleParameters")
 
         a_ego = self._finite_attr(car_state, "aEgo")
         v_ego = self._finite_attr(car_state, "vEgo")
@@ -1194,9 +1240,11 @@ class OpenpilotLiveSource:
         if self.params is None:
             return None
 
-        live_delay = self._event_service_from_param("LiveDelay", "liveDelay")
-        live_torque = self._event_service_from_param("LiveTorqueParameters", "liveTorqueParameters")
-        live_parameters = self._event_service_from_param("LiveParametersV2", "liveParameters")
+        live_delay = self._event_service_from_param("LiveDelay", "lateralDelay", "liveDelay")
+        live_torque = self._event_service_from_param(
+            "LiveTorqueParameters", "lateralTorqueParameters", "liveTorqueParameters"
+        )
+        live_parameters = self._event_service_from_param("LiveParametersV2", "vehicleParameters", "liveParameters")
         live_steer_ratio = None
         if live_parameters is not None:
             live_steer_ratio = safe_optional_float(live_parameters, "steerRatio")
@@ -1205,7 +1253,7 @@ class OpenpilotLiveSource:
 
         live_torque_valid = None
         if live_torque is not None:
-            live_valid = safe_get(live_torque, "liveValid")
+            live_valid = torque_params_valid(live_torque)
             live_torque_valid = bool(live_valid) if live_valid is not None else None
 
         info = LiveDebugInfo(
@@ -1234,7 +1282,7 @@ class OpenpilotLiveSource:
         )
         return info if any(value is not None for value in values) else None
 
-    def _event_service_from_param(self, param_key: str, service_name: str) -> Any | None:
+    def _event_service_from_param(self, param_key: str, *service_names: str) -> Any | None:
         if self.params is None or self.log is None:
             return None
         try:
@@ -1245,9 +1293,20 @@ class OpenpilotLiveSource:
             return None
         try:
             event = self.messaging.log_from_bytes(data, self.log.Event)
-            return safe_get(event, service_name)
         except Exception:
             return None
+        which = None
+        try:
+            which = event.which()
+        except Exception:
+            pass
+        for service_name in service_names:
+            if which is not None and which != service_name:
+                continue
+            value = safe_get(event, service_name)
+            if value is not None:
+                return value
+        return None
 
     def _legacy_live_parameters_steer_ratio(self) -> float | None:
         if self.params is None:
@@ -1285,7 +1344,7 @@ class OpenpilotLiveSource:
         if self.params is None:
             return None
         try:
-            value = float(self.params.get_float(key)) * scale
+            value = float(read_float_param(self.params, key)) * scale
         except Exception:
             return None
         return value if math.isfinite(value) else None
@@ -1294,14 +1353,20 @@ class OpenpilotLiveSource:
         if self.params is None:
             return default
         try:
-            value = int(self.params.get_int(key))
+            value = int(read_int_param(self.params, key))
         except Exception:
             return default
         return value if value >= 0 else default
 
+    def _sm_key(self, service: str) -> str:
+        if service in self.services:
+            return service
+        legacy = LIVE_SERVICE_LEGACY_NAMES.get(service)
+        return legacy if legacy is not None and legacy in self.services else service
+
     def _service_data(self, service: str) -> Any | None:
         try:
-            return self.sm[service]
+            return self.sm[self._sm_key(service)]
         except Exception:
             return None
 
@@ -1354,7 +1419,7 @@ class OpenpilotLiveSource:
 
     def _service_alive(self, service: str) -> bool:
         try:
-            return bool(self.sm.alive.get(service, False))
+            return bool(self.sm.alive.get(self._sm_key(service), False))
         except AttributeError:
             return False
 
