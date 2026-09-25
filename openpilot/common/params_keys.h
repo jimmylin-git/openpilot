@@ -298,4 +298,20 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TorqueParamsOverrideEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"TorqueParamsOverrideFriction", {PERSISTENT | BACKUP, FLOAT, "0.1"}},
     {"TorqueParamsOverrideLatAccelFactor", {PERSISTENT | BACKUP, FLOAT, "2.5"}},
+
+    // Cluster HUD (selfdrive/sp/cluster); unset keys use the cluster's built-in defaults
+    {"ClusterHud", {PERSISTENT | BACKUP, INT}},
+    {"ClusterHudDebug", {PERSISTENT | BACKUP, INT}},
+    {"ClusterHudBrightness", {PERSISTENT | BACKUP, INT}},
+    {"ClusterHudEncoder", {PERSISTENT | BACKUP, INT}},
+    {"ClusterHudCoreMode", {PERSISTENT | BACKUP, INT}},
+    {"ClusterHudPriority", {PERSISTENT | BACKUP, INT}},
+    {"ClusterHudTheme", {PERSISTENT | BACKUP, INT}},
+    {"ClusterHudLiveFps", {PERSISTENT | BACKUP, INT}},
+    {"ClusterHudScreenMode", {PERSISTENT | BACKUP, INT}},
+    {"ClusterHudCameraViewMode", {PERSISTENT | BACKUP, INT}},
+    {"ClusterHudRadarInfo", {PERSISTENT | BACKUP, STRING}},
+    {"ClusterHudRadarDisplay", {PERSISTENT | BACKUP, STRING}},
+    {"ClusterHudRadarSourceColor", {PERSISTENT | BACKUP, STRING}},
+    {"ShowPlotMode", {PERSISTENT | BACKUP, INT}},
 };

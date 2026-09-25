@@ -209,11 +209,15 @@ launcher resets `ClusterHudBrightness` to `0` at startup, then passes
 `ClusterHudBrightness` names are currently read-only integration points unless
 another component writes those Params; they are not settings UI by themselves.
 
-On sunnypilot the `ClusterHud*` / `ShowPlotMode` keys are not registered in the
-prebuilt `libparams_c.so` (so `Params().get` rejects them and manager start wipes
-unregistered files from `/data/params/d`). The cluster therefore also reads them
-from `/data/cluster_params/<key>` (override with `CLUSTER_PARAMS_DIR`), one plain
-text value per file, which survives reboots, e.g.:
+The `ClusterHud*` / `ShowPlotMode` keys are registered in
+`openpilot/common/params_keys.h` (INT; `ClusterHudRadarInfo`,
+`ClusterHudRadarDisplay`, `ClusterHudRadarSourceColor` are STRING so text aliases
+work). This branch ships a prebuilt `libparams_c.so`, so the keys only take effect
+after rebuilding it on the device (`scons -j$(nproc) openpilot/common/libparams_c.so`)
+and committing the new `.so`. Until then `Params().get` rejects them and manager
+start wipes unregistered files from `/data/params/d`, so the cluster also reads
+unset or unknown keys from `/data/cluster_params/<key>` (override with
+`CLUSTER_PARAMS_DIR`), one plain text value per file, e.g.:
 
 ```bash
 mkdir -p /data/cluster_params

@@ -92,13 +92,17 @@ CLUSTER_PARAMS_DIR_DEFAULT = "/data/cluster_params"
 
 
 def read_param_value(params: object, key: str) -> object | None:
-    """Return a param value. Keys the prebuilt libparams does not register raise
-    UnknownKeyName on sunnypilot and are wiped from /data/params at manager start,
-    so fall back to a cluster-owned directory (one file per key), then the params dir."""
+    """Return a param value. Registered keys come from Params().get. Keys the
+    running libparams does not register (older prebuilt libparams_c.so) raise
+    UnknownKeyName and are wiped from /data/params at manager start, so unset or
+    unknown keys fall back to a cluster-owned directory (one file per key), then
+    the params dir."""
     import os
 
     try:
-        return params.get(key)  # type: ignore[attr-defined]
+        value = params.get(key)  # type: ignore[attr-defined]
+        if value is not None and value != b"" and value != "":
+            return value
     except Exception:
         pass
     candidates = [os.environ.get(CLUSTER_PARAMS_DIR_ENV) or CLUSTER_PARAMS_DIR_DEFAULT]
@@ -138,6 +142,8 @@ def read_float_param(params: object, key: str) -> float:
     if callable(getter):
         return float(getter(key))
     return float(_param_text(params, key))
+
+
 AUTO_DARK_START_HOUR = 18
 AUTO_LIGHT_START_HOUR = 6
 CLUSTER_LIVE_FPS_BY_MODE = {
