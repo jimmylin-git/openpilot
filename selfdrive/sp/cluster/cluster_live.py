@@ -29,19 +29,10 @@ from cluster_scene import (
 from cluster_utils import clamp
 
 
-def find_openpilot_root(start: Path) -> Path | None:
-    for path in (start, *start.parents):
-        if (path / "cereal").exists() and (path / "selfdrive").exists():
-            return path
-        nested = path / "openpilot"
-        if (nested / "cereal").exists() and (nested / "selfdrive").exists():
-            return nested
-    return None
+from cluster_paths import REPO_ROOT
 
-
-OPENPILOT_ROOT = find_openpilot_root(Path(__file__).resolve().parent)
-if OPENPILOT_ROOT is not None:
-    sys.path.insert(0, str(OPENPILOT_ROOT))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 LIVE_SERVICES_BASE = (
     "carState",
@@ -90,7 +81,10 @@ VEHICLE_FILTER_LOG_VERSION = 5
 class OpenpilotLiveSource:
     def __init__(self, include_can: bool = True, timeout_ms: int = 0) -> None:
         try:
-            import cereal.messaging as messaging
+            try:
+                import openpilot.cereal.messaging as messaging
+            except ImportError:
+                import cereal.messaging as messaging
         except Exception as exc:
             raise RuntimeError(
                 "Openpilot live input requires cereal.messaging. Run from an openpilot environment "
@@ -99,7 +93,10 @@ class OpenpilotLiveSource:
 
         self.messaging: Any = messaging
         try:
-            from cereal import log
+            try:
+                from openpilot.cereal import log
+            except ImportError:
+                from cereal import log
 
             self.log: Any | None = log
         except Exception:

@@ -11,10 +11,11 @@ import threading
 import time
 from typing import Any
 
+from cluster_paths import OPENPILOT_PACKAGE_ROOT
 from cluster_usb_display import TuringUsbDisplay
 
 
-OPENPILOT_ROOT = Path(__file__).resolve().parents[3]
+OPENPILOT_ROOT = OPENPILOT_PACKAGE_ROOT
 DEFAULT_H264_LIBRARY = OPENPILOT_ROOT / "system" / "loggerd" / "libcluster_h264_encoder_bridge.so"
 DEFAULT_H264_DEVICE = "/dev/v4l/by-path/platform-aa00000.qcom_vidc-video-index1"
 DEFAULT_H264_FFMPEG = "ffmpeg"

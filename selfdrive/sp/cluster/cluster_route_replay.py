@@ -42,6 +42,7 @@ from cluster_models import (
     RouteOverlay,
     radar_position_is_zero,
 )
+from cluster_paths import CEREAL_DIR, OPENDBC_REPO_DIR
 from cluster_utils import clamp, smoothstep
 
 
@@ -2936,8 +2937,7 @@ def parse_corner_radar_message(
 
 @cache
 def hyundai_canfd_corner_dbc_signals() -> dict[int, dict[str, DbcSignalSpec]]:
-    openpilot_root = find_openpilot_root_for_schema(Path(__file__).resolve().parent)
-    dbc_path = openpilot_root / "opendbc_repo" / "opendbc" / "dbc" / "generator" / "hyundai" / "hyundai_canfd.dbc"
+    dbc_path = OPENDBC_REPO_DIR / "opendbc" / "dbc" / "generator" / "hyundai" / "hyundai_canfd.dbc"
     signals: dict[int, dict[str, DbcSignalSpec]] = {address: {} for address in CORNER_RADAR_DBC_MESSAGES}
     current_address: int | None = None
     with open(dbc_path, encoding="utf-8") as dbc_file:
@@ -3241,7 +3241,10 @@ def load_openpilot_log_schema() -> Any:
 
     if sys.platform != "win32":
         try:
-            from cereal import log as capnp_log
+            try:
+                from openpilot.cereal import log as capnp_log
+            except ImportError:
+                from cereal import log as capnp_log
 
             _LOG_SCHEMA = capnp_log
             return _LOG_SCHEMA
@@ -3259,9 +3262,8 @@ def load_openpilot_log_schema() -> Any:
 
 
 def prepare_schema_copy() -> Path:
-    openpilot_root = find_openpilot_root_for_schema(Path(__file__).resolve().parent)
-    cereal_root = openpilot_root / "cereal"
-    car_schema = openpilot_root / "opendbc_repo" / "opendbc" / "car" / "car.capnp"
+    cereal_root = CEREAL_DIR
+    car_schema = OPENDBC_REPO_DIR / "opendbc" / "car" / "car.capnp"
     if not car_schema.exists():
         raise RuntimeError(f"openpilot car schema not found: {car_schema}")
 
@@ -3273,16 +3275,6 @@ def prepare_schema_copy() -> Path:
     shutil.copyfile(car_schema, schema_dir / "car.capnp")
     shutil.copyfile(cereal_root / "include" / "c++.capnp", include_dir / "c++.capnp")
     return schema_dir
-
-
-def find_openpilot_root_for_schema(start: Path) -> Path:
-    for path in (start, *start.parents):
-        if (path / "cereal").exists() and (path / "opendbc_repo").exists():
-            return path
-        nested = path / "openpilot"
-        if (nested / "cereal").exists() and (nested / "opendbc_repo").exists():
-            return nested
-    return start / "openpilot"
 
 
 def read_log_bytes(path: Path) -> bytes:

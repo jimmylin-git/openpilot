@@ -57,17 +57,18 @@ from cluster_scene import (
     VehicleBox,
     build_cluster_scene,
 )
+from cluster_paths import SELFDRIVE_DIR
 from cluster_system_monitor import SystemStats, SystemStatsSampler
 from cluster_utils import blink_visible, clamp, smoothstep
 
 
 CLUSTER_DIR = Path(__file__).resolve().parent
-SELFDRIVE_DIR = CLUSTER_DIR.parents[1]
+CLUSTER_FONT_DIR = CLUSTER_DIR / "assets" / "fonts"
 OPENPILOT_FONT_DIR = SELFDRIVE_DIR / "assets" / "fonts"
 OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
-ORBITRON_BLACK_FONT_PATH = OPENPILOT_FONT_DIR / "OrbitronBlack.ttf"
+ORBITRON_BLACK_FONT_PATH = CLUSTER_FONT_DIR / "OrbitronBlack.ttf"
 # raylib centers text using the font's full em-box height (measure_text_ex's
 # y == the point size), but Orbitron's glyphs sit noticeably higher within
 # that box than the previous font, so anchor="center"/"left"/"right" text
@@ -1400,16 +1401,14 @@ class ClusterUiRenderer:
         return [
             # Preferred cluster font.
             ORBITRON_BLACK_FONT_PATH,
-            Path("/data/openpilot/selfdrive/assets/fonts/OrbitronBlack.ttf"),
+            OPENPILOT_FONT_DIR / "OrbitronBlack.ttf",
             # 以下保留原本的候選路徑...
+            CLUSTER_FONT_DIR / "GeistMono-Light.ttf",
             OPENPILOT_FONT_DIR / "GeistMono-Light.ttf",
-            Path("/data/openpilot/selfdrive/assets/fonts/GeistMono-Light.ttf"),
             KAIGEN_GOTHIC_KR_BOLD_FONT_PATH,
             OPENPILOT_ADDON_FONT_DIR / "KaiGenGothicKR-Bold.ttf",
             JETBRAINS_MONO_FONT_PATH,
             OPENPILOT_FONT_DIR / "JetBrainsMono-Bold.ttf",
-            Path("/data/openpilot/selfdrive/assets/fonts/KaiGenGothicKR-Bold.ttf"),
-            Path("/data/openpilot/selfdrive/assets/addon/font/KaiGenGothicKR-Bold.ttf"),
             Path("/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Medium.ttf"),
             Path("/usr/share/fonts/TTF/JetBrainsMono-Medium.ttf"),
             Path("/usr/local/share/fonts/JetBrainsMono-Medium.ttf"),
