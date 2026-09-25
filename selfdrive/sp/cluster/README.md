@@ -469,10 +469,10 @@ launcher in non-exiting mode so the error returns to the watcher loop, letting
 The bundled TURZX code includes only the Python vendor library. The openpilot
 device uses the system `libusb-1.0.so` through `pyusb`.
 
-The renderer prefers the bundled `selfdrive/sp/cluster/assets/fonts/OrbitronBlack.ttf`
-for HUD text, then the bundled GeistMono, then KaiGenGothicKR (if present under
-`openpilot/selfdrive/assets/fonts`), then `JetBrainsMono-Medium.ttf` from
-`openpilot/selfdrive/assets/fonts` and system/platform fonts.
+The renderer loads the fonts bundled in `selfdrive/sp/cluster/assets/fonts`
+(OrbitronBlack, then GeistMono-Light, then KaiGenGothicKR-Bold), falling back to
+the same names under `openpilot/selfdrive/assets/fonts`, then
+`JetBrainsMono-Medium.ttf` and system/platform fonts.
 
 USB frame upload runs in no-ACK mode by default because some TURZX panels accept
 image data but never return a frame-upload response. Use `--usb-wait-frame-ack`

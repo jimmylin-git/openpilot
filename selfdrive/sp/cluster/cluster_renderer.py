@@ -66,7 +66,7 @@ CLUSTER_DIR = Path(__file__).resolve().parent
 CLUSTER_FONT_DIR = CLUSTER_DIR / "assets" / "fonts"
 OPENPILOT_FONT_DIR = SELFDRIVE_DIR / "assets" / "fonts"
 OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
-KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
+KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = CLUSTER_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
 ORBITRON_BLACK_FONT_PATH = CLUSTER_FONT_DIR / "OrbitronBlack.ttf"
 # raylib centers text using the font's full em-box height (measure_text_ex's
@@ -1406,6 +1406,7 @@ class ClusterUiRenderer:
             CLUSTER_FONT_DIR / "GeistMono-Light.ttf",
             OPENPILOT_FONT_DIR / "GeistMono-Light.ttf",
             KAIGEN_GOTHIC_KR_BOLD_FONT_PATH,
+            OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf",
             OPENPILOT_ADDON_FONT_DIR / "KaiGenGothicKR-Bold.ttf",
             JETBRAINS_MONO_FONT_PATH,
             OPENPILOT_FONT_DIR / "JetBrainsMono-Bold.ttf",
