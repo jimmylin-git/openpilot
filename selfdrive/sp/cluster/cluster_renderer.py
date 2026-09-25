@@ -101,6 +101,7 @@ TOP_SYSTEM_METRIC_LEFT_X = 340.0
 TOP_SYSTEM_METRIC_RIGHT_X = 1570.0
 TOP_SYSTEM_METRIC_Y = 100.0
 TOP_SYSTEM_METRIC_FONT_SIZE = 24.0
+TOP_SYSTEM_METRIC_LINE_GAP = 30.0
 FOLLOW_STATUS_GAP_BARS = 3
 FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
@@ -2514,6 +2515,15 @@ class ClusterUiRenderer:
 
         cpu_header_y = panel_y + 128
         self._draw_text("CPU CORE %", panel_x + pad_x, cpu_header_y, 15, theme.muted)
+        if stats.cpu_total_percent is not None:
+            self._draw_text(
+                f"TOTAL {self._percent_text(stats.cpu_total_percent)}",
+                panel_x + panel_w - pad_x,
+                cpu_header_y,
+                15,
+                self._system_metric_color(stats.cpu_total_percent),
+                anchor="right",
+            )
         if cpu_count == 0:
             self._draw_text("unavailable", panel_x + panel_w - pad_x, cpu_header_y, 15, theme.muted, anchor="right")
             return
@@ -2551,6 +2561,16 @@ class ClusterUiRenderer:
             f"MEM {memory_text}",
             TOP_SYSTEM_METRIC_LEFT_X,
             TOP_SYSTEM_METRIC_Y,
+            TOP_SYSTEM_METRIC_FONT_SIZE,
+            theme.text,
+            anchor="center",
+        )
+        cpu_percent = stats.cpu_total_percent
+        cpu_text = "--" if cpu_percent is None else f"{cpu_percent:.0f}%"
+        self._draw_text(
+            f"CPU {cpu_text}",
+            TOP_SYSTEM_METRIC_LEFT_X,
+            TOP_SYSTEM_METRIC_Y + TOP_SYSTEM_METRIC_LINE_GAP,
             TOP_SYSTEM_METRIC_FONT_SIZE,
             theme.text,
             anchor="center",

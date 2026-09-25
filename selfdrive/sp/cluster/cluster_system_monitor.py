@@ -19,6 +19,7 @@ class SystemStats:
     memory_used_percent: float | None = None
     temperature_c: float | None = None
     cpu_core_percents: tuple[float | None, ...] = ()
+    cpu_total_percent: float | None = None
 
 
 class SystemStatsSampler:
@@ -47,10 +48,12 @@ class SystemStatsSampler:
         memory_total, memory_used, memory_percent = self._read_linux_memory()
         temperature_c = self._read_linux_temperature()
         cpu_times = self._read_linux_cpu_times()
+        cpu_total_percent: float | None = None
         if cpu_times is None:
             cpu_percents: tuple[float | None, ...] = ()
         else:
             cpu_percents = self._linux_cpu_percents(cpu_times)
+            cpu_total_percent = self._linux_cpu_total_percent(cpu_times)
             self._previous_linux_cpu_times = cpu_times
 
         return SystemStats(
@@ -59,6 +62,7 @@ class SystemStatsSampler:
             memory_used_percent=memory_percent,
             temperature_c=temperature_c,
             cpu_core_percents=cpu_percents,
+            cpu_total_percent=cpu_total_percent,
         )
 
     @staticmethod
@@ -147,6 +151,17 @@ class SystemStatsSampler:
             busy = max(0, min(delta_total, delta_total - delta_idle))
             percents.append(busy / delta_total * 100.0)
         return tuple(percents)
+
+    def _linux_cpu_total_percent(self, cpu_times: tuple[tuple[int, int], ...]) -> float | None:
+        previous = self._previous_linux_cpu_times
+        if previous is None or len(previous) != len(cpu_times):
+            return None
+        delta_total = sum(t for t, _ in cpu_times) - sum(t for t, _ in previous)
+        delta_idle = sum(i for _, i in cpu_times) - sum(i for _, i in previous)
+        if delta_total <= 0:
+            return None
+        busy = max(0, min(delta_total, delta_total - delta_idle))
+        return busy / delta_total * 100.0
 
 
 @dataclass(frozen=True, slots=True)
