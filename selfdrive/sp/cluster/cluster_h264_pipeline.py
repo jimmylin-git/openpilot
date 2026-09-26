@@ -61,6 +61,7 @@ H264_DEBUG_CHUNK_LIMIT = 60
 H264_DEBUG_CHUNK_INTERVAL = 25
 NATIVE_PACKET_QUEUE_MAX_CHUNKS = 8
 NATIVE_PACKET_QUEUE_PUT_TIMEOUT_S = 0.05
+NATIVE_FRAME_PACKET_WAIT_S = 0.05
 V4L2_BUF_FLAG_KEYFRAME = 0x00000008
 V4L2_BUF_FLAG_PFRAME = 0x00000010
 V4L2_BUF_FLAG_BFRAME = 0x00000020
@@ -1057,6 +1058,7 @@ class H264UsbPipeline:
                 ) from exc
             encode_size = active_count
             sample_name = "usb_h264.native_encode_nv12_active"
+        packets_before = self._debug_encoder_packets
         result = encode_fn(
             handle,
             ctypes.c_void_p(data_ptr),
@@ -1070,7 +1072,21 @@ class H264UsbPipeline:
         self._native_frame_index += 1
         self._add_native_timing_samples(lib, handle)
         self._add_sample(sample_name, profile_stage)
+        self._wait_native_frame_packet(lib, handle, packets_before)
         self.check_error()
+
+    def _wait_native_frame_packet(self, lib: ctypes.CDLL, handle: int, packets_before: int) -> None:
+        # encode_fn only polls non-blocking after queueing the frame, so the encoded packet
+        # would otherwise be picked up on the next frame (one full frame period of latency).
+        profile_stage = time.perf_counter()
+        deadline = profile_stage + NATIVE_FRAME_PACKET_WAIT_S
+        while self._debug_encoder_packets == packets_before and self._error is None:
+            remaining_ms = int((deadline - time.perf_counter()) * 1000.0)
+            if remaining_ms <= 0:
+                break
+            if lib.cluster_h264_encoder_bridge_drain(handle, remaining_ms, self._native_callback, None) != 0:
+                raise RuntimeError(self._native_error_text("native H264 drain failed"))
+        self._add_sample("usb_h264.native.wait_packet", profile_stage)
 
     def build_nv12_color_test_pattern(self) -> bytearray:
         if self._native_input_bytesused <= 0:
