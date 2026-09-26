@@ -508,9 +508,11 @@ image data but never return a frame-upload response. Use `--usb-wait-frame-ack`
 only when testing a panel/driver combination known to reply after each frame.
 
 Manager autorun uses H264 at 5 FPS, trying the native encoder first and
-falling back to ffmpeg when the optional native bridge is unavailable. When
-Chestnut is loading or active, H264 USB chunks are capped at 32 KiB with a
-2 ms yield between chunks so its transfers can use the shared bus. The HUD
-and tinygrad Chestnut USB transfers use the same process-shared lock at
+falling back to ffmpeg when the native bridge or V4L2 encoder is unavailable.
+On the comma device, build the native bridge with
+`scons system/loggerd/libcluster_h264_encoder_bridge.so`. When Chestnut is
+loading or active, H264 USB chunks are capped at 32 KiB with a 2 ms yield
+between chunks so its transfers can use the shared bus. The HUD and tinygrad
+Chestnut USB transfers use the same process-shared lock at
 `/tmp/carrot_usbgpu_bus.lock`; Chestnut transfers retain their asynchronous
 double-buffered upload path.
