@@ -36,9 +36,7 @@ def cluster_cmd() -> list[str]:
         "--fps",
         "5",
         "--usb-codec",
-        "jpeg",
-        "--usb-jpeg-quality",
-        "50",
+        "h264",
         "--theme",
         "auto",
     ]
