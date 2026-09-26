@@ -21,6 +21,12 @@ class SystemStats:
     temperature_c: float | None = None
     cpu_core_percents: tuple[float | None, ...] = ()
     cpu_total_percent: float | None = None
+    chestnut_state: str | None = None
+
+
+CHESTNUT_LOADING = "loading"
+CHESTNUT_ACTIVE = "active"
+CHESTNUT_FAILED = "failed"
 
 
 class SystemStatsSampler:
@@ -31,6 +37,8 @@ class SystemStatsSampler:
         self._previous_linux_cpu_times: tuple[tuple[int, int], ...] | None = None
         self._thread: threading.Thread | None = None
         self._wake = threading.Event()
+        self._params = None
+        self._params_unavailable = False
 
     def sample(self, now: float | None = None) -> SystemStats:
         # Thermal zone reads can block for tens of ms on device, so sample off the render thread.
@@ -73,7 +81,31 @@ class SystemStatsSampler:
             temperature_c=temperature_c,
             cpu_core_percents=cpu_percents,
             cpu_total_percent=cpu_total_percent,
+            chestnut_state=self._read_chestnut_state(),
         )
+
+    def _read_chestnut_state(self) -> str | None:
+        # modeld sets ChestnutLoading while the eGPU model loads, then ChestnutActive
+        # True/False; ChestnutActive stays unset when no Chestnut is connected.
+        if self._params is None:
+            if self._params_unavailable:
+                return None
+            try:
+                from openpilot.common.params import Params
+
+                self._params = Params()
+            except Exception:
+                self._params_unavailable = True
+                return None
+        try:
+            if self._params.get_bool("ChestnutLoading"):
+                return CHESTNUT_LOADING
+            active = self._params.get("ChestnutActive")
+        except Exception:
+            return None
+        if active is None:
+            return None
+        return CHESTNUT_ACTIVE if active else CHESTNUT_FAILED
 
     @staticmethod
     def _read_linux_memory() -> tuple[int | None, int | None, float | None]:

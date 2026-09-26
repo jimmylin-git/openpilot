@@ -59,7 +59,7 @@ from cluster_scene import (
 )
 from cluster_gles_dmabuf import DirectNv12DmabufError, create_tici_nv12_dmabuf_pool
 from cluster_paths import SELFDRIVE_DIR
-from cluster_system_monitor import SystemStats, SystemStatsSampler
+from cluster_system_monitor import CHESTNUT_ACTIVE, CHESTNUT_FAILED, CHESTNUT_LOADING, SystemStats, SystemStatsSampler
 from cluster_utils import blink_visible, clamp, smoothstep
 
 
@@ -84,6 +84,15 @@ FOLLOW_GAP_LANE_ICON_PATH = CLUSTER_DIR / "assets" / "FCD_Lane.png"
 BACKGROUND_IMAGE_PATH = CLUSTER_DIR / "assets" / "bg.png"
 TURN_SIGNAL_LEFT_ICON_PATH = CLUSTER_DIR / "assets" / "cluster_turn_signal_left.png"
 TURN_SIGNAL_RIGHT_ICON_PATH = CLUSTER_DIR / "assets" / "cluster_turn_signal_right.png"
+# Same icons the mici UI uses for the Chestnut eGPU: white=loading, green=active, orange=failed.
+CHESTNUT_ICON_PATHS = {
+    CHESTNUT_LOADING: SELFDRIVE_DIR / "assets" / "icons_mici" / "chestnut.png",
+    CHESTNUT_ACTIVE: SELFDRIVE_DIR / "assets" / "icons_mici" / "chestnut_green.png",
+    CHESTNUT_FAILED: SELFDRIVE_DIR / "assets" / "icons_mici" / "chestnut_orange.png",
+}
+CHESTNUT_ICON_CENTER_X = 1570.0
+CHESTNUT_ICON_CENTER_Y = 140.0
+CHESTNUT_ICON_HEIGHT = 36.0
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
 TURN_SIGNAL_CENTER_Y = 94
@@ -551,6 +560,7 @@ class ClusterUiRenderer:
         self._follow_gap_lane_texture = None
         self._left_turn_signal_texture = None
         self._right_turn_signal_texture = None
+        self._chestnut_textures: dict[str, object] = {}
         self._background_texture = None
         self._route_video_texture = None
         self._route_video_size: tuple[int, int] | None = None
@@ -728,6 +738,10 @@ class ClusterUiRenderer:
         if self._right_turn_signal_texture is not None:
             rl.unload_texture(self._right_turn_signal_texture)
             self._right_turn_signal_texture = None
+        for texture in self._chestnut_textures.values():
+            if texture is not None:
+                rl.unload_texture(texture)
+        self._chestnut_textures.clear()
         if self._background_texture is not None:
             rl.unload_texture(self._background_texture)
             self._background_texture = None
@@ -2618,6 +2632,33 @@ class ClusterUiRenderer:
             TOP_SYSTEM_METRIC_FONT_SIZE,
             theme.text,
             anchor="center",
+        )
+        self._draw_chestnut_icon(stats.chestnut_state)
+
+    def _draw_chestnut_icon(self, chestnut_state: str | None) -> None:
+        if chestnut_state is None:
+            return
+        if chestnut_state not in self._chestnut_textures:
+            self._chestnut_textures[chestnut_state] = self._load_icon_texture(
+                CHESTNUT_ICON_PATHS[chestnut_state],
+                "Chestnut",
+            )
+        texture = self._chestnut_textures[chestnut_state]
+        if texture is None:
+            return
+        alpha = 255
+        if chestnut_state == CHESTNUT_LOADING:
+            alpha = int(255 * (0.35 + 0.65 * (0.5 - 0.5 * math.cos(time.monotonic() * 6.0))))
+        height = CHESTNUT_ICON_HEIGHT
+        width = height * texture.width / max(1, texture.height)
+        self._draw_bottom_aligned_texture_icon(
+            texture,
+            CHESTNUT_ICON_CENTER_X,
+            CHESTNUT_ICON_CENTER_Y + height * 0.5,
+            width,
+            height,
+            WHITE,
+            alpha,
         )
 
     def _draw_live_debug_panel(self, state: ClusterUiState) -> None:
