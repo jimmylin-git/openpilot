@@ -37,6 +37,8 @@ def cluster_cmd() -> list[str]:
         "5",
         "--usb-codec",
         "h264",
+        "--usb-h264-backend",
+        "auto",
         "--theme",
         "auto",
     ]
