@@ -15,11 +15,23 @@ import zipfile
 from pathlib import Path
 
 CLUSTER_DIR = Path(__file__).resolve().parent / "cluster"
-# comma-deps-raylib picks its DRM "comma" backend on device, which would fight the
-# openpilot UI for /dev/dri/card0. The cluster renders offscreen for the USB panel,
-# so default to the EGL-surfaceless "headless" backend (llvmpipe, CPU rendered).
-# Override with CLUSTER_RAYLIB_BACKEND=comma|headless|desktop.
-DEFAULT_RAYLIB_BACKEND = "headless"
+# Like CarrotPilot, render on the Adreno GPU through comma-deps-raylib's DRM "comma"
+# backend. In USB output mode the HUD only draws into render textures and never calls
+# end_drawing()/SwapScreenBuffer, and the backend defers its modeset to the first swap,
+# so it never takes the panel away from the openpilot UI. If the comma backend cannot
+# initialize, fall back to the EGL-surfaceless "headless" backend (Mesa llvmpipe, CPU,
+# ~1-2 FPS on device). Override with CLUSTER_RAYLIB_BACKEND=comma|headless|desktop.
+DEFAULT_RAYLIB_BACKEND = "auto"
+BACKEND_PROBE_TIMEOUT_S = 20.0
+BACKEND_PROBE_CODE = (
+    "import pyray as rl\n"
+    "rl.set_trace_log_level(rl.TraceLogLevel.LOG_WARNING)\n"
+    "rl.set_config_flags(rl.ConfigFlags.FLAG_WINDOW_HIDDEN)\n"
+    "rl.init_window(64, 64, 'cluster-probe')\n"
+    "ok = rl.is_window_ready()\n"
+    "rl.close_window()\n"
+    "raise SystemExit(0 if ok else 1)\n"
+)
 # Logging is off by default; set CLUSTER_LOG_PATH=/tmp/cluster.log to debug.
 LOG_MAX_BYTES = 5 * 1024 * 1024
 RESTART_DELAY_S = 5.0
@@ -93,9 +105,43 @@ def ensure_headless_mesa(log_file=None) -> Path | None:
         return None
 
 
-def cluster_env(mesa_dir: Path | None = None) -> dict[str, str]:
+def requested_backend() -> str:
+    return os.environ.get("CLUSTER_RAYLIB_BACKEND", DEFAULT_RAYLIB_BACKEND).strip().lower()
+
+
+def probe_backend(backend: str, log_file=None) -> bool:
     env = os.environ.copy()
-    backend = env.get("CLUSTER_RAYLIB_BACKEND", DEFAULT_RAYLIB_BACKEND).strip().lower()
+    env["RAYLIB_BACKEND"] = backend
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", BACKEND_PROBE_CODE],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=BACKEND_PROBE_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        _log(log_file, f"raylib {backend} backend probe failed: {exc}")
+        return False
+    if result.returncode != 0:
+        tail = result.stdout.decode("utf-8", "replace").strip().splitlines()[-3:]
+        _log(log_file, f"raylib {backend} backend probe exited {result.returncode}: {' | '.join(tail)}")
+        return False
+    return True
+
+
+def resolve_backend(log_file=None) -> str:
+    backend = requested_backend()
+    if backend != "auto":
+        return backend
+    if probe_backend("comma", log_file):
+        return "comma"
+    _log(log_file, "comma GPU backend unavailable; falling back to headless (Mesa llvmpipe)")
+    return "headless"
+
+
+def cluster_env(backend: str, mesa_dir: Path | None = None) -> dict[str, str]:
+    env = os.environ.copy()
     if backend:
         env["RAYLIB_BACKEND"] = backend
     if mesa_dir is not None and backend == "headless":
@@ -144,8 +190,9 @@ def _log(log_file, message: str) -> None:
 def main() -> None:
     # sunnypilot's manager never restarts a PythonProcess that exited, so supervise
     # the cluster here: restart on crash (e.g. screen not enumerated yet at boot).
-    env = cluster_env()
     log_file = _open_log()
+    backend = resolve_backend(log_file)
+    env = cluster_env(backend)
     child: subprocess.Popen | None = None
     stopping = False
     mesa_dir: Path | None = None
@@ -162,11 +209,11 @@ def main() -> None:
 
     _log(log_file, f"starting cluster HUD with live openpilot data (raylib backend={env.get('RAYLIB_BACKEND')})")
     while not stopping:
-        if env.get("RAYLIB_BACKEND") == "headless" and mesa_dir is None and time.monotonic() >= mesa_next_try:
+        if backend == "headless" and mesa_dir is None and time.monotonic() >= mesa_next_try:
             mesa_dir = ensure_headless_mesa(log_file)
             if mesa_dir is None:
                 mesa_next_try = time.monotonic() + MESA_RETRY_S
-            env = cluster_env(mesa_dir)
+            env = cluster_env(backend, mesa_dir)
         output = log_file if log_file is not None else subprocess.DEVNULL
         child = subprocess.Popen(cluster_cmd(), env=env, stdout=output, stderr=subprocess.STDOUT)
         try:

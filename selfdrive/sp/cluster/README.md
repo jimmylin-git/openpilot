@@ -491,14 +491,17 @@ device uses the system `libusb-1.0.so` through `pyusb`. Pure-python `pyusb`
 1.3.1 and `pyserial` 3.5 (BSD) are vendored in `.vendor/pydeps` and appended to
 `sys.path`, so they are only used when the device venv lacks them.
 
-`cluster_autorun` launches the HUD with `RAYLIB_BACKEND=headless`: sunnypilot's
-`comma-deps-raylib` 6.0 would otherwise pick its DRM `comma` backend on device
-and contend with the openpilot UI for `/dev/dri/card0`. The headless backend
-renders through EGL surfaceless/llvmpipe (CPU). Set
-`CLUSTER_RAYLIB_BACKEND=comma` (or `desktop`) in the manager environment to
+`cluster_autorun` picks the raylib backend like CarrotPilot: it probes the
+`comma` backend (Adreno GPU through DRM/GBM) with a hidden 64x64 window and uses
+it when it initializes. In USB output mode the HUD only renders into render
+textures and never calls `end_drawing()`, and the comma backend defers its
+modeset to the first buffer swap, so the openpilot UI keeps the panel. If the
+probe fails it falls back to `RAYLIB_BACKEND=headless`, which renders through
+EGL surfaceless/llvmpipe on the CPU (only ~1-2 FPS on device). Set
+`CLUSTER_RAYLIB_BACKEND=comma|headless|desktop` in the manager environment to
 override.
 
-The headless backend needs Mesa's EGL. `comma-deps-raylib` bundles it from
+The headless fallback needs Mesa's EGL. `comma-deps-raylib` bundles it from
 6.0.0.1.post101, but older AGNOS venvs ship a wheel without it, and the Qualcomm
 system EGL then fails with `EGL_BAD_ALLOC`. When the installed raylib has no
 `install/lib/libEGL.so.1`, `cluster_autorun` downloads the pinned post101
