@@ -14,6 +14,7 @@ from pathlib import Path
 import pyray as rl
 
 from cluster_config import (
+    TURN_SIGNAL_BLINK_ON_SECONDS,
     AMBER,
     BLUE,
     BLUE_SOFT,
@@ -569,6 +570,8 @@ class ClusterUiRenderer:
         self._route_video_frame_id: str | None = None
         self._left_turn_signal_started_at: float | None = None
         self._right_turn_signal_started_at: float | None = None
+        self._turn_signal_frames = {"left": 0, "right": 0}
+        self.blink_fps = float(target_fps)
         self._triangle_strip_point_cache: OrderedDict[
             tuple[int, int],
             tuple[tuple[Vec3, ...], tuple[Vec3, ...], object, int],
@@ -609,6 +612,7 @@ class ClusterUiRenderer:
 
     def set_target_fps(self, target_fps: int) -> None:
         self.target_fps = max(0, int(target_fps))
+        self.blink_fps = float(self.target_fps)
         if self._window_open:
             profile_stage = self._profile_start()
             rl.set_target_fps(self.target_fps)
@@ -3300,9 +3304,10 @@ class ClusterUiRenderer:
 
     def _turn_signal_lights(self, state: ClusterUiState) -> tuple[bool, bool]:
         now = time.perf_counter()
+        # Called once per rendered frame; advance the frame-based blink counters here.
         return (
-            self._turn_signal_lit("left", state.left_signal, now),
-            self._turn_signal_lit("right", state.right_signal, now),
+            self._turn_signal_lit("left", state.left_signal, now, advance=True),
+            self._turn_signal_lit("right", state.right_signal, now, advance=True),
         )
 
     @staticmethod
@@ -3316,12 +3321,13 @@ class ClusterUiRenderer:
             return left_signal_lit if state.left_signal else right_signal_lit
         return True
 
-    def _turn_signal_lit(self, side: str, active: bool, now: float | None = None) -> bool:
+    def _turn_signal_lit(self, side: str, active: bool, now: float | None = None, advance: bool = False) -> bool:
         if not active:
             if side == "left":
                 self._left_turn_signal_started_at = None
             else:
                 self._right_turn_signal_started_at = None
+            self._turn_signal_frames[side] = 0
             return False
 
         if now is None:
@@ -3334,7 +3340,16 @@ class ClusterUiRenderer:
             if self._right_turn_signal_started_at is None:
                 self._right_turn_signal_started_at = now
             started_at = self._right_turn_signal_started_at
-        return blink_visible(now, started_at, float("inf"))
+        if self.blink_fps <= 0:
+            return blink_visible(now, started_at, float("inf"))
+        # At low HUD rates a wall-clock blink phase lands on a varying number of frames
+        # (e.g. 0.35s at 8 FPS = 2.8 frames), so on/off steps look uneven or get skipped.
+        # Count rendered frames instead so every on and off phase is a whole number of frames.
+        frames_per_phase = max(1, round(TURN_SIGNAL_BLINK_ON_SECONDS * self.blink_fps))
+        frame_index = self._turn_signal_frames[side]
+        if advance:
+            self._turn_signal_frames[side] = frame_index + 1
+        return (frame_index // frames_per_phase) % 2 == 0
 
     def _draw_turn_signal(self, side: str, lit: bool, show_inactive: bool = False) -> None:
         if not lit and not show_inactive:

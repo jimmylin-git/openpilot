@@ -749,6 +749,13 @@ def run_demo(
     next_chestnut_read = start_time + CHESTNUT_POLL_SECONDS
     if chestnut_active:
         print(f"Chestnut active: limiting cluster HUD to {CHESTNUT_FPS:.0f} Hz", flush=True)
+
+    def effective_blink_fps() -> float:
+        if chestnut_active and (target_fps <= 0 or target_fps > CHESTNUT_FPS):
+            return CHESTNUT_FPS
+        return max(0.0, target_fps)
+
+    renderer.blink_fps = effective_blink_fps()
     h264_test_pattern_rgba: bytearray | None = None
     h264_test_pattern_nv12: bytearray | None = None
     h264_render_nv12_buffer: bytearray | None = None
@@ -988,6 +995,7 @@ def run_demo(
                     target_fps = next_target_fps
                     frame_interval = 1.0 / target_fps if target_fps > 0 else 0.0
                     renderer.set_target_fps(max(0, int(round(target_fps))))
+                    renderer.blink_fps = effective_blink_fps()
                     fps_text = "uncapped" if target_fps == 0 else f"{target_fps:.1f} Hz"
                     print(f"{CLUSTER_LIVE_FPS_PARAM} updated: {fps_text}", flush=True)
                     if usb_display is not None and usb_display_fps_auto:
@@ -1004,6 +1012,7 @@ def run_demo(
                 next_chestnut_active = chestnut_reader.read()
                 if next_chestnut_active != chestnut_active:
                     chestnut_active = next_chestnut_active
+                    renderer.blink_fps = effective_blink_fps()
                     state_text = f"limiting cluster HUD to {CHESTNUT_FPS:.0f} Hz" if chestnut_active else "restoring cluster HUD rate"
                     print(f"Chestnut {'active' if chestnut_active else 'inactive'}: {state_text}", flush=True)
                 next_chestnut_read = now + CHESTNUT_POLL_SECONDS
