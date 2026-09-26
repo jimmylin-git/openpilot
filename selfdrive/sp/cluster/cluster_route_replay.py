@@ -1477,16 +1477,20 @@ class RouteLogParser:
         self.radar_detection_t = event_t
 
     def _update_can_detections(self, can_messages: Any, event_t: float, source_service: str = "can") -> None:
+        # Only camera-bus corner radar frames on "can" are used; check the cheap fields before copying data.
+        if source_service == "sendcan":
+            return
         for can_message in can_messages:
-            address = int(safe_get(can_message, "address", -1))
+            try:
+                address = can_message.address
+            except Exception:
+                continue
+            if address != CCNC_CORNER_RADAR_ADDRESS and address != ADRV_CORNER_RADAR_ADDRESS:
+                continue
             bus = int(safe_get(can_message, "src", -1))
-            if source_service == "can" and bus >= 0x80:
+            if bus >= 0x80 or not is_hyundai_camera_can_bus(bus):
                 continue
             data = bytes(safe_get(can_message, "dat", b""))
-            if address not in (CCNC_CORNER_RADAR_ADDRESS, ADRV_CORNER_RADAR_ADDRESS):
-                continue
-            if source_service == "sendcan" or not is_hyundai_camera_can_bus(bus):
-                continue
             if len(data) < 24:
                 continue
             corner_values = decode_hyundai_canfd_dbc_message(address, data)
@@ -2686,8 +2690,8 @@ def model_line_lateral_shift(
 
 
 def model_line_points(line: Any) -> tuple[ModelPathPoint, ...]:
-    xs = safe_get(line, "x")
-    ys = safe_get(line, "y")
+    xs = _as_list(safe_get(line, "x"))
+    ys = _as_list(safe_get(line, "y"))
     if xs is None or ys is None:
         return ()
 
@@ -2714,19 +2718,19 @@ def model_path_points_from_model_v2(model: Any) -> tuple[ModelPathPoint, ...]:
     position = safe_get(model, "position")
     if position is None:
         return ()
-    xs = safe_get(position, "x")
-    ys = safe_get(position, "y")
+    xs = _as_list(safe_get(position, "x"))
+    ys = _as_list(safe_get(position, "y"))
     if xs is None or ys is None:
         return ()
-    y_stds = safe_get(position, "yStd")
+    y_stds = _as_list(safe_get(position, "yStd"))
     velocity = safe_get(model, "velocity")
     acceleration = safe_get(model, "acceleration")
     orientation = safe_get(model, "orientation")
     orientation_rate = safe_get(model, "orientationRate")
-    speeds = safe_get(velocity, "x") if velocity is not None else None
-    accels = safe_get(acceleration, "x") if acceleration is not None else None
-    orientations = safe_get(orientation, "z") if orientation is not None else None
-    orientation_rates = safe_get(orientation_rate, "z") if orientation_rate is not None else None
+    speeds = _as_list(safe_get(velocity, "x")) if velocity is not None else None
+    accels = _as_list(safe_get(acceleration, "x")) if acceleration is not None else None
+    orientations = _as_list(safe_get(orientation, "z")) if orientation is not None else None
+    orientation_rates = _as_list(safe_get(orientation_rate, "z")) if orientation_rate is not None else None
 
     count = min(len(xs), len(ys))
     points: list[ModelPathPoint] = []
@@ -3346,6 +3350,16 @@ def safe_optional_int(obj: Any, name: str) -> int | None:
     try:
         return int(value)
     except (TypeError, ValueError):
+        return None
+
+
+def _as_list(values: Any) -> list[Any] | None:
+    # Indexing capnp lists element by element is slow; copy them to Python lists once.
+    if values is None:
+        return None
+    try:
+        return list(values)
+    except TypeError:
         return None
 
 

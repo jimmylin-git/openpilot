@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import threading
 import time
 
 
@@ -28,18 +29,27 @@ class SystemStatsSampler:
         self._next_sample_time = 0.0
         self._stats = SystemStats()
         self._previous_linux_cpu_times: tuple[tuple[int, int], ...] | None = None
+        self._thread: threading.Thread | None = None
+        self._wake = threading.Event()
 
     def sample(self, now: float | None = None) -> SystemStats:
-        if now is None:
-            now = time.perf_counter()
-        if now < self._next_sample_time:
-            return self._stats
-
-        stats = self._sample_linux()
-        if stats is not None:
-            self._stats = stats
-        self._next_sample_time = now + self.refresh_interval_s
+        # Thermal zone reads can block for tens of ms on device, so sample off the render thread.
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._run, name="cluster-sysstats", daemon=True)
+            self._thread.start()
         return self._stats
+
+    def _run(self) -> None:
+        while True:
+            try:
+                stats = self._sample_linux()
+            except Exception:
+                stats = None
+            if stats is not None:
+                self._stats = stats
+            elif not PROC_STAT_PATH.exists() and not PROC_MEMINFO_PATH.exists():
+                return
+            self._wake.wait(self.refresh_interval_s)
 
     def _sample_linux(self) -> SystemStats | None:
         if not PROC_STAT_PATH.exists() and not PROC_MEMINFO_PATH.exists():

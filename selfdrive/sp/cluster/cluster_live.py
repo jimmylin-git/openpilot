@@ -246,7 +246,9 @@ class OpenpilotLiveSource:
             if not self._service_updated(service):
                 continue
             event_t = self._service_time(service)
+            service_stage = self._profile_start()
             self._apply_service_update(service, event_t)
+            self._profile_add(f"source.live.apply.{service}", service_stage)
             if service == "carState":
                 self._last_car_state_update_t = time.monotonic()
         self._profile_add("source.live.apply_updates", profile_stage)
@@ -261,7 +263,9 @@ class OpenpilotLiveSource:
             state = frame_to_state(frame)
             self._profile_add("source.live.frame_to_state", profile_stage)
 
+            profile_stage = self._profile_start()
             state = self._smooth_scene_state(state)
+            self._profile_add("source.live.smooth_scene", profile_stage)
             self.last_state = self._with_debug_state(state)
             self.frames += 1
             return self.last_state
