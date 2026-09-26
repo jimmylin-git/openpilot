@@ -74,6 +74,8 @@ DEFAULT_FPS = 0.0
 DEFAULT_USB_BRIGHTNESS = 60
 MAX_USB_BRIGHTNESS = 60
 MIN_USB_BRIGHTNESS = 10
+# Auto (ambient) brightness is dimmed to 90% after clamping.
+AUTO_USB_BRIGHTNESS_SCALE = 0.9
 DEFAULT_H264_BITRATE = "auto"
 DEFAULT_H264_GOP = 1
 H264_AUTO_BITRATE_BITS_PER_FPS = 234_000
@@ -485,10 +487,11 @@ def resolved_usb_brightness(
     if live_source is not None:
         auto_brightness = live_source.ambient_brightness_percent()
         if auto_brightness is not None:
-            return max(
+            auto_brightness = max(
                 MIN_USB_BRIGHTNESS,
                 min(MAX_USB_BRIGHTNESS, normalize_cluster_brightness_percent(auto_brightness)),
             )
+            return max(MIN_USB_BRIGHTNESS, int(round(auto_brightness * AUTO_USB_BRIGHTNESS_SCALE)))
 
     return min(MAX_USB_BRIGHTNESS, max(MIN_USB_BRIGHTNESS, DEFAULT_USB_BRIGHTNESS))
 

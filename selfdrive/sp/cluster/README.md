@@ -236,7 +236,8 @@ Unset keys keep the built-in defaults.
 When `--usb-brightness` is omitted, USB launches follow `ClusterHudBrightness`:
 `0` auto follows the wide-road camera exposure after samples are available,
 using the same ambient-light estimate as the main UI and smoothing changes over
-time. The resolved brightness is limited to `10..60`; `1` through `100` are
+time. The resolved brightness is limited to `10..60` and then scaled to 90%
+(so auto tops out at 54); `1` through `100` are
 fixed brightness percentages, also limited to `10..60`.
 After the boot grace period, live USB output dims to `5` while offroad.
 Brightness commands use no-ACK command `14` during USB initialization and when
