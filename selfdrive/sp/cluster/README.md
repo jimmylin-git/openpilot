@@ -188,8 +188,8 @@ because the eGPU shares the USB bus. Only the render interval changes, so the
 H264 encoder is not restarted. The top status row (set speed, follow gap, LFA)
 also shows the mici Chestnut icon right of LFA at the same spacing; the row is
 shifted left half a slot so it stays centered between the turn signals. Icon (`icons_mici/chestnut*.png`): pulsing white while loading, green
-when active, orange when the eGPU model failed, hidden when no Chestnut is
-connected.
+when active, orange when the eGPU model failed, and greyed out when no
+Chestnut is connected.
 `ClusterHudDebug` controls the autorun output gate: `0` starts external HUD
 rendering only while openpilot is onroad, and `1`, `2`, and `3` keep the
 always-on debug behavior after power-up. In live input only, `2` also keeps the

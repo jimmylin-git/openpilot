@@ -2638,18 +2638,22 @@ class ClusterUiRenderer:
         self._draw_chestnut_icon(stats.chestnut_state)
 
     def _draw_chestnut_icon(self, chestnut_state: str | None) -> None:
-        if chestnut_state is None:
-            return
-        if chestnut_state not in self._chestnut_textures:
-            self._chestnut_textures[chestnut_state] = self._load_icon_texture(
-                CHESTNUT_ICON_PATHS[chestnut_state],
+        # No Chestnut connected: show the plain icon greyed out like other inactive icons.
+        texture_key = CHESTNUT_LOADING if chestnut_state is None else chestnut_state
+        if texture_key not in self._chestnut_textures:
+            self._chestnut_textures[texture_key] = self._load_icon_texture(
+                CHESTNUT_ICON_PATHS[texture_key],
                 "Chestnut",
             )
-        texture = self._chestnut_textures[chestnut_state]
+        texture = self._chestnut_textures[texture_key]
         if texture is None:
             return
+        tint = WHITE
         alpha = 255
-        if chestnut_state == CHESTNUT_LOADING:
+        if chestnut_state is None:
+            tint = self._current_theme().muted
+            alpha = 190
+        elif chestnut_state == CHESTNUT_LOADING:
             alpha = int(255 * (0.35 + 0.65 * (0.5 - 0.5 * math.cos(time.monotonic() * 6.0))))
         height = LFA_STATUS_ICON_SIZE
         width = height * texture.width / max(1, texture.height)
@@ -2659,7 +2663,7 @@ class ClusterUiRenderer:
             TURN_SIGNAL_CENTER_Y + height * 0.5,
             width,
             height,
-            WHITE,
+            tint,
             alpha,
         )
 
