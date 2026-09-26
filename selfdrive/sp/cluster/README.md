@@ -501,6 +501,14 @@ EGL surfaceless/llvmpipe on the CPU (only ~1-2 FPS on device). Set
 `CLUSTER_RAYLIB_BACKEND=comma|headless|desktop` in the manager environment to
 override.
 
+On the comma backend the native H.264 path renders NV12 straight into the
+Venus encoder's input DMA-BUFs (`cluster_gles_dmabuf.py`, ported from
+CarrotPilot): each encoder buffer is imported once as an `EGLImage`-backed
+framebuffer, the Y/UV pack shaders draw into it, and a GL fence is waited on
+before the buffer is queued, so there is no `glReadPixels` or CPU copy. If the
+import fails it falls back to GPU readback. Set `CLUSTER_NV12_DMABUF_OUTPUT=0`
+to disable it.
+
 The headless fallback needs Mesa's EGL. `comma-deps-raylib` bundles it from
 6.0.0.1.post101, but older AGNOS venvs ship a wheel without it, and the Qualcomm
 system EGL then fails with `EGL_BAD_ALLOC`. When the installed raylib has no

@@ -57,6 +57,7 @@ from cluster_scene import (
     VehicleBox,
     build_cluster_scene,
 )
+from cluster_gles_dmabuf import DirectNv12DmabufError, create_tici_nv12_dmabuf_pool
 from cluster_paths import SELFDRIVE_DIR
 from cluster_system_monitor import SystemStats, SystemStatsSampler
 from cluster_utils import blink_visible, clamp, smoothstep
@@ -538,6 +539,9 @@ class ClusterUiRenderer:
         self._nv12_pack_uv_size: tuple[int, int] | None = None
         self._nv12_pack_full_target = None
         self._nv12_pack_full_size: tuple[int, int] | None = None
+        self._nv12_dmabuf_pool = None
+        self._nv12_dmabuf_pool_checked = False
+        self._nv12_dmabuf_pool_disabled = False
         self._nv12_pack_shader = None
         self._nv12_pack_shader_locations: dict[str, int] = {}
         self._vehicle_model = None
@@ -605,6 +609,29 @@ class ClusterUiRenderer:
     def clear_profile_samples(self) -> None:
         self._profile_samples.clear()
 
+    def nv12_dmabuf_output_available(self) -> bool:
+        if self._nv12_dmabuf_pool_disabled:
+            return False
+        if not self._nv12_dmabuf_pool_checked:
+            self._nv12_dmabuf_pool_checked = True
+            self.open(hidden=self.hidden)
+            try:
+                self._nv12_dmabuf_pool = create_tici_nv12_dmabuf_pool()
+            except DirectNv12DmabufError as exc:
+                print(f"NV12 DMA-BUF output unavailable: {exc}", flush=True)
+                self._nv12_dmabuf_pool_disabled = True
+        return self._nv12_dmabuf_pool is not None
+
+    def disable_nv12_dmabuf_output(self) -> None:
+        self.release_nv12_dmabuf_output()
+        self._nv12_dmabuf_pool_disabled = True
+
+    def release_nv12_dmabuf_output(self) -> None:
+        if self._nv12_dmabuf_pool is not None:
+            self._nv12_dmabuf_pool.close()
+        self._nv12_dmabuf_pool = None
+        self._nv12_dmabuf_pool_checked = False
+
     def profile_samples(self) -> list[tuple[str, float]]:
         return self._profile_samples
 
@@ -656,6 +683,7 @@ class ClusterUiRenderer:
             self._vehicle_log_file = None
         if not self._window_open:
             return
+        self.release_nv12_dmabuf_output()
         if self._capture_target is not None:
             rl.unload_render_texture(self._capture_target)
             self._capture_target = None
@@ -988,6 +1016,7 @@ class ClusterUiRenderer:
         byte_count: int,
         buffer: bytearray | None = None,
         flip_x: bool = False,
+        destination_dmabuf_fd: int | None = None,
     ) -> Iterator[object]:
         self.open(hidden=self.hidden)
         output_width = int(output_width)
@@ -1045,6 +1074,8 @@ class ClusterUiRenderer:
         self._profile_add("render_to_nv12.gpu_upload_transform", profile_stage)
 
         pack_direct_input = stride % 4 == 0 and byte_count % stride == 0 and uv_offset % stride == 0
+        if destination_dmabuf_fd is not None and not pack_direct_input:
+            raise DirectNv12DmabufError("encoder DMA-BUF output requires a four-byte packed Venus layout")
         if pack_direct_input:
             full_pack_w = stride // 4
             full_pack_h = byte_count // stride
@@ -1053,7 +1084,13 @@ class ClusterUiRenderer:
             y_pack_y = tail_pack_h + uv_scanlines
 
             profile_stage = self._profile_start()
-            full_target = self._get_nv12_pack_target("full", full_pack_w, full_pack_h)
+            if destination_dmabuf_fd is None:
+                full_target = self._get_nv12_pack_target("full", full_pack_w, full_pack_h)
+            else:
+                dmabuf_pool = self._nv12_dmabuf_pool
+                if dmabuf_pool is None:
+                    raise DirectNv12DmabufError("encoder DMA-BUF render targets are unavailable")
+                full_target = dmabuf_pool.target_for(destination_dmabuf_fd, stride, byte_count)
             self._profile_add("render_to_nv12.get_pack_targets", profile_stage)
 
             profile_stage = self._profile_start()
@@ -1086,6 +1123,13 @@ class ClusterUiRenderer:
                 clear_target=False,
             )
             self._profile_add("render_to_nv12.pack_uv_shader", profile_stage)
+
+            if destination_dmabuf_fd is not None:
+                profile_stage = self._profile_start()
+                dmabuf_pool.wait_for_gpu()
+                self._profile_add("render_to_nv12.dmabuf_fence_wait", profile_stage)
+                yield destination_dmabuf_fd
+                return
 
             profile_stage = self._profile_start()
             image = rl.load_image_from_texture(full_target.texture)
