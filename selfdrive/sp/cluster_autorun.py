@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 CLUSTER_DIR = Path(__file__).resolve().parent / "cluster"
@@ -12,6 +14,9 @@ CLUSTER_DIR = Path(__file__).resolve().parent / "cluster"
 # so default to the EGL-surfaceless "headless" backend (llvmpipe, CPU rendered).
 # Override with CLUSTER_RAYLIB_BACKEND=comma|headless|desktop.
 DEFAULT_RAYLIB_BACKEND = "headless"
+DEFAULT_LOG_PATH = "/tmp/cluster.log"
+LOG_MAX_BYTES = 5 * 1024 * 1024
+RESTART_DELAY_S = 5.0
 
 
 def cluster_env() -> dict[str, str]:
@@ -22,29 +27,80 @@ def cluster_env() -> dict[str, str]:
     return env
 
 
+def cluster_cmd() -> list[str]:
+    return [
+        sys.executable,
+        str(CLUSTER_DIR / "main.py"),
+        "--input",
+        "live",
+        "--fps",
+        "15",
+        "--usb-codec",
+        "jpeg",
+        "--usb-jpeg-quality",
+        "50",
+        "--theme",
+        "auto",
+    ]
+
+
+def _open_log():
+    path = Path(os.environ.get("CLUSTER_LOG_PATH", DEFAULT_LOG_PATH))
+    try:
+        if path.exists() and path.stat().st_size > LOG_MAX_BYTES:
+            path.replace(path.with_name(path.name + ".1"))
+        return path.open("a", buffering=1)
+    except OSError:
+        return None
+
+
+def _log(log_file, message: str) -> None:
+    line = f"[cluster_autorun {time.strftime('%Y-%m-%d %H:%M:%S')}] {message}"
+    print(line, flush=True)
+    if log_file is not None:
+        log_file.write(line + "\n")
+
+
 def main() -> None:
-    main_script = CLUSTER_DIR / "main.py"
+    # sunnypilot's manager never restarts a PythonProcess that exited, so supervise
+    # the cluster here: restart on crash (e.g. screen not enumerated yet at boot).
     env = cluster_env()
-    print("[cluster_autorun] Using camera-based automatic brightness", flush=True)
-    print(f"[cluster_autorun] Starting cluster HUD with live openpilot data (raylib backend={env.get('RAYLIB_BACKEND')})", flush=True)
-    subprocess.run(
-        [
-            sys.executable,
-            str(main_script),
-            "--input",
-            "live",
-            "--fps",
-            "15",
-            "--usb-codec",
-            "jpeg",
-            "--usb-jpeg-quality",
-            "50",
-            "--theme",
-            "auto",
-        ],
-        check=True,
-        env=env,
-    )
+    log_file = _open_log()
+    child: subprocess.Popen | None = None
+    stopping = False
+
+    def _stop(signum, _frame):
+        nonlocal stopping
+        stopping = True
+        if child is not None and child.poll() is None:
+            child.terminate()
+
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGINT, _stop)
+
+    _log(log_file, f"starting cluster HUD with live openpilot data (raylib backend={env.get('RAYLIB_BACKEND')})")
+    while not stopping:
+        stdout = log_file if log_file is not None else None
+        child = subprocess.Popen(cluster_cmd(), env=env, stdout=stdout, stderr=subprocess.STDOUT if stdout else None)
+        try:
+            returncode = child.wait()
+        except KeyboardInterrupt:
+            stopping = True
+            child.terminate()
+            returncode = child.wait()
+        if stopping:
+            break
+        _log(log_file, f"cluster exited with code {returncode}, restarting in {RESTART_DELAY_S:.0f}s")
+        deadline = time.monotonic() + RESTART_DELAY_S
+        while not stopping and time.monotonic() < deadline:
+            time.sleep(0.2)
+
+    if child is not None and child.poll() is None:
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill()
+    _log(log_file, "stopped")
 
 
 if __name__ == "__main__":
