@@ -14,7 +14,7 @@ CLUSTER_DIR = Path(__file__).resolve().parent / "cluster"
 # so default to the EGL-surfaceless "headless" backend (llvmpipe, CPU rendered).
 # Override with CLUSTER_RAYLIB_BACKEND=comma|headless|desktop.
 DEFAULT_RAYLIB_BACKEND = "headless"
-DEFAULT_LOG_PATH = "/tmp/cluster.log"
+# Logging is off by default; set CLUSTER_LOG_PATH=/tmp/cluster.log to debug.
 LOG_MAX_BYTES = 5 * 1024 * 1024
 RESTART_DELAY_S = 5.0
 
@@ -45,7 +45,10 @@ def cluster_cmd() -> list[str]:
 
 
 def _open_log():
-    path = Path(os.environ.get("CLUSTER_LOG_PATH", DEFAULT_LOG_PATH))
+    log_path = os.environ.get("CLUSTER_LOG_PATH", "").strip()
+    if not log_path:
+        return None
+    path = Path(log_path)
     try:
         if path.exists() and path.stat().st_size > LOG_MAX_BYTES:
             path.replace(path.with_name(path.name + ".1"))
@@ -55,10 +58,10 @@ def _open_log():
 
 
 def _log(log_file, message: str) -> None:
+    if log_file is None:
+        return
     line = f"[cluster_autorun {time.strftime('%Y-%m-%d %H:%M:%S')}] {message}"
-    print(line, flush=True)
-    if log_file is not None:
-        log_file.write(line + "\n")
+    log_file.write(line + "\n")
 
 
 def main() -> None:
@@ -80,8 +83,8 @@ def main() -> None:
 
     _log(log_file, f"starting cluster HUD with live openpilot data (raylib backend={env.get('RAYLIB_BACKEND')})")
     while not stopping:
-        stdout = log_file if log_file is not None else None
-        child = subprocess.Popen(cluster_cmd(), env=env, stdout=stdout, stderr=subprocess.STDOUT if stdout else None)
+        output = log_file if log_file is not None else subprocess.DEVNULL
+        child = subprocess.Popen(cluster_cmd(), env=env, stdout=output, stderr=subprocess.STDOUT)
         try:
             returncode = child.wait()
         except KeyboardInterrupt:
