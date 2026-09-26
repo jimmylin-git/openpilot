@@ -9,6 +9,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+from openpilot.common.usbgpu_bus_lock import usbgpu_bus_lock
+
 from cluster_utils import clamp
 
 
@@ -55,6 +57,8 @@ CMD_GET_STREAM_STATUS = 122
 CMD_STOP_STREAM = 123
 DEFAULT_H264_CHUNK_SIZE = 202752
 MAX_H264_CHUNK_SIZE = 1024 * 1024
+USBGPU_H264_MAX_CHUNK_SIZE = 32 * 1024
+USBGPU_H264_CHUNK_GAP_S = 0.002
 _LIBUSB_DLL_DIR_HANDLE = None
 
 
@@ -161,6 +165,7 @@ class TuringUsbDisplay:
         self._turbojpeg_unavailable = False
         self._jpeg_buffer = BytesIO()
         self._usb_lock = threading.Lock()
+        self.chunk_gap_s = USBGPU_H264_CHUNK_GAP_S
         self.profile_enabled = os.environ.get("CLUSTER_PROFILE_USB") == "1"
         self._profile_samples: list[tuple[str, float]] = []
 
@@ -237,7 +242,8 @@ class TuringUsbDisplay:
         try:
             import usb.util
 
-            usb.util.dispose_resources(self.dev)
+            with usbgpu_bus_lock():
+                usb.util.dispose_resources(self.dev)
         except Exception:
             pass
 
@@ -259,25 +265,26 @@ class TuringUsbDisplay:
 
     def _find_expected_usb_device(self) -> tuple[Any, int]:
         if self.expected_product_id is None:
-            return self._find_usb_device()
+            with usbgpu_bus_lock():
+                return self._find_usb_device()
 
         import usb.core  # type: ignore
 
-        dev = usb.core.find(idVendor=TURZX_USB_VENDOR_ID, idProduct=self.expected_product_id)
-        if dev is None:
-            raise ValueError(f"USB device not found for pid=0x{self.expected_product_id:04x}")
-
-        try:
-            dev.set_configuration()
-        except usb.core.USBError as exc:
-            print("Warning: set_configuration() failed:", exc)
-
-        if sys.platform.startswith("linux"):
+        with usbgpu_bus_lock():
+            dev = usb.core.find(idVendor=TURZX_USB_VENDOR_ID, idProduct=self.expected_product_id)
+            if dev is None:
+                raise ValueError(f"USB device not found for pid=0x{self.expected_product_id:04x}")
             try:
-                if dev.is_kernel_driver_active(0):
-                    dev.detach_kernel_driver(0)
+                dev.set_configuration()
             except usb.core.USBError as exc:
-                print("Warning: detach_kernel_driver failed:", exc)
+                print("Warning: set_configuration() failed:", exc)
+
+            if sys.platform.startswith("linux"):
+                try:
+                    if dev.is_kernel_driver_active(0):
+                        dev.detach_kernel_driver(0)
+                except usb.core.USBError as exc:
+                    print("Warning: detach_kernel_driver failed:", exc)
 
         return dev, self.expected_product_id
 
@@ -399,7 +406,8 @@ class TuringUsbDisplay:
             except Exception as exc:
                 print(f"USB reset failed: {exc}")
             try:
-                usb.util.dispose_resources(self.dev)
+                with usbgpu_bus_lock():
+                    usb.util.dispose_resources(self.dev)
             except Exception:
                 pass
         time.sleep(1.5)
@@ -482,8 +490,13 @@ class TuringUsbDisplay:
                 no_ack_drain_attempts=1,
             )
 
-        chunk_size = self._h264_chunk_size(requested_chunk_size)
-        print(f"TURZX H264 stream chunk size: {chunk_size} bytes", flush=True)
+        negotiated_chunk_size = self._h264_chunk_size(requested_chunk_size)
+        chunk_size = min(negotiated_chunk_size, USBGPU_H264_MAX_CHUNK_SIZE)
+        print(
+            f"TURZX H264 stream chunk size: {chunk_size} bytes "
+            f"(negotiated={negotiated_chunk_size}, USBGPU max={USBGPU_H264_MAX_CHUNK_SIZE})",
+            flush=True,
+        )
         return chunk_size
 
     def stop_h264_stream(self) -> None:
@@ -658,7 +671,7 @@ class TuringUsbDisplay:
     def _write_payload_checked(self, payload: bytes, error_message: str, timeout_ms: int) -> bytes:
         if self._ep_out is None or self._ep_in is None:
             raise RuntimeError("USB endpoints are not open")
-        with self._usb_lock:
+        with self._usb_lock, usbgpu_bus_lock():
             profile_stage = self._profile_start()
             self._clear_endpoint_halt()
             self._drain_input()
@@ -677,7 +690,7 @@ class TuringUsbDisplay:
     def _write_payload_no_ack(self, payload: bytes, error_message: str, timeout_ms: int) -> None:
         if self._ep_out is None:
             raise RuntimeError("USB OUT endpoint is not open")
-        with self._usb_lock:
+        with self._usb_lock, usbgpu_bus_lock():
             profile_stage = self._profile_start()
             self._clear_endpoint_halt()
             self._drain_input()
@@ -727,7 +740,7 @@ class TuringUsbDisplay:
         if self._ep_out is None or self._ep_in is None:
             raise RuntimeError("USB OUT endpoint is not open")
 
-        with self._usb_lock:
+        with self._usb_lock, usbgpu_bus_lock():
             profile_stage = self._profile_start()
             self._clear_endpoint_halt()
             self._drain_input()
@@ -747,7 +760,7 @@ class TuringUsbDisplay:
         if self._ep_out is None:
             raise RuntimeError("USB OUT endpoint is not open")
 
-        with self._usb_lock:
+        with self._usb_lock, usbgpu_bus_lock():
             profile_stage = self._profile_start()
             if drain_input:
                 self._drain_input(
@@ -808,7 +821,7 @@ class TuringUsbDisplay:
         if self._ep_out is None or self._ep_in is None:
             raise RuntimeError("USB endpoints are not open")
 
-        with self._usb_lock:
+        with self._usb_lock, usbgpu_bus_lock():
             profile_stage = self._profile_start()
             payload = self._build_h264_chunk_payload(chunk, is_last=is_last)
             self._profile_add("usb.h264.payload", profile_stage)
@@ -843,7 +856,7 @@ class TuringUsbDisplay:
         if self._ep_out is None:
             raise RuntimeError("USB OUT endpoint is not open")
 
-        with self._usb_lock:
+        with self._usb_lock, usbgpu_bus_lock():
             profile_stage = self._profile_start()
             if drain_input:
                 self._drain_input(

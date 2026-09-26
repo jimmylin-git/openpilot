@@ -506,3 +506,9 @@ the same names under `openpilot/selfdrive/assets/fonts`, then
 USB frame upload runs in no-ACK mode by default because some TURZX panels accept
 image data but never return a frame-upload response. Use `--usb-wait-frame-ack`
 only when testing a panel/driver combination known to reply after each frame.
+
+Manager autorun uses native H264 at 5 FPS. H264 USB chunks are capped at 32 KiB
+with a 2 ms yield between chunks to let Chestnut transfers share the bus. The
+HUD and tinygrad Chestnut USB transfers use the same process-shared lock at
+`/tmp/carrot_usbgpu_bus.lock`; Chestnut model uploads are serialized one chunk
+at a time so the HUD can acquire the bus between transfers.

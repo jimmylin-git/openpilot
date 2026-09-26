@@ -1993,6 +1993,8 @@ class H264UsbPipeline:
             wait_for_ack=self.wait_for_ack,
             require_ack_response=not self.soft_ack,
         )
+        if self.usb_display.chunk_gap_s > 0:
+            time.sleep(self.usb_display.chunk_gap_s)
         elapsed_ms = (time.perf_counter() - profile_stage) * 1000.0
         self._add_sample_value("usb_h264.send_chunk", elapsed_ms)
         self._record_h264_send(source, len(chunk), elapsed_ms)
