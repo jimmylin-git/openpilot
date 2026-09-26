@@ -90,9 +90,6 @@ CHESTNUT_ICON_PATHS = {
     CHESTNUT_ACTIVE: SELFDRIVE_DIR / "assets" / "icons_mici" / "chestnut_green.png",
     CHESTNUT_FAILED: SELFDRIVE_DIR / "assets" / "icons_mici" / "chestnut_orange.png",
 }
-CHESTNUT_ICON_CENTER_X = 1570.0
-CHESTNUT_ICON_CENTER_Y = 140.0
-CHESTNUT_ICON_HEIGHT = 36.0
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
 TURN_SIGNAL_CENTER_Y = 94
@@ -131,9 +128,14 @@ FOLLOW_GAP_LANE_CONTENT_TOP_FRAC = 16.0 / 128.0
 FOLLOW_GAP_LANE_CONTENT_BOTTOM_FRAC = 111.0 / 128.0
 FOLLOW_GAP_BAR_SPAN_TOP_FRAC = 0.5
 FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 0.99
-FOLLOW_GAP_LANE_CENTER_X = DESIGN_WIDTH * 0.5
-LFA_STATUS_CENTER_X = FOLLOW_GAP_LANE_CENTER_X + 142
-TOP_CRUISE_CENTER_X = FOLLOW_GAP_LANE_CENTER_X - 142
+TOP_STATUS_ICON_SPACING = 142
+# The top row holds cruise set speed, follow gap, LFA and the Chestnut icon at equal
+# spacing; shift it left by half a slot so the four slots stay centered between the
+# turn signals and the Chestnut slot clears the right turn signal.
+FOLLOW_GAP_LANE_CENTER_X = DESIGN_WIDTH * 0.5 - TOP_STATUS_ICON_SPACING * 0.5
+LFA_STATUS_CENTER_X = FOLLOW_GAP_LANE_CENTER_X + TOP_STATUS_ICON_SPACING
+TOP_CRUISE_CENTER_X = FOLLOW_GAP_LANE_CENTER_X - TOP_STATUS_ICON_SPACING
+CHESTNUT_ICON_CENTER_X = LFA_STATUS_CENTER_X + TOP_STATUS_ICON_SPACING
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
 LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
 TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
@@ -2649,12 +2651,12 @@ class ClusterUiRenderer:
         alpha = 255
         if chestnut_state == CHESTNUT_LOADING:
             alpha = int(255 * (0.35 + 0.65 * (0.5 - 0.5 * math.cos(time.monotonic() * 6.0))))
-        height = CHESTNUT_ICON_HEIGHT
+        height = LFA_STATUS_ICON_SIZE
         width = height * texture.width / max(1, texture.height)
         self._draw_bottom_aligned_texture_icon(
             texture,
             CHESTNUT_ICON_CENTER_X,
-            CHESTNUT_ICON_CENTER_Y + height * 0.5,
+            TURN_SIGNAL_CENTER_Y + height * 0.5,
             width,
             height,
             WHITE,

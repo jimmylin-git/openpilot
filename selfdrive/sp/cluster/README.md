@@ -185,8 +185,9 @@ are fixed at startup. Set `CLUSTER_AUTORUN_FPS` only for fixed test overrides;
 `0` means uncapped. Autorun launches at 8 FPS (`CLUSTER_FPS` overrides); in live
 input the HUD drops to 5 FPS while `ChestnutLoading`/`ChestnutActive` is set,
 because the eGPU shares the USB bus. Only the render interval changes, so the
-H264 encoder is not restarted. The top-right metrics area also shows the mici
-Chestnut icon (`icons_mici/chestnut*.png`): pulsing white while loading, green
+H264 encoder is not restarted. The top status row (set speed, follow gap, LFA)
+also shows the mici Chestnut icon right of LFA at the same spacing; the row is
+shifted left half a slot so it stays centered between the turn signals. Icon (`icons_mici/chestnut*.png`): pulsing white while loading, green
 when active, orange when the eGPU model failed, hidden when no Chestnut is
 connected.
 `ClusterHudDebug` controls the autorun output gate: `0` starts external HUD
