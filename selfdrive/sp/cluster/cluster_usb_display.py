@@ -90,6 +90,16 @@ def _add_libusb_search_path_once() -> None:
         _LIBUSB_DLL_DIR_HANDLE = os.add_dll_directory(dll_dir)
 
 
+def _usbgpu_transfer_active() -> bool:
+    try:
+        from openpilot.common.params import Params
+    except ModuleNotFoundError:
+        return False
+
+    params = Params()
+    return params.get_bool("ChestnutLoading") or params.get_bool("ChestnutActive")
+
+
 def find_supported_usb_product(expected_product_id: int | None = None) -> int | None:
     if not VENDOR_LIBRARY.exists():
         print(f"TURZX vendor library not found: {VENDOR_LIBRARY}", flush=True)
@@ -165,7 +175,7 @@ class TuringUsbDisplay:
         self._turbojpeg_unavailable = False
         self._jpeg_buffer = BytesIO()
         self._usb_lock = threading.Lock()
-        self.chunk_gap_s = USBGPU_H264_CHUNK_GAP_S
+        self.chunk_gap_s = 0.0
         self.profile_enabled = os.environ.get("CLUSTER_PROFILE_USB") == "1"
         self._profile_samples: list[tuple[str, float]] = []
 
@@ -490,13 +500,19 @@ class TuringUsbDisplay:
                 no_ack_drain_attempts=1,
             )
 
-        negotiated_chunk_size = self._h264_chunk_size(requested_chunk_size)
-        chunk_size = min(negotiated_chunk_size, USBGPU_H264_MAX_CHUNK_SIZE)
-        print(
-            f"TURZX H264 stream chunk size: {chunk_size} bytes "
-            f"(negotiated={negotiated_chunk_size}, USBGPU max={USBGPU_H264_MAX_CHUNK_SIZE})",
-            flush=True,
-        )
+        chunk_size = self._h264_chunk_size(requested_chunk_size)
+        self.chunk_gap_s = 0.0
+        if _usbgpu_transfer_active():
+            negotiated_chunk_size = chunk_size
+            chunk_size = min(negotiated_chunk_size, USBGPU_H264_MAX_CHUNK_SIZE)
+            self.chunk_gap_s = USBGPU_H264_CHUNK_GAP_S
+            print(
+                f"TURZX H264 eGPU coexistence pacing: chunk "
+                f"{negotiated_chunk_size}->{chunk_size} bytes, "
+                f"gap={self.chunk_gap_s * 1000.0:.1f} ms",
+                flush=True,
+            )
+        print(f"TURZX H264 stream chunk size: {chunk_size} bytes", flush=True)
         return chunk_size
 
     def stop_h264_stream(self) -> None:
