@@ -1,158 +1,35 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import hashlib
-import importlib.util
 import os
-import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
-import urllib.request
-import zipfile
 from pathlib import Path
 
 CLUSTER_DIR = Path(__file__).resolve().parent / "cluster"
 # Like CarrotPilot, render on the Adreno GPU through comma-deps-raylib's DRM "comma"
 # backend. In USB output mode the HUD only draws into render textures and never calls
 # end_drawing()/SwapScreenBuffer, and the backend defers its modeset to the first swap,
-# so it never takes the panel away from the openpilot UI. If the comma backend cannot
-# initialize, fall back to the EGL-surfaceless "headless" backend (Mesa llvmpipe, CPU,
-# ~1-2 FPS on device). Override with CLUSTER_RAYLIB_BACKEND=comma|headless|desktop.
-DEFAULT_RAYLIB_BACKEND = "auto"
-BACKEND_PROBE_TIMEOUT_S = 20.0
-BACKEND_PROBE_CODE = (
-    "import pyray as rl\n"
-    "rl.set_trace_log_level(rl.TraceLogLevel.LOG_WARNING)\n"
-    "rl.set_config_flags(rl.ConfigFlags.FLAG_WINDOW_HIDDEN)\n"
-    "rl.init_window(64, 64, 'cluster-probe')\n"
-    "ok = rl.is_window_ready()\n"
-    "rl.close_window()\n"
-    "raise SystemExit(0 if ok else 1)\n"
-)
+# so it never takes the panel away from the openpilot UI. There is no CPU fallback:
+# Mesa llvmpipe only reaches ~1-2 FPS on device, which is unusable.
+RAYLIB_BACKEND = "comma"
 # Logging is off by default; set CLUSTER_LOG_PATH=/tmp/cluster.log to debug.
 LOG_MAX_BYTES = 5 * 1024 * 1024
 RESTART_DELAY_S = 5.0
-
-# The headless backend needs Mesa's EGL (surfaceless + llvmpipe). comma-deps-raylib
-# bundles it since 6.0.0.1.post101, but older AGNOS venvs ship a wheel without it and
-# fall back to the Qualcomm EGL, which fails with EGL_BAD_ALLOC. In that case fetch the
-# Mesa libs once from the pinned wheel into /data so they survive reinstalls.
-MESA_LIBS = ("libEGL.so.1", "libGLESv2.so.2", "libgallium-26.2.1.so", "libdrm.so.2")
-MESA_WHEEL_URL = (
-    "https://files.pythonhosted.org/packages/a1/17/12977631f6d86d1daa4f67a310cfdf2783ba288f42d444d6a89b2297a0a4/"
-    "comma_deps_raylib-6.0.0.1.post101-py3-none-manylinux_2_28_aarch64.whl"
-)
-MESA_WHEEL_SHA256 = "c93ff9b45df414620b3011280da77151764c027e2f95d384fe255615d78872cc"
-MESA_CACHE_DIR = Path(os.environ.get("CLUSTER_MESA_DIR", "/data/cluster_mesa/raylib-6.0.0.1.post101"))
-MESA_RETRY_S = 300.0
+DEFAULT_FPS = "8"
 
 
-def _has_mesa(lib_dir: Path) -> bool:
-    return all((lib_dir / name).is_file() for name in MESA_LIBS)
-
-
-def _bundled_raylib_lib_dir() -> Path | None:
-    spec = importlib.util.find_spec("raylib")
-    if spec is None or not spec.submodule_search_locations:
-        return None
-    return Path(list(spec.submodule_search_locations)[0]) / "install" / "lib"
-
-
-def _download_mesa(dest: Path) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=dest.parent) as tmp:
-        wheel = Path(tmp) / "raylib.whl"
-        digest = hashlib.sha256()
-        with urllib.request.urlopen(MESA_WHEEL_URL, timeout=60) as resp, wheel.open("wb") as out:
-            while chunk := resp.read(1 << 20):
-                digest.update(chunk)
-                out.write(chunk)
-        if digest.hexdigest() != MESA_WHEEL_SHA256:
-            raise RuntimeError("raylib wheel sha256 mismatch")
-        staging = Path(tmp) / "lib"
-        staging.mkdir()
-        with zipfile.ZipFile(wheel) as zf:
-            for member in zf.namelist():
-                name = member.rsplit("/", 1)[-1]
-                if name in MESA_LIBS and "/raylib/install/lib/" in member:
-                    (staging / name).write_bytes(zf.read(member))
-        if not _has_mesa(staging):
-            raise RuntimeError("raylib wheel is missing Mesa libs")
-        if dest.exists():
-            shutil.rmtree(dest)
-        staging.replace(dest)
-
-
-def ensure_headless_mesa(log_file=None) -> Path | None:
-    """Return a directory to prepend to LD_LIBRARY_PATH, or None if not needed/unavailable."""
-    bundled = _bundled_raylib_lib_dir()
-    if bundled is not None and _has_mesa(bundled):
-        return None
-    if _has_mesa(MESA_CACHE_DIR):
-        return MESA_CACHE_DIR
-    if not MESA_CACHE_DIR.parent.parent.is_dir():
-        return None
-    try:
-        _log(log_file, f"installed raylib has no Mesa EGL; downloading it to {MESA_CACHE_DIR}")
-        _download_mesa(MESA_CACHE_DIR)
-        _log(log_file, "Mesa EGL ready")
-        return MESA_CACHE_DIR
-    except Exception as exc:
-        _log(log_file, f"Mesa EGL download failed: {exc}")
-        return None
-
-
-def requested_backend() -> str:
-    return os.environ.get("CLUSTER_RAYLIB_BACKEND", DEFAULT_RAYLIB_BACKEND).strip().lower()
-
-
-def probe_backend(backend: str, log_file=None) -> bool:
+def cluster_env() -> dict[str, str]:
     env = os.environ.copy()
-    env["RAYLIB_BACKEND"] = backend
-    try:
-        result = subprocess.run(
-            [sys.executable, "-c", BACKEND_PROBE_CODE],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=BACKEND_PROBE_TIMEOUT_S,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        _log(log_file, f"raylib {backend} backend probe failed: {exc}")
-        return False
-    if result.returncode != 0:
-        tail = result.stdout.decode("utf-8", "replace").strip().splitlines()[-3:]
-        _log(log_file, f"raylib {backend} backend probe exited {result.returncode}: {' | '.join(tail)}")
-        return False
-    return True
-
-
-def resolve_backend(log_file=None) -> str:
-    backend = requested_backend()
-    if backend != "auto":
-        return backend
-    if probe_backend("comma", log_file):
-        return "comma"
-    _log(log_file, "comma GPU backend unavailable; falling back to headless (Mesa llvmpipe)")
-    return "headless"
-
-
-def cluster_env(backend: str, mesa_dir: Path | None = None) -> dict[str, str]:
-    env = os.environ.copy()
-    if backend:
-        env["RAYLIB_BACKEND"] = backend
-    if mesa_dir is not None and backend == "headless":
-        existing = env.get("LD_LIBRARY_PATH", "")
-        env["LD_LIBRARY_PATH"] = f"{mesa_dir}:{existing}" if existing else str(mesa_dir)
+    env["RAYLIB_BACKEND"] = RAYLIB_BACKEND
     return env
 
 
 def cluster_fps() -> str:
     # main.py drops to 5 FPS on its own while the Chestnut eGPU is loading/active.
-    return os.environ.get("CLUSTER_FPS", "").strip() or "10"
+    return os.environ.get("CLUSTER_FPS", "").strip() or DEFAULT_FPS
 
 
 def cluster_cmd() -> list[str]:
@@ -196,12 +73,9 @@ def main() -> None:
     # sunnypilot's manager never restarts a PythonProcess that exited, so supervise
     # the cluster here: restart on crash (e.g. screen not enumerated yet at boot).
     log_file = _open_log()
-    backend = resolve_backend(log_file)
-    env = cluster_env(backend)
+    env = cluster_env()
     child: subprocess.Popen | None = None
     stopping = False
-    mesa_dir: Path | None = None
-    mesa_next_try = 0.0
 
     def _stop(signum, _frame):
         nonlocal stopping
@@ -214,11 +88,6 @@ def main() -> None:
 
     _log(log_file, f"starting cluster HUD with live openpilot data (raylib backend={env.get('RAYLIB_BACKEND')})")
     while not stopping:
-        if backend == "headless" and mesa_dir is None and time.monotonic() >= mesa_next_try:
-            mesa_dir = ensure_headless_mesa(log_file)
-            if mesa_dir is None:
-                mesa_next_try = time.monotonic() + MESA_RETRY_S
-            env = cluster_env(backend, mesa_dir)
         output = log_file if log_file is not None else subprocess.DEVNULL
         child = subprocess.Popen(cluster_cmd(), env=env, stdout=output, stderr=subprocess.STDOUT)
         try:

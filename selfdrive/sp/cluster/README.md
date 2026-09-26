@@ -182,7 +182,7 @@ Manager autostart omits `--fps` by default so live launches follow
 runs exit and let `cluster_autorun` relaunch when the setting changes the
 encoder FPS because the V4L2 encoder timing, SPS timing, and automatic bitrate
 are fixed at startup. Set `CLUSTER_AUTORUN_FPS` only for fixed test overrides;
-`0` means uncapped. Autorun launches at 10 FPS (`CLUSTER_FPS` overrides); in live
+`0` means uncapped. Autorun launches at 8 FPS (`CLUSTER_FPS` overrides); in live
 input the HUD drops to 5 FPS while `ChestnutLoading`/`ChestnutActive` is set,
 because the eGPU shares the USB bus. Only the render interval changes, so the
 H264 encoder is not restarted.
@@ -494,15 +494,13 @@ device uses the system `libusb-1.0.so` through `pyusb`. Pure-python `pyusb`
 1.3.1 and `pyserial` 3.5 (BSD) are vendored in `.vendor/pydeps` and appended to
 `sys.path`, so they are only used when the device venv lacks them.
 
-`cluster_autorun` picks the raylib backend like CarrotPilot: it probes the
-`comma` backend (Adreno GPU through DRM/GBM) with a hidden 64x64 window and uses
-it when it initializes. In USB output mode the HUD only renders into render
-textures and never calls `end_drawing()`, and the comma backend defers its
-modeset to the first buffer swap, so the openpilot UI keeps the panel. If the
-probe fails it falls back to `RAYLIB_BACKEND=headless`, which renders through
-EGL surfaceless/llvmpipe on the CPU (only ~1-2 FPS on device). Set
-`CLUSTER_RAYLIB_BACKEND=comma|headless|desktop` in the manager environment to
-override.
+`cluster_autorun` always launches the HUD with `RAYLIB_BACKEND=comma`
+(Adreno GPU through DRM/GBM), like CarrotPilot. In USB output mode the HUD only
+renders into render textures and never calls `end_drawing()`, and the comma
+backend defers its modeset to the first buffer swap, so the openpilot UI keeps
+the panel. There is no CPU (headless/llvmpipe) fallback because it only reached
+~1-2 FPS on device; if the comma backend fails, the HUD exits and autorun retries
+every 5 seconds.
 
 On the comma backend the native H.264 path renders NV12 straight into the
 Venus encoder's input DMA-BUFs (`cluster_gles_dmabuf.py`, ported from
@@ -511,16 +509,6 @@ framebuffer, the Y/UV pack shaders draw into it, and a GL fence is waited on
 before the buffer is queued, so there is no `glReadPixels` or CPU copy. If the
 import fails it falls back to GPU readback. Set `CLUSTER_NV12_DMABUF_OUTPUT=0`
 to disable it.
-
-The headless fallback needs Mesa's EGL. `comma-deps-raylib` bundles it from
-6.0.0.1.post101, but older AGNOS venvs ship a wheel without it, and the Qualcomm
-system EGL then fails with `EGL_BAD_ALLOC`. When the installed raylib has no
-`install/lib/libEGL.so.1`, `cluster_autorun` downloads the pinned post101
-aarch64 wheel once (sha256 verified, ~22 MB, needs network), extracts the Mesa
-libs to `/data/cluster_mesa/raylib-6.0.0.1.post101` (override with
-`CLUSTER_MESA_DIR`), and prepends that directory to the HUD's
-`LD_LIBRARY_PATH`. Failed downloads are retried every 5 minutes. The cache in
-`/data` survives reinstalls.
 
 The renderer loads the fonts bundled in `selfdrive/sp/cluster/assets/fonts`
 (OrbitronBlack, then GeistMono-Light, then KaiGenGothicKR-Bold), falling back to
