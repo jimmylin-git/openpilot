@@ -182,7 +182,10 @@ Manager autostart omits `--fps` by default so live launches follow
 runs exit and let `cluster_autorun` relaunch when the setting changes the
 encoder FPS because the V4L2 encoder timing, SPS timing, and automatic bitrate
 are fixed at startup. Set `CLUSTER_AUTORUN_FPS` only for fixed test overrides;
-`0` means uncapped.
+`0` means uncapped. Autorun launches at 10 FPS (`CLUSTER_FPS` overrides); in live
+input the HUD drops to 5 FPS while `ChestnutLoading`/`ChestnutActive` is set,
+because the eGPU shares the USB bus. Only the render interval changes, so the
+H264 encoder is not restarted.
 `ClusterHudDebug` controls the autorun output gate: `0` starts external HUD
 rendering only while openpilot is onroad, and `1`, `2`, and `3` keep the
 always-on debug behavior after power-up. In live input only, `2` also keeps the

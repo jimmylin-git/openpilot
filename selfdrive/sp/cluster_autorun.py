@@ -150,22 +150,19 @@ def cluster_env(backend: str, mesa_dir: Path | None = None) -> dict[str, str]:
     return env
 
 
-def cluster_fps(backend: str) -> str:
-    override = os.environ.get("CLUSTER_FPS", "").strip()
-    if override:
-        return override
-    # llvmpipe (headless) cannot keep up with more than a few FPS; the Adreno path holds ~10.
-    return "5" if backend == "headless" else "10"
+def cluster_fps() -> str:
+    # main.py drops to 5 FPS on its own while the Chestnut eGPU is loading/active.
+    return os.environ.get("CLUSTER_FPS", "").strip() or "10"
 
 
-def cluster_cmd(backend: str) -> list[str]:
+def cluster_cmd() -> list[str]:
     return [
         sys.executable,
         str(CLUSTER_DIR / "main.py"),
         "--input",
         "live",
         "--fps",
-        cluster_fps(backend),
+        cluster_fps(),
         "--usb-codec",
         "h264",
         "--usb-h264-backend",
@@ -223,7 +220,7 @@ def main() -> None:
                 mesa_next_try = time.monotonic() + MESA_RETRY_S
             env = cluster_env(backend, mesa_dir)
         output = log_file if log_file is not None else subprocess.DEVNULL
-        child = subprocess.Popen(cluster_cmd(backend), env=env, stdout=output, stderr=subprocess.STDOUT)
+        child = subprocess.Popen(cluster_cmd(), env=env, stdout=output, stderr=subprocess.STDOUT)
         try:
             returncode = child.wait()
         except KeyboardInterrupt:

@@ -82,6 +82,8 @@ H264_AUTO_BITRATE_MAX_BPS = 7_000_000
 DEFAULT_H264_DIMENSION_ALIGN = 1
 THEME_PARAM_POLL_SECONDS = 1.0
 FPS_PARAM_POLL_SECONDS = 1.0
+CHESTNUT_POLL_SECONDS = 1.0
+CHESTNUT_FPS = 5.0
 BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
 # Not literal 0: on this TURZX hardware, sending a brightness of exactly 0
 # while the process keeps running (as opposed to the brightness-off command
@@ -209,6 +211,25 @@ class ClusterLiveFpsParamReader:
             return normalize_cluster_live_fps(read_int_param(self._params, CLUSTER_LIVE_FPS_PARAM))
         except Exception:
             return 0.0
+
+
+class ChestnutActiveParamReader:
+    def __init__(self) -> None:
+        self._params = None
+        try:
+            from openpilot.common.params import Params
+
+            self._params = Params()
+        except Exception:
+            pass
+
+    def read(self) -> bool:
+        if self._params is None:
+            return False
+        try:
+            return self._params.get_bool("ChestnutLoading") or self._params.get_bool("ChestnutActive")
+        except Exception:
+            return False
 
 
 class ClusterHudBrightnessParamReader:
@@ -720,6 +741,14 @@ def run_demo(
     report_frames = 0
     display_actual_fps: float | None = None
     frame_interval = 1.0 / target_fps if target_fps > 0 else 0.0
+    # The Chestnut eGPU shares the USB bus with the TURZX screen; halve the HUD
+    # rate while it is loading/active. Only the render interval changes, so the
+    # H264 encoder keeps running without a restart.
+    chestnut_reader = ChestnutActiveParamReader() if input_mode == "live" else None
+    chestnut_active = chestnut_reader.read() if chestnut_reader is not None else False
+    next_chestnut_read = start_time + CHESTNUT_POLL_SECONDS
+    if chestnut_active:
+        print(f"Chestnut active: limiting cluster HUD to {CHESTNUT_FPS:.0f} Hz", flush=True)
     h264_test_pattern_rgba: bytearray | None = None
     h264_test_pattern_nv12: bytearray | None = None
     h264_render_nv12_buffer: bytearray | None = None
@@ -971,6 +1000,13 @@ def run_demo(
                         if usb_display.set_display_fps(next_display_fps):
                             print(f"TURZX display FPS updated: {next_display_fps}", flush=True)
                 next_fps_param_read = now + FPS_PARAM_POLL_SECONDS
+            if chestnut_reader is not None and now >= next_chestnut_read:
+                next_chestnut_active = chestnut_reader.read()
+                if next_chestnut_active != chestnut_active:
+                    chestnut_active = next_chestnut_active
+                    state_text = f"limiting cluster HUD to {CHESTNUT_FPS:.0f} Hz" if chestnut_active else "restoring cluster HUD rate"
+                    print(f"Chestnut {'active' if chestnut_active else 'inactive'}: {state_text}", flush=True)
+                next_chestnut_read = now + CHESTNUT_POLL_SECONDS
             if duration_seconds is not None and now - start_time >= duration_seconds:
                 break
 
@@ -1241,9 +1277,10 @@ def run_demo(
             report_frames += 1
             profile.add_elapsed("main.frame_active", frame_start_time)
 
-            if frame_interval > 0.0:
+            effective_frame_interval = max(frame_interval, 1.0 / CHESTNUT_FPS) if chestnut_active else frame_interval
+            if effective_frame_interval > 0.0:
                 elapsed = time.perf_counter() - frame_start_time
-                remaining = frame_interval - elapsed
+                remaining = effective_frame_interval - elapsed
                 if remaining > 0.0:
                     profile_stage = time.perf_counter()
                     time.sleep(remaining)
