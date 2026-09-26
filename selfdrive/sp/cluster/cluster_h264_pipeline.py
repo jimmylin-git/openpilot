@@ -1018,7 +1018,7 @@ class H264UsbPipeline:
         except AttributeError as exc:
             raise RuntimeError(
                 "native H264 library does not expose NV12 input; rebuild "
-                "system/loggerd/libcluster_h264_encoder_bridge.so"
+                "openpilot/system/loggerd/libcluster_h264_encoder_bridge.so"
             ) from exc
 
         byte_count = self._native_input_bytesused
@@ -1053,7 +1053,7 @@ class H264UsbPipeline:
             except AttributeError as exc:
                 raise RuntimeError(
                     "native H264 library does not expose active NV12 input; rebuild "
-                    "system/loggerd/libcluster_h264_encoder_bridge.so"
+                    "openpilot/system/loggerd/libcluster_h264_encoder_bridge.so"
                 ) from exc
             encode_size = active_count
             sample_name = "usb_h264.native_encode_nv12_active"
@@ -1489,7 +1489,7 @@ class H264UsbPipeline:
                 return str(candidate)
         raise RuntimeError(
             f"native H264 encoder library not found: {self.library_path}. "
-            "Build system/loggerd/libcluster_h264_encoder_bridge.so first."
+            "Build openpilot/system/loggerd/libcluster_h264_encoder_bridge.so first."
         )
 
     def _ffmpeg_executable(self) -> str:
@@ -1728,7 +1728,7 @@ class H264UsbPipeline:
             if self.slice_max_bytes and self.debug:
                 print(
                     "Warning: native H264 library does not expose slice max-byte control; rebuild "
-                    "system/loggerd/libcluster_h264_encoder_bridge.so",
+                    "openpilot/system/loggerd/libcluster_h264_encoder_bridge.so",
                     flush=True,
                 )
             return
@@ -1742,7 +1742,7 @@ class H264UsbPipeline:
             if self.rate_control != DEFAULT_H264_RATE_CONTROL:
                 raise RuntimeError(
                     "native H264 library does not expose rate-control setup; rebuild "
-                    "system/loggerd/libcluster_h264_encoder_bridge.so"
+                    "openpilot/system/loggerd/libcluster_h264_encoder_bridge.so"
                 )
             return
         if set_rate_control(handle, NATIVE_RATE_CONTROLS[self.rate_control]) != 0:
@@ -1755,7 +1755,7 @@ class H264UsbPipeline:
             if self.realtime_priority:
                 raise RuntimeError(
                     "native H264 library does not expose realtime-priority setup; rebuild "
-                    "system/loggerd/libcluster_h264_encoder_bridge.so"
+                    "openpilot/system/loggerd/libcluster_h264_encoder_bridge.so"
                 )
             return
         if set_realtime_priority(handle, 1 if self.realtime_priority else 0) != 0:

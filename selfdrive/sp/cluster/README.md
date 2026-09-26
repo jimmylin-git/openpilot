@@ -65,7 +65,7 @@ ffmpeg/libx264 path remains available as a known-good comparison path. Build
 the native library before hardware testing:
 
 ```bash
-scons system/loggerd/libcluster_h264_encoder_bridge.so
+scons openpilot/system/loggerd/libcluster_h264_encoder_bridge.so
 ```
 
 Use `--usb-h264-backend ffmpeg --usb-h264-ffmpeg-encoder libx264` to compare
@@ -510,11 +510,11 @@ only when testing a panel/driver combination known to reply after each frame.
 Manager autorun uses H264 at 5 FPS, trying the native encoder first and
 falling back to ffmpeg when the native bridge or V4L2 encoder is unavailable.
 The normal comma installation build and prebuilt release build both compile
-`system/loggerd/libcluster_h264_encoder_bridge.so` automatically. To rebuild
-only that target during development, run
-`scons system/loggerd/libcluster_h264_encoder_bridge.so`. When Chestnut is
-loading or active, H264 USB chunks are capped at 32 KiB with a 2 ms yield
-between chunks so its transfers can use the shared bus. The HUD and tinygrad
-Chestnut USB transfers use the same process-shared lock at
+`openpilot/system/loggerd/libcluster_h264_encoder_bridge.so` automatically.
+To rebuild only that target during development, run
+`scons openpilot/system/loggerd/libcluster_h264_encoder_bridge.so`. When
+Chestnut is loading or active, H264 USB chunks are capped at 32 KiB with a
+2 ms yield between chunks so its transfers can use the shared bus. The HUD
+and tinygrad Chestnut USB transfers use the same process-shared lock at
 `/tmp/carrot_usbgpu_bus.lock`; Chestnut transfers retain their asynchronous
 double-buffered upload path.
