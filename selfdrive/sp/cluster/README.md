@@ -498,6 +498,16 @@ renders through EGL surfaceless/llvmpipe (CPU). Set
 `CLUSTER_RAYLIB_BACKEND=comma` (or `desktop`) in the manager environment to
 override.
 
+The headless backend needs Mesa's EGL. `comma-deps-raylib` bundles it from
+6.0.0.1.post101, but older AGNOS venvs ship a wheel without it, and the Qualcomm
+system EGL then fails with `EGL_BAD_ALLOC`. When the installed raylib has no
+`install/lib/libEGL.so.1`, `cluster_autorun` downloads the pinned post101
+aarch64 wheel once (sha256 verified, ~22 MB, needs network), extracts the Mesa
+libs to `/data/cluster_mesa/raylib-6.0.0.1.post101` (override with
+`CLUSTER_MESA_DIR`), and prepends that directory to the HUD's
+`LD_LIBRARY_PATH`. Failed downloads are retried every 5 minutes. The cache in
+`/data` survives reinstalls.
+
 The renderer loads the fonts bundled in `selfdrive/sp/cluster/assets/fonts`
 (OrbitronBlack, then GeistMono-Light, then KaiGenGothicKR-Bold), falling back to
 the same names under `openpilot/selfdrive/assets/fonts`, then
