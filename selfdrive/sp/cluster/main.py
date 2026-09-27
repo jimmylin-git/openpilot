@@ -94,7 +94,7 @@ BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
 # and crashes+relaunches the whole HUD process a few seconds after the
 # vehicle is turned off. A very low but nonzero value still reads as
 # effectively black without touching that path.
-OFFROAD_USB_BRIGHTNESS = 5
+OFFROAD_USB_BRIGHTNESS = 3
 # The offroad dim-to-black check is only trusted once the process has been
 # running this long (avoids the boot-time window where vehicle_started()
 # has not yet settled and could read False before the first onroad
