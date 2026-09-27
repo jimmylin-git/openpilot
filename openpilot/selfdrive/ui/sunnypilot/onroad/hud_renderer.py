@@ -55,7 +55,7 @@ class HudRendererSP(HudRenderer):
 
     super()._update_state()
     self.road_name_renderer.update()
-    self.speed_limit_renderer.update()
+    # self.speed_limit_renderer.update()  # hidden, source data not working
     self.smart_cruise_control_renderer.update()
     self.turn_signal_controller.update()
     self.circular_alerts_renderer.update()
@@ -139,7 +139,7 @@ class HudRendererSP(HudRenderer):
 
     self.developer_ui.render(rect)
     self.road_name_renderer.render(rect)
-    self.speed_limit_renderer.render(rect)
+    # self.speed_limit_renderer.render(rect)  # hidden, source data not working
     self.smart_cruise_control_renderer.render(rect)
     self.turn_signal_controller.render(rect)
     self.circular_alerts_renderer.render(rect)
