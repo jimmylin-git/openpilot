@@ -184,8 +184,10 @@ encoder FPS because the V4L2 encoder timing, SPS timing, and automatic bitrate
 are fixed at startup. Set `CLUSTER_AUTORUN_FPS` only for fixed test overrides;
 `0` means uncapped. Autorun launches at 8 FPS (`CLUSTER_FPS` overrides); in live
 input the HUD drops to 5 FPS while `ChestnutLoading`/`ChestnutActive` is set,
-because the eGPU shares the USB bus. Only the render interval changes, so the
-H264 encoder is not restarted. The top status row (set speed, follow gap, LFA)
+because the eGPU shares the USB bus. Offroad, the 3D scene is hidden and the
+HUD render rate is limited to 1 FPS; onroad, the configured render rate is
+restored. These are render interval changes, so the H264 encoder is not
+restarted. The top status row (set speed, follow gap, LFA)
 also shows the mici Chestnut icon right of LFA at the same spacing; the row is
 shifted left half a slot so it stays centered between the turn signals. Icon (`icons_mici/chestnut*.png`): pulsing white while loading, green
 when active, orange when the eGPU model failed, and greyed out when no
@@ -236,16 +238,17 @@ Unset keys keep the built-in defaults.
 When `--usb-brightness` is omitted, USB launches follow `ClusterHudBrightness`:
 `0` auto follows the wide-road camera exposure after samples are available,
 using the same ambient-light estimate as the main UI and smoothing changes over
-time. The resolved brightness is limited to `5..55` and then scaled to 70%
-(so auto tops out at 38); `1` through `100` are
-fixed brightness percentages, also limited to `5..55`.
-After the boot grace period, live USB output dims to `5` while offroad.
+time. The resolved brightness is limited to `3..30` and then scaled to 70%
+(so auto tops out at 21); `1` through `100` are
+fixed brightness percentages, also limited to `3..30`.
+After the boot grace period, live USB output dims to `3` while offroad.
 Brightness commands use no-ACK command `14` during USB initialization and when
 the resolved brightness changes.
 
 The launcher defaults to `--input live`, subscribes to openpilot cereal services,
 and renders live `carState`, `modelV2`, `radarState`, `radarTracks`,
-`controlsState`, `selfdriveState`, `carControl`, and `deviceState`. Front radar
+`controlsState`, `selfdriveState`, `carControl`, `deviceState`, and
+`pandaStates`. Front radar
 tracks come from `radarTracks` (named `liveTracks` on older cereal trees; the
 old `liveDelay`/`liveParameters`/`liveTorqueParameters` names map to
 `lateralDelay`/`vehicleParameters`/`lateralTorqueParameters`); the cluster does not directly parse A-CAN CAN-FD

@@ -522,6 +522,7 @@ class ClusterUiRenderer:
         self._theme = current_cluster_theme(self.theme_mode)
         self.hidden = False
         self._window_open = False
+        self._world_enabled = True
         self._font = None
         self._owns_font = False
         self._capture_target = None
@@ -591,6 +592,9 @@ class ClusterUiRenderer:
 
     def set_screen_mode(self, screen_mode: int) -> None:
         self.screen_mode = normalize_cluster_screen_mode(screen_mode)
+
+    def set_world_enabled(self, enabled: bool) -> None:
+        self._world_enabled = bool(enabled)
 
     def set_target_fps(self, target_fps: int) -> None:
         self.target_fps = max(0, int(target_fps))
@@ -766,7 +770,7 @@ class ClusterUiRenderer:
         if signal_lights is None:
             signal_lights = self._turn_signal_lights(state)
         profile_stage = self._profile_start()
-        if self.screen_mode == CLUSTER_SCREEN_MODE_DEBUG_GRAPH:
+        if self.screen_mode == CLUSTER_SCREEN_MODE_DEBUG_GRAPH or not self._world_enabled:
             self._clear_world()
         else:
             self._render_world(state, signal_lights)

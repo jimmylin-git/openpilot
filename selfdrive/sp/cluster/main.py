@@ -95,6 +95,7 @@ BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
 # vehicle is turned off. A very low but nonzero value still reads as
 # effectively black without touching that path.
 OFFROAD_USB_BRIGHTNESS = 3
+OFFROAD_RENDER_FPS = 1.0
 # The offroad dim-to-black check is only trusted once the process has been
 # running this long (avoids the boot-time window where vehicle_started()
 # has not yet settled and could read False before the first onroad
@@ -743,7 +744,9 @@ def run_demo(
     next_hud_mode_param_read = start_time
     report_frames = 0
     display_actual_fps: float | None = None
-    frame_interval = 1.0 / target_fps if target_fps > 0 else 0.0
+    is_offroad = False
+    render_fps = target_fps
+    frame_interval = 1.0 / render_fps if render_fps > 0 else 0.0
     # The Chestnut eGPU shares the USB bus with the TURZX screen; halve the HUD
     # rate while it is loading/active. Only the render interval changes, so the
     # H264 encoder keeps running without a restart.
@@ -754,9 +757,9 @@ def run_demo(
         print(f"Chestnut active: limiting cluster HUD to {CHESTNUT_FPS:.0f} Hz", flush=True)
 
     def effective_blink_fps() -> float:
-        if chestnut_active and (target_fps <= 0 or target_fps > CHESTNUT_FPS):
+        if chestnut_active and (render_fps <= 0 or render_fps > CHESTNUT_FPS):
             return CHESTNUT_FPS
-        return max(0.0, target_fps)
+        return max(0.0, render_fps)
 
     renderer.blink_fps = effective_blink_fps()
     h264_test_pattern_rgba: bytearray | None = None
@@ -996,8 +999,9 @@ def run_demo(
                         )
                         break
                     target_fps = next_target_fps
-                    frame_interval = 1.0 / target_fps if target_fps > 0 else 0.0
-                    renderer.set_target_fps(max(0, int(round(target_fps))))
+                    render_fps = OFFROAD_RENDER_FPS if is_offroad else target_fps
+                    frame_interval = 1.0 / render_fps if render_fps > 0 else 0.0
+                    renderer.set_target_fps(max(0, int(round(render_fps))))
                     renderer.blink_fps = effective_blink_fps()
                     fps_text = "uncapped" if target_fps == 0 else f"{target_fps:.1f} Hz"
                     print(f"{CLUSTER_LIVE_FPS_PARAM} updated: {fps_text}", flush=True)
@@ -1033,9 +1037,25 @@ def run_demo(
                 )
             source_status: str | None = None
             center_clock_text: str | None = None
+            vehicle_started: bool | None = None
             if live_source is not None:
                 profile_stage = time.perf_counter()
                 state = live_source.update()
+                vehicle_started = live_source.vehicle_started()
+                next_is_offroad = vehicle_started is False
+                if next_is_offroad != is_offroad:
+                    is_offroad = next_is_offroad
+                    render_fps = OFFROAD_RENDER_FPS if is_offroad else target_fps
+                    frame_interval = 1.0 / render_fps if render_fps > 0 else 0.0
+                    renderer.set_target_fps(max(0, int(round(render_fps))))
+                    renderer.blink_fps = effective_blink_fps()
+                    print(
+                        f"Cluster {'offroad' if is_offroad else 'onroad'}: "
+                        f"{'hiding 3D scene and limiting HUD to' if is_offroad else 'restoring HUD to'} "
+                        f"{render_fps:.1f} Hz",
+                        flush=True,
+                    )
+                renderer.set_world_enabled(not is_offroad)
                 center_clock_text = time.strftime("%H:%M:%S")
                 profile.add_samples(live_source.profile_samples())
                 profile.add_elapsed("source.live_update", profile_stage)
@@ -1109,7 +1129,6 @@ def run_demo(
                 # yet" (e.g. right after startup, before the first read
                 # settles) still falls back to the dimmer MIN_USB_BRIGHTNESS
                 # instead of full black.
-                vehicle_started = live_source.vehicle_started() if live_source is not None else None
                 past_boot_grace = brightness_now - start_time >= OFFROAD_DIM_BOOT_GRACE_SECONDS
                 if past_boot_grace and vehicle_started is False:
                     next_usb_brightness = OFFROAD_USB_BRIGHTNESS
