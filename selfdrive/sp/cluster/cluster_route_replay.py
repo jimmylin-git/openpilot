@@ -903,6 +903,13 @@ class RouteLogParser:
     def __init__(self) -> None:
         self.speed_limit_kph: int | None = None
         self.speed_limit_source: str | None = None
+        # Populated from longitudinalPlanSP.speedLimit.resolver, which sunnypilot's
+        # plannerd computes every cycle according to the user's SpeedLimitPolicy
+        # (car camera / OSM map data / combined), independent of the Speed Limit
+        # Assist Mode toggle. Preferred over the legacy carState.speedLimit lookup
+        # below, which stock carState never actually populates.
+        self._resolver_speed_limit_kph: int | None = None
+        self._resolver_speed_limit_source: str | None = None
         self.cruise_kph: int | None = None
         self.cruise_gap: int | None = None
         self.lfa_active: bool | None = None
@@ -1035,6 +1042,8 @@ class RouteLogParser:
                 self._update_lateral_plan(event.lateralPlan)
             elif event_type == "longitudinalPlan":
                 self._update_longitudinal_plan(event.longitudinalPlan)
+            elif event_type == "longitudinalPlanSP":
+                self._update_longitudinal_plan_sp(event.longitudinalPlanSP)
             elif event_type == "controlsState":
                 self._update_controls_state(event.controlsState)
             elif event_type == "selfdriveState":
@@ -1077,13 +1086,17 @@ class RouteLogParser:
             self.cruise_gap = car_cruise_gap
         cruise_gap = car_cruise_gap if car_cruise_gap is not None else self.cruise_gap
 
-        car_speed_limit_kph = self._speed_limit_kph_from_car_state(car_state)
-        if car_speed_limit_kph is not None:
-            self.speed_limit_kph = car_speed_limit_kph
-            self.speed_limit_source = "v"
+        if self._resolver_speed_limit_kph is not None:
+            self.speed_limit_kph = self._resolver_speed_limit_kph
+            self.speed_limit_source = self._resolver_speed_limit_source or "v"
         else:
-            self.speed_limit_kph = None
-            self.speed_limit_source = None
+            car_speed_limit_kph = self._speed_limit_kph_from_car_state(car_state)
+            if car_speed_limit_kph is not None:
+                self.speed_limit_kph = car_speed_limit_kph
+                self.speed_limit_source = "v"
+            else:
+                self.speed_limit_kph = None
+                self.speed_limit_source = None
 
         self._update_lane_styles_from_car_state(car_state)
         lane_values = self._lane_values()
@@ -1380,6 +1393,20 @@ class RouteLogParser:
         jerk_target = safe_optional_float(longitudinal_plan, "jTargetNow")
         if jerk_target is not None and abs(jerk_target) <= 12.0:
             self.longitudinal_jerk_target_mps3 = jerk_target
+
+    def _update_longitudinal_plan_sp(self, longitudinal_plan_sp: Any) -> None:
+        resolver = safe_get(safe_get(longitudinal_plan_sp, "speedLimit"), "resolver")
+        if resolver is None or not bool(safe_get(resolver, "speedLimitValid", False)):
+            self._resolver_speed_limit_kph = None
+            self._resolver_speed_limit_source = None
+            return
+        speed_limit_mps = safe_float(resolver, "speedLimit", 0.0)
+        if speed_limit_mps <= 0.0:
+            self._resolver_speed_limit_kph = None
+            self._resolver_speed_limit_source = None
+            return
+        self._resolver_speed_limit_kph = int(round(speed_limit_mps * 3.6))
+        self._resolver_speed_limit_source = enum_text(safe_get(resolver, "source", "")) or None
 
     def _update_camera_odometry(self, camera_odometry: Any, valid: bool) -> None:
         self.camera_odometry_valid = valid

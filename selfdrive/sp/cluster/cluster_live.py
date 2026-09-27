@@ -48,6 +48,7 @@ LIVE_SERVICES_BASE = (
     "radarState",
     "radarTracks",
     "longitudinalPlan",
+    "longitudinalPlanSP",
     #"lateralPlan",
     "controlsState",
     "selfdriveState",
@@ -1062,6 +1063,8 @@ class OpenpilotLiveSource:
             self.parser._update_lateral_plan(data)
         elif service == "longitudinalPlan":
             self.parser._update_longitudinal_plan(data)
+        elif service == "longitudinalPlanSP":
+            self.parser._update_longitudinal_plan_sp(data)
         elif service == "controlsState":
             self.parser._update_controls_state(data)
         elif service == "selfdriveState":
