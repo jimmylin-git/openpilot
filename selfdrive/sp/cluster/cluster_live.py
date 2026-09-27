@@ -54,6 +54,7 @@ LIVE_SERVICES_BASE = (
     "selfdriveState",
     "carControl",
     "deviceState",
+    "pandaStates",
     "cameraOdometry",
     "drivingModelData",
     "lateralDelay",
@@ -158,6 +159,11 @@ class OpenpilotLiveSource:
         self.timeout_ms = max(0, int(timeout_ms))
         self.last_state: ClusterUiState | None = None
         self._last_car_state_update_t: float | None = None
+        # Mirrors ui_state.py's ignition tracking: read directly from pandaStates
+        # rather than only trusting deviceState.started, so cluster's offroad dim
+        # matches the same onroad/offroad signal the main openpilot UI uses.
+        self._ignition = False
+        self._panda_type_known = False
         self._smoothed_state: ClusterUiState | None = None
         self._smoothed_state_t: float | None = None
         self._vehicle_missing_since: dict[tuple[str, str], float] = {}
@@ -243,6 +249,8 @@ class OpenpilotLiveSource:
         self.sm.update(self.timeout_ms)
         self._profile_add("source.live.submaster_update", profile_stage)
 
+        self._update_ignition()
+
         profile_stage = self._profile_start()
         self._update_current_speed()
         self._profile_add("source.live.current_speed", profile_stage)
@@ -288,24 +296,57 @@ class OpenpilotLiveSource:
         last_update_t = self._last_car_state_update_t
         return last_update_t is not None and time.monotonic() - last_update_t <= LIVE_DATA_STALE_SECONDS
 
+    def _update_ignition(self) -> None:
+        """Track panda ignition the same way openpilot's own ui_state.py does.
+
+        This is read directly from pandaStates (not derived from carState/CAN
+        traffic, which can keep flowing for a while after key-off on some
+        vehicles), so it reflects hardware ignition immediately regardless of
+        whether thermald's deviceState.started has caught up yet.
+        """
+        if self._service_updated("pandaStates"):
+            panda_states = self.sm["pandaStates"]
+            if len(panda_states) > 0:
+                panda_type = panda_states[0].pandaType
+                unknown_type = self.log is not None and panda_type == self.log.PandaState.PandaType.unknown
+                self._panda_type_known = not unknown_type
+                if self._panda_type_known:
+                    self._ignition = any(state.ignitionLine or state.ignitionCan for state in panda_states)
+        elif not self._service_alive("pandaStates"):
+            self._panda_type_known = False
+
     def vehicle_started(self) -> bool | None:
         """Return the current onroad state, or None until it can be determined.
 
-        selfdriveState is only published while openpilot is actually running
-        onroad, so relying on it alone means this always reports None while
-        offroad (its service is dead), which prevented the offroad screen
-        dimming from ever engaging. deviceState.started is published
-        continuously by thermald in both onroad and offroad states, so prefer
-        it and only fall back to selfdriveState if deviceState is unavailable.
+        Mirrors ui_state.py's `deviceState.started and ignition`: the main
+        openpilot UI switches between its onroad and offroad screens using
+        that exact combination, not deviceState.started alone. Trusting only
+        deviceState.started let a stale/delayed thermald update (or the
+        selfdriveState fallback below, whose service is dead offroad) leave
+        vehicle_started() reporting True/None after the car had actually gone
+        offroad, so the cluster screen never dimmed. ANDing in a directly-read
+        ignition signal from pandaStates keeps this in sync with the same
+        onroad/offroad transition the main UI uses.
         """
+        device_started: bool | None = None
         if self._service_alive("deviceState") and self._service_valid("deviceState"):
             value = safe_get(self.sm["deviceState"], "started")
             if value is not None:
-                return bool(value)
-        if not self._service_alive("selfdriveState") or not self._service_valid("selfdriveState"):
+                device_started = bool(value)
+        if device_started is None:
+            if not self._service_alive("selfdriveState") or not self._service_valid("selfdriveState"):
+                return None
+            value = safe_get(self.sm["selfdriveState"], "started")
+            device_started = bool(value) if value is not None else None
+        if device_started is None:
             return None
-        value = safe_get(self.sm["selfdriveState"], "started")
-        return bool(value) if value is not None else None
+        if not device_started:
+            return False
+        if self._service_alive("pandaStates") and self._panda_type_known:
+            return self._ignition
+        # No usable ignition signal yet (e.g. right at boot, before the first
+        # pandaStates message); fall back to trusting deviceState alone.
+        return device_started
 
     def _smooth_scene_state(self, state: ClusterUiState) -> ClusterUiState:
         now = time.monotonic()
