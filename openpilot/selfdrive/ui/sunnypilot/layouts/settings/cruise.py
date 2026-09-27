@@ -98,6 +98,7 @@ class CruiseLayout(Widget):
       self.custom_acc_toggle,
       self.custom_acc_short_increment,
       self.custom_acc_long_increment,
+      self.sla_settings_button,
     ]
     return items
 
