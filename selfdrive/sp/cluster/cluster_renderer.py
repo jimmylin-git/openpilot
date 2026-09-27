@@ -2971,17 +2971,11 @@ class ClusterUiRenderer:
         return theme.muted
 
     def _draw_drive_status(self, state: ClusterUiState) -> None:
-        theme = self._current_theme()
         gear_text = (state.gear_text or "").strip().upper()
-        if (
-            not state.debug_ui_visible
-            and not gear_text
-            and state.cruise_gap is None
-            and not self._cruise_set_visible(state)
-            and state.lfa_active is None
-        ):
-            return
-
+        # Always draw this row (gear / cruise set speed / follow gap / LFA), even
+        # offroad when every field is None. Each sub-draw already falls back to a
+        # muted/gray "no data" look (gear "-", cruise set "---", empty follow gap
+        # bars, muted LFA icon) instead of disappearing entirely.
         bottom_y = self._drive_status_bottom_y(state)
         gear_display = gear_text[:2] if gear_text else "-"
         self._draw_text(
@@ -3014,8 +3008,6 @@ class ClusterUiRenderer:
         return TURN_SIGNAL_CENTER_Y - SPEED_LIMIT_SIGN_RADIUS + row_h
 
     def _draw_follow_gap_lane_icon(self, state: ClusterUiState, bottom_y: float) -> None:
-        if state.cruise_gap is None:
-            return
         theme = self._current_theme()
         active = bool(state.cruise_display_state == "engaged")
         tint = WHITE if active else theme.muted
@@ -3044,7 +3036,7 @@ class ClusterUiRenderer:
         content_bottom_y = icon_top_y + icon_size * FOLLOW_GAP_LANE_CONTENT_BOTTOM_FRAC
         content_h = max(1.0, content_bottom_y - content_top_y)
 
-        gap_count = int(clamp(float(state.cruise_gap), 1.0, float(FOLLOW_STATUS_GAP_BARS)))
+        gap_count = 0 if state.cruise_gap is None else int(clamp(float(state.cruise_gap), 1.0, float(FOLLOW_STATUS_GAP_BARS)))
         bars_total_h = FOLLOW_GAP_BAR_H + FOLLOW_GAP_BAR_STEP_Y * (FOLLOW_STATUS_GAP_BARS - 1)
         top_y = icon_center_y - bars_total_h * 0.5
         for index in range(FOLLOW_STATUS_GAP_BARS):
