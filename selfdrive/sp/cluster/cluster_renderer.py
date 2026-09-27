@@ -154,22 +154,9 @@ TOP_STATUS_DETAIL_CENTER_Y = (
 # "1", letting the block sit closer to the accel bar than a wider gauge would.
 SPEED_VALUE_CENTER_X = 300
 SPEED_VALUE_CENTER_Y = 350
-# Centered directly above the speed digits, in the gap between the compact MEM/CPU
-# readout (TOP_SYSTEM_METRIC_Y=100 + LINE_GAP=30, ends ~142) and the top of the speed
-# digit block (SPEED_VALUE_CENTER_Y=350 minus half the ~165px digit height, ~267).
-SPEED_LIMIT_SIGN_CENTER_X = SPEED_VALUE_CENTER_X
-SPEED_LIMIT_SIGN_CENTER_Y = 205
+# Speed limit sign is no longer drawn (source data unreliable), but this radius is
+# still used by _drive_status_bottom_y() to anchor the row below the turn signals.
 SPEED_LIMIT_SIGN_RADIUS = 56.0
-SPEED_LIMIT_SOURCE_LABELS = {
-    "vehicle": "v",
-    "car": "v",
-    "v": "v",
-    "model": "m",
-    "m": "m",
-    "vision": "vis",
-    "vis": "vis",
-    "sim": "sim",
-}
 SYSTEM_PANEL_X = 1416
 SYSTEM_PANEL_Y = 118
 SYSTEM_PANEL_W = 476
@@ -451,15 +438,6 @@ def vehicle_source_is_front_radar(source: str) -> bool:
 
 def vehicle_source_is_radar_track(source: str) -> bool:
     return source in ("radarPoint", "liveTracks") or "+radar:" in source
-
-
-def speed_limit_source_label(source: str | None) -> str:
-    if source is None:
-        return ""
-    normalized = source.strip().lower()
-    if not normalized:
-        return ""
-    return SPEED_LIMIT_SOURCE_LABELS.get(normalized, normalized[:3])
 
 
 def world_label_scale(distance_m: float) -> float:
@@ -3029,10 +3007,10 @@ class ClusterUiRenderer:
             speed_h,
         )
         # This row (cruise set speed / follow gap / LFA / Chestnut) lives at the same
-        # height as the turn signals; it used to reuse SPEED_LIMIT_SIGN_CENTER_Y as its
-        # anchor back when the speed limit sign also sat on that row, but the sign has
-        # since moved above the speed digits, so anchor on TURN_SIGNAL_CENTER_Y directly
-        # to keep this row's layout unchanged.
+        # height as the turn signals; it used to reuse the speed limit sign's center Y
+        # as its anchor back when the sign was drawn on that row, but the sign has since
+        # moved (then been removed), so anchor on TURN_SIGNAL_CENTER_Y directly to keep
+        # this row's layout unchanged.
         return TURN_SIGNAL_CENTER_Y - SPEED_LIMIT_SIGN_RADIUS + row_h
 
     def _draw_follow_gap_lane_icon(self, state: ClusterUiState, bottom_y: float) -> None:
@@ -3211,30 +3189,6 @@ class ClusterUiRenderer:
         _, unit_height = self._measure_text("km/h", unit_font_size, unit_spacing)
         unit_center_y = SPEED_VALUE_CENTER_Y + digit_height * 0.5 + 5 + unit_height * 0.5
         self._draw_text("km/h", SPEED_VALUE_CENTER_X, unit_center_y, unit_font_size, theme.muted, anchor="center")
-
-        if state.speed_limit_kph is not None:
-            center = rl.Vector2(SPEED_LIMIT_SIGN_CENTER_X, SPEED_LIMIT_SIGN_CENTER_Y)
-            rl.draw_circle_v(center, SPEED_LIMIT_SIGN_RADIUS, rl_color(RED))
-            rl.draw_circle_v(center, 47, rl_color(WHITE))
-            limit_text = "--" if state.speed_limit_kph is None else str(state.speed_limit_kph)
-            self._draw_text(
-                limit_text,
-                SPEED_LIMIT_SIGN_CENTER_X,
-                SPEED_LIMIT_SIGN_CENTER_Y - 12,
-                42,
-                TEXT,
-                anchor="center",
-            )
-            source_label = speed_limit_source_label(state.speed_limit_source) if state.speed_limit_kph is not None else ""
-            if source_label:
-                self._draw_text(
-                    source_label,
-                    SPEED_LIMIT_SIGN_CENTER_X,
-                    SPEED_LIMIT_SIGN_CENTER_Y + 31,
-                    17,
-                    TEXT,
-                    anchor="center",
-                )
 
     def _draw_fixed_width_speed_digits(
         self,
