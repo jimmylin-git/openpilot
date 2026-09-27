@@ -154,8 +154,11 @@ TOP_STATUS_DETAIL_CENTER_Y = (
 # "1", letting the block sit closer to the accel bar than a wider gauge would.
 SPEED_VALUE_CENTER_X = 300
 SPEED_VALUE_CENTER_Y = 350
-SPEED_LIMIT_SIGN_CENTER_X = 460
-SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
+# Centered directly above the speed digits, in the gap between the compact MEM/CPU
+# readout (TOP_SYSTEM_METRIC_Y=100 + LINE_GAP=30, ends ~142) and the top of the speed
+# digit block (SPEED_VALUE_CENTER_Y=350 minus half the ~165px digit height, ~267).
+SPEED_LIMIT_SIGN_CENTER_X = SPEED_VALUE_CENTER_X
+SPEED_LIMIT_SIGN_CENTER_Y = 205
 SPEED_LIMIT_SIGN_RADIUS = 56.0
 SPEED_LIMIT_SOURCE_LABELS = {
     "vehicle": "v",
@@ -3025,7 +3028,12 @@ class ClusterUiRenderer:
             FOLLOW_GAP_LANE_ICON_SIZE,
             speed_h,
         )
-        return SPEED_LIMIT_SIGN_CENTER_Y - SPEED_LIMIT_SIGN_RADIUS + row_h
+        # This row (cruise set speed / follow gap / LFA / Chestnut) lives at the same
+        # height as the turn signals; it used to reuse SPEED_LIMIT_SIGN_CENTER_Y as its
+        # anchor back when the speed limit sign also sat on that row, but the sign has
+        # since moved above the speed digits, so anchor on TURN_SIGNAL_CENTER_Y directly
+        # to keep this row's layout unchanged.
+        return TURN_SIGNAL_CENTER_Y - SPEED_LIMIT_SIGN_RADIUS + row_h
 
     def _draw_follow_gap_lane_icon(self, state: ClusterUiState, bottom_y: float) -> None:
         if state.cruise_gap is None:
