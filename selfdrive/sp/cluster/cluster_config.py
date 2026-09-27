@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 DESIGN_WIDTH = 1920
 DESIGN_HEIGHT = 720
+
+# Vehicle/radar diagnostic JSONL logging is a tuning aid, not a runtime feature.
+# It builds a rounded payload dict for every tracked object on every sensor
+# update and writes line-buffered JSON to /data/media/0, so leaving it on costs
+# CPU and flash writes during normal driving. Opt in with CLUSTER_VEHICLE_LOG=1.
+VEHICLE_DIAGNOSTIC_LOG_ENV = "CLUSTER_VEHICLE_LOG"
+_TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 
 Color3 = tuple[int, int, int]
 Color4 = tuple[int, int, int, int]
@@ -142,6 +150,12 @@ def read_float_param(params: object, key: str) -> float:
     if callable(getter):
         return float(getter(key))
     return float(_param_text(params, key))
+
+
+def vehicle_diagnostic_log_enabled() -> bool:
+    """True when the vehicle/radar stability JSONL diagnostics should be written."""
+    raw = os.environ.get(VEHICLE_DIAGNOSTIC_LOG_ENV, "")
+    return raw.strip().lower() in _TRUTHY_ENV_VALUES
 
 
 AUTO_DARK_START_HOUR = 18

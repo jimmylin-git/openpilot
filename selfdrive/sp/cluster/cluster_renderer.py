@@ -41,6 +41,7 @@ from cluster_config import (
     current_cluster_theme,
     normalize_cluster_screen_mode,
     normalize_cluster_theme_mode,
+    vehicle_diagnostic_log_enabled,
 )
 from cluster_models import (
     ClusterUiState,
@@ -596,7 +597,7 @@ class ClusterUiRenderer:
         self._ground_scroll_last_t: float | None = None
         self._front_vehicle_distance_m: float | None = None
         self._vehicle_log_file = None
-        self._vehicle_log_disabled = False
+        self._vehicle_log_disabled = not vehicle_diagnostic_log_enabled()
         self._vehicle_log_tracks: dict[tuple[str, str], dict[str, object]] = {}
         self._vehicle_log_active_keys: set[tuple[str, str]] = set()
 
@@ -1815,6 +1816,8 @@ class ClusterUiRenderer:
             })
 
     def _finish_vehicle_logging(self, now: float, vehicles: tuple[VehicleBox, ...]) -> None:
+        if self._vehicle_log_disabled:
+            return
         self._vehicle_log_active_keys.clear()
         for vehicle in vehicles:
             self._record_vehicle_draw(vehicle, now)

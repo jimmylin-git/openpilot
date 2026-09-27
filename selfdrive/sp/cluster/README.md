@@ -462,6 +462,15 @@ a nearby radarPoint before rendering. Scene composition now uses only
 confidence-qualified detected vehicles for radar hiding and merged-label
 suppression; an undrawn low-confidence model object can no longer make a valid
 radarPoint disappear without a replacement vehicle box.
+These `rendered_vehicle`/`stability_filter` JSONL diagnostics are a tuning aid,
+not a runtime feature, and they are now **off by default**. When enabled they
+build a rounded payload dict for every tracked object on every sensor update
+(the `radarPoint` payload even re-runs the multi-branch
+`radar_point_is_vehicle_candidate()` classifier) and append line-buffered JSON
+to `/data/media/0/cluster_vehicle_objects.jsonl`, which costs CPU and flash
+writes on every drive. Set `CLUSTER_VEHICLE_LOG=1` (accepted truthy values:
+`1`, `true`, `yes`, `on`) to turn the logging back on for a tuning session;
+`CLUSTER_VEHICLE_LOG_PATH` still overrides the output file.
 During ACC lane-change states the planned path, ego-lane floor, target-lane
 floor highlight, ego vehicle box, and detected/radar vehicle boxes follow the
 animated lane-change offset. When ACC is engaged above 1 km/h the ego-lane

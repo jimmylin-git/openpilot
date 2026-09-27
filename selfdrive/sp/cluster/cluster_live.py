@@ -16,6 +16,7 @@ from cluster_config import (
     SHOW_PLOT_MODE_PARAM,
     read_float_param,
     read_int_param,
+    vehicle_diagnostic_log_enabled,
 )
 from cluster_models import (
     ClusterUiState,
@@ -110,6 +111,10 @@ RADAR_POINT_FADE_MIN_PROBABILITY = 0.40
 # has to clearly leave the display range before it drops.
 VEHICLE_FILTER_LOG_PATH = "/data/media/0/cluster_vehicle_objects.jsonl"
 VEHICLE_FILTER_LOG_VERSION = 5
+# Shared placeholder used when diagnostic logging is off. The stability filters
+# still track a payload slot per key so the expiry paths can index it, but the
+# rounded dict is never built. Never mutate it; callers only ** it into records.
+EMPTY_FILTER_PAYLOAD: dict[str, object] = {}
 
 
 class OpenpilotLiveSource:
@@ -173,7 +178,7 @@ class OpenpilotLiveSource:
         self._radar_missing_since: dict[tuple[str, str], float] = {}
         self._lane_range_visible: dict[tuple[str, str], bool] = {}
         self._filter_log_file = None
-        self._filter_log_disabled = False
+        self._filter_log_disabled = not vehicle_diagnostic_log_enabled()
         self.start_t = time.monotonic()
         self.frames = 0
         self.params: Any | None = None
@@ -303,20 +308,25 @@ class OpenpilotLiveSource:
 
     def _smooth_scene_state(self, state: ClusterUiState) -> ClusterUiState:
         now = time.monotonic()
-        current_vehicle_keys = {
-            (vehicle.label, vehicle.source) for vehicle in state.detected_vehicles
-        }
-        target2_by_key = {
-            (vehicle.label, vehicle.source): vehicle
+        target2_keys = {
+            (vehicle.label, vehicle.source)
             for vehicle in state.detected_vehicles
             if vehicle.label == "TARGET2" and vehicle.source == "radarState"
         }
-        target2_keys = set(target2_by_key)
         target2_update_t = self.parser.radar_detection_t
         if target2_update_t != self._last_target2_filter_update_t:
             self._last_target2_filter_update_t = target2_update_t
+            target2_by_key = {
+                (vehicle.label, vehicle.source): vehicle
+                for vehicle in state.detected_vehicles
+                if vehicle.label == "TARGET2" and vehicle.source == "radarState"
+            }
             for key, vehicle in target2_by_key.items():
-                payload = self._vehicle_filter_payload(vehicle)
+                payload = (
+                    EMPTY_FILTER_PAYLOAD
+                    if self._filter_log_disabled
+                    else self._vehicle_filter_payload(vehicle)
+                )
                 self._vehicle_filter_last_payload[key] = payload
                 if key not in self._vehicle_seen_since:
                     self._vehicle_seen_since[key] = target2_update_t
@@ -365,16 +375,20 @@ class OpenpilotLiveSource:
         current_radar_keys = {
             (point.label, point.source) for point in state.radar_points
         }
-        radar_by_key = {
-            (point.label, point.source): point for point in state.radar_points
-        }
         radar_update_t = self.parser.live_track_radar_t
         radar_snapshot_changed = radar_update_t != self._last_radar_filter_update_t
         radar_snapshot_expired = not current_radar_keys and bool(self._radar_seen_since)
         if radar_snapshot_changed or radar_snapshot_expired:
             self._last_radar_filter_update_t = radar_update_t
+            radar_by_key = {
+                (point.label, point.source): point for point in state.radar_points
+            }
             for key, point in radar_by_key.items():
-                payload = self._radar_filter_payload(point, state)
+                payload = (
+                    EMPTY_FILTER_PAYLOAD
+                    if self._filter_log_disabled
+                    else self._radar_filter_payload(point, state)
+                )
                 self._radar_filter_last_payload[key] = payload
                 if key not in self._radar_seen_since:
                     self._radar_seen_since[key] = radar_update_t
@@ -440,11 +454,11 @@ class OpenpilotLiveSource:
         unsupported_model_by_key: dict[tuple[str, str], DetectedVehicle] = {}
         unsupported_model_keys: set[tuple[str, str]] = set()
         for vehicle in state.detected_vehicles:
-            key = (vehicle.label, vehicle.source)
             if not vehicle.source.startswith("modelV2"):
                 continue
             if self._model_vehicle_supported_by_radar(vehicle, state.radar_points):
                 continue
+            key = (vehicle.label, vehicle.source)
             unsupported_model_by_key[key] = vehicle
             unsupported_model_keys.add(key)
 
@@ -452,7 +466,11 @@ class OpenpilotLiveSource:
         if model_update_t != self._last_model_filter_update_t:
             self._last_model_filter_update_t = model_update_t
             for key, vehicle in unsupported_model_by_key.items():
-                payload = self._vehicle_filter_payload(vehicle)
+                payload = (
+                    EMPTY_FILTER_PAYLOAD
+                    if self._filter_log_disabled
+                    else self._vehicle_filter_payload(vehicle)
+                )
                 self._model_vehicle_filter_last_payload[key] = payload
                 if key not in self._model_vehicle_seen_since:
                     self._model_vehicle_seen_since[key] = model_update_t
