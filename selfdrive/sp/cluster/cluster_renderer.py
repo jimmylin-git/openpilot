@@ -770,7 +770,11 @@ class ClusterUiRenderer:
         if signal_lights is None:
             signal_lights = self._turn_signal_lights(state)
         profile_stage = self._profile_start()
-        if self.screen_mode == CLUSTER_SCREEN_MODE_DEBUG_GRAPH or not self._world_enabled:
+        if (
+            self.screen_mode == CLUSTER_SCREEN_MODE_DEBUG_GRAPH
+            or not self._world_enabled
+            or state.cruise_display_state == "off"
+        ):
             self._clear_world()
         else:
             self._render_world(state, signal_lights)

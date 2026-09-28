@@ -477,10 +477,12 @@ to `/data/media/0/cluster_vehicle_objects.jsonl`, which costs CPU and flash
 writes on every drive. Set `CLUSTER_VEHICLE_LOG=1` (accepted truthy values:
 `1`, `true`, `yes`, `on`) to turn the logging back on for a tuning session;
 `CLUSTER_VEHICLE_LOG_PATH` still overrides the output file.
-During ACC lane-change states the planned path, ego-lane floor, target-lane
-floor highlight, ego vehicle box, and detected/radar vehicle boxes follow the
-animated lane-change offset. When ACC is engaged above 1 km/h the ego-lane
-floor uses the animated rainbow flow strips.
+The 3D driving scene is hidden while ACC is off and appears when ACC is
+available in standby or engaged. While ACC is engaged, the ego-lane floor uses
+the original solid green fill (no moving rainbow animation). During ACC
+lane-change states the planned path, ego-lane floor, target-lane floor
+highlight, ego vehicle box, and detected/radar vehicle boxes follow the
+animated lane-change offset.
 Radar-track vehicle classification rejects points outside model road edges, but
 does not require in-road points to sit near the road-edge line; center-lane
 points can classify as vehicles when probability/in-lane data or moving radar
