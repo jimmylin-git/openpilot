@@ -75,7 +75,11 @@ class UIStateSP:
     if _ui_state.sm.recv_frame["carState"] < _ui_state.started_frame:
       return
 
-    has_alert = _ui_state.started and self.onroad_brightness != OnroadBrightness.AUTO and alert is not None
+    has_alert = (
+      _ui_state.started
+      and self.onroad_brightness not in (OnroadBrightness.AUTO, OnroadBrightness.SCREEN_OFF)
+      and alert is not None
+    )
 
     self.update_onroad_brightness(has_alert)
     if has_alert:
@@ -88,7 +92,17 @@ class UIStateSP:
     if self.onroad_brightness_timer > 0:
       self.onroad_brightness_timer -= 1
 
-  def reset_onroad_sleep_timer(self, timer_status: OnroadTimerStatus = OnroadTimerStatus.NONE) -> None:
+  def reset_onroad_sleep_timer(
+    self,
+    timer_status: OnroadTimerStatus = OnroadTimerStatus.NONE,
+    *,
+    user_interaction: bool = False,
+  ) -> None:
+    if self.onroad_brightness == OnroadBrightness.SCREEN_OFF:
+      if user_interaction:
+        self.onroad_brightness_timer = self.onroad_brightness_timer_param * gui_app.target_fps
+      return
+
     # Toggling from active state to inactive
     if timer_status == OnroadTimerStatus.PAUSE and self.onroad_brightness_timer != ONROAD_BRIGHTNESS_TIMER_PAUSED:
       self.onroad_brightness_timer = ONROAD_BRIGHTNESS_TIMER_PAUSED
@@ -300,7 +314,17 @@ class DeviceSP:
 
   @staticmethod
   def wake_from_dimmed_onroad_brightness(_ui_state, evs) -> None:
-    if _ui_state.started and (_ui_state.onroad_brightness_timer_expired or _ui_state.onroad_brightness == OnroadBrightness.AUTO_DARK):
+    if not _ui_state.started:
+      return
+
+    if _ui_state.onroad_brightness == OnroadBrightness.SCREEN_OFF:
+      if any(ev.left_down for ev in evs):
+        if _ui_state.onroad_brightness_timer_expired:
+          gui_app.mouse_events.clear()
+        _ui_state.reset_onroad_sleep_timer(user_interaction=True)
+      return
+
+    if _ui_state.onroad_brightness_timer_expired or _ui_state.onroad_brightness == OnroadBrightness.AUTO_DARK:
       if any(ev.left_down for ev in evs):
         if _ui_state.onroad_brightness_timer_expired:
           gui_app.mouse_events.clear()
