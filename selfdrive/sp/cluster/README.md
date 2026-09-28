@@ -311,8 +311,8 @@ backend `auto` falls back to ffmpeg, the run uses the software RGBA pipe.
 Changing this setting while the HUD is running makes the current HUD process
 exit so `cluster_autorun` can relaunch it with the new encoder choice.
 The main HUD compact system metrics show memory usage and the highest available
-thermal-zone temperature using the one-second system sampler; the SYSTEM panel
-also shows those values with CPU core usage.
+thermal-zone temperature using the three-second system sampler; the SYSTEM
+panel also shows those values with CPU core usage.
 `ClusterHudScreenMode` controls optional debug views: `0` default, `1` shows
 the live debug panel with grouped `LIVE DELAY`, `LIVE TORQUE`, `STEERING`, and
 `LATERAL PLAN` rows, `2` shows the system information panel with maximum
