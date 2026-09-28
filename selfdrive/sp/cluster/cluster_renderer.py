@@ -775,11 +775,13 @@ class ClusterUiRenderer:
         """Draw one frame into the currently active raylib render target."""
         if signal_lights is None:
             signal_lights = self._turn_signal_lights(state)
+        layout_progress = self._update_acc_layout_progress(state)
         profile_stage = self._profile_start()
         if (
             self.screen_mode == CLUSTER_SCREEN_MODE_DEBUG_GRAPH
             or not self._world_enabled
             or state.cruise_display_state == "off"
+            or layout_progress < 1.0
         ):
             self._clear_world()
         else:
@@ -2982,7 +2984,7 @@ class ClusterUiRenderer:
         return theme.muted
 
     def _draw_drive_status(self, state: ClusterUiState) -> None:
-        layout_progress = self._update_acc_layout_progress(state)
+        layout_progress = self._acc_layout_progress if self._acc_layout_progress is not None else 1.0
         gear_text = (state.gear_text or "").strip().upper()
         # Always draw this row (gear / cruise set speed / follow gap / LFA), even
         # offroad when every field is None. Each sub-draw already falls back to a

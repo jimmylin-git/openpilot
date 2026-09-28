@@ -483,8 +483,10 @@ writes on every drive. Set `CLUSTER_VEHICLE_LOG=1` (accepted truthy values:
 `1`, `true`, `yes`, `on`) to turn the logging back on for a tuning session;
 `CLUSTER_VEHICLE_LOG_PATH` still overrides the output file.
 The 3D driving scene is hidden while ACC is off and appears when ACC is
-available in standby or engaged. While ACC is engaged, the ego-lane floor uses
-the original solid green fill (no moving rainbow animation). During ACC
+available in standby or engaged. On ACC activation, 3D rendering remains hidden
+until the LFA/top-row layout transition has completed, preventing the centered
+LFA animation from overlapping the 3D scene. While ACC is engaged, the ego-lane
+floor uses the original solid green fill (no moving rainbow animation). During ACC
 lane-change states the planned path, ego-lane floor, target-lane floor
 highlight, ego vehicle box, and detected/radar vehicle boxes follow the
 animated lane-change offset.
