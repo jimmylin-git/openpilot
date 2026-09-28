@@ -241,9 +241,12 @@ using the same ambient-light estimate as the main UI and smoothing changes over
 time. The resolved brightness is limited to `3..30` and then scaled to 70%
 (so auto tops out at 21); `1` through `100` are
 fixed brightness percentages, also limited to `3..30`.
-After the boot grace period, live USB output dims to `3` while offroad.
-Brightness commands use no-ACK command `14` during USB initialization and when
-the resolved brightness changes.
+After the boot grace period, live USB output dims to `2` while offroad.
+Brightness settings and ambient light are checked once per second onroad.
+Offroad, the dim level is applied once after the boot grace period and
+brightness polling stops until the next onroad transition. Brightness commands
+use no-ACK command `14` during USB initialization and when the resolved
+brightness changes.
 
 The launcher defaults to `--input live`, subscribes to openpilot cereal services,
 and renders live `carState`, `modelV2`, `radarState`, `radarTracks`,

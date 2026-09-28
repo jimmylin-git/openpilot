@@ -745,6 +745,7 @@ def run_demo(
     report_frames = 0
     display_actual_fps: float | None = None
     is_offroad = False
+    brightness_refresh_pending = False
     render_fps = target_fps
     frame_interval = 1.0 / render_fps if render_fps > 0 else 0.0
     # The Chestnut eGPU shares the USB bus with the TURZX screen; halve the HUD
@@ -1045,6 +1046,7 @@ def run_demo(
                 next_is_offroad = vehicle_started is False
                 if next_is_offroad != is_offroad:
                     is_offroad = next_is_offroad
+                    brightness_refresh_pending = True
                     render_fps = OFFROAD_RENDER_FPS if is_offroad else target_fps
                     frame_interval = 1.0 / render_fps if render_fps > 0 else 0.0
                     renderer.set_target_fps(max(0, int(round(render_fps))))
@@ -1112,8 +1114,11 @@ def run_demo(
                 cluster_core_usage_text=cluster_core_usage_text,
             )
             brightness_now = time.perf_counter()
-            if usb_display is not None and brightness_now >= next_brightness_param_read:
-                if usb_brightness_param_reader is not None:
+            past_boot_grace = brightness_now - start_time >= OFFROAD_DIM_BOOT_GRACE_SECONDS
+            brightness_poll_due = not is_offroad and brightness_now >= next_brightness_param_read
+            offroad_brightness_due = is_offroad and brightness_refresh_pending and past_boot_grace
+            if usb_display is not None and (brightness_poll_due or offroad_brightness_due):
+                if brightness_poll_due and usb_brightness_param_reader is not None:
                     next_brightness_setting = usb_brightness_param_reader.read()
                     if next_brightness_setting != active_brightness_setting:
                         active_brightness_setting = next_brightness_setting
@@ -1123,14 +1128,9 @@ def run_demo(
                             else f"{active_brightness_setting}%"
                         )
                         print(f"{CLUSTER_BRIGHTNESS_PARAM} updated: {brightness_text}", flush=True)
-                # Offroad dim-to-black: only trust vehicle_started() once past
-                # the boot grace window, so a transient/stale reading right
-                # after boot can't get the screen stuck dark. "No live data
-                # yet" (e.g. right after startup, before the first read
-                # settles) still falls back to the dimmer MIN_USB_BRIGHTNESS
-                # instead of full black.
-                past_boot_grace = brightness_now - start_time >= OFFROAD_DIM_BOOT_GRACE_SECONDS
-                if past_boot_grace and vehicle_started is False:
+                # Apply the offroad level once after the boot grace period;
+                # while offroad, do not poll brightness params or ambient light.
+                if is_offroad and past_boot_grace:
                     next_usb_brightness = OFFROAD_USB_BRIGHTNESS
                 elif live_source is not None and not live_source.live_data_available():
                     next_usb_brightness = MIN_USB_BRIGHTNESS
@@ -1150,7 +1150,9 @@ def run_demo(
                     # path below, which autorun is designed to relaunch
                     # after replug.
                     print(f"Warning: set_brightness({next_usb_brightness}) failed: {exc}", flush=True)
-                next_brightness_param_read = brightness_now + BRIGHTNESS_PARAM_POLL_SECONDS
+                if brightness_poll_due:
+                    next_brightness_param_read = brightness_now + BRIGHTNESS_PARAM_POLL_SECONDS
+                brightness_refresh_pending = False
 
             if output_mode in ("window", "both"):
                 profile_stage = time.perf_counter()
