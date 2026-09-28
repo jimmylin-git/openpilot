@@ -131,6 +131,8 @@ FOLLOW_GAP_LANE_CONTENT_BOTTOM_FRAC = 111.0 / 128.0
 FOLLOW_GAP_BAR_SPAN_TOP_FRAC = 0.5
 FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 0.99
 TOP_STATUS_ICON_SPACING = 142
+ACC_LAYOUT_TRANSITION_SECONDS = 0.7
+ACC_OFF_TOP_ROW_SPACING = TOP_STATUS_ICON_SPACING * 1.7
 # The top row holds cruise set speed, follow gap, LFA and the Chestnut icon at equal
 # spacing; shift it left by half a slot so the four slots stay centered between the
 # turn signals and the Chestnut slot clears the right turn signal.
@@ -554,6 +556,10 @@ class ClusterUiRenderer:
         self._left_turn_signal_started_at: float | None = None
         self._right_turn_signal_started_at: float | None = None
         self._turn_signal_frames = {"left": 0, "right": 0}
+        self._acc_layout_progress: float | None = None
+        self._acc_layout_target: float | None = None
+        self._acc_layout_from = 1.0
+        self._acc_layout_transition_started_at = 0.0
         self.blink_fps = float(target_fps)
         self._triangle_strip_point_cache: OrderedDict[
             tuple[int, int],
@@ -2647,9 +2653,12 @@ class ClusterUiRenderer:
             alpha = int(255 * (0.35 + 0.65 * (0.5 - 0.5 * math.cos(time.monotonic() * 6.0))))
         height = LFA_STATUS_ICON_SIZE
         width = height * texture.width / max(1, texture.height)
+        layout_progress = self._acc_layout_progress if self._acc_layout_progress is not None else 1.0
+        off_center_x = DESIGN_WIDTH * 0.5 + ACC_OFF_TOP_ROW_SPACING
+        center_x = off_center_x + (CHESTNUT_ICON_CENTER_X - off_center_x) * layout_progress
         self._draw_bottom_aligned_texture_icon(
             texture,
-            CHESTNUT_ICON_CENTER_X,
+            center_x,
             TURN_SIGNAL_CENTER_Y + height * 0.5,
             width,
             height,
@@ -2973,6 +2982,7 @@ class ClusterUiRenderer:
         return theme.muted
 
     def _draw_drive_status(self, state: ClusterUiState) -> None:
+        layout_progress = self._update_acc_layout_progress(state)
         gear_text = (state.gear_text or "").strip().upper()
         # Always draw this row (gear / cruise set speed / follow gap / LFA), even
         # offroad when every field is None. Each sub-draw already falls back to a
@@ -2990,8 +3000,28 @@ class ClusterUiRenderer:
         )
 
         self._draw_top_cruise_set(state, bottom_y)
-        self._draw_follow_gap_lane_icon(state, bottom_y)
-        self._draw_lfa_status_icon(state, bottom_y)
+        self._draw_follow_gap_lane_icon(state, bottom_y, layout_progress)
+        self._draw_lfa_status_icon(state, bottom_y, layout_progress)
+
+    def _update_acc_layout_progress(self, state: ClusterUiState) -> float:
+        target = 0.0 if state.cruise_display_state == "off" else 1.0
+        now = time.perf_counter()
+        if self._acc_layout_progress is None:
+            self._acc_layout_progress = target
+            self._acc_layout_target = target
+            return target
+        if target != self._acc_layout_target:
+            self._acc_layout_from = self._acc_layout_progress
+            self._acc_layout_target = target
+            self._acc_layout_transition_started_at = now
+
+        elapsed = now - self._acc_layout_transition_started_at
+        transition = clamp(elapsed / ACC_LAYOUT_TRANSITION_SECONDS, 0.0, 1.0)
+        eased = smoothstep(transition)
+        self._acc_layout_progress = self._acc_layout_from + (
+            target - self._acc_layout_from
+        ) * eased
+        return self._acc_layout_progress
 
     def _drive_status_bottom_y(self, state: ClusterUiState) -> float:
         speed_text = self._cruise_set_speed_text(state)
@@ -3009,7 +3039,12 @@ class ClusterUiRenderer:
         # this row's layout unchanged.
         return TURN_SIGNAL_CENTER_Y - SPEED_LIMIT_SIGN_RADIUS + row_h
 
-    def _draw_follow_gap_lane_icon(self, state: ClusterUiState, bottom_y: float) -> None:
+    def _draw_follow_gap_lane_icon(
+        self,
+        state: ClusterUiState,
+        bottom_y: float,
+        layout_progress: float,
+    ) -> None:
         theme = self._current_theme()
         active = bool(state.cruise_display_state == "engaged")
         tint = WHITE if active else theme.muted
@@ -3017,7 +3052,8 @@ class ClusterUiRenderer:
         bar_active_color = (*tint, alpha)
         bar_inactive_color = (*theme.muted, 130)
 
-        icon_center_x = FOLLOW_GAP_LANE_CENTER_X
+        off_center_x = DESIGN_WIDTH * 0.5
+        icon_center_x = off_center_x + (FOLLOW_GAP_LANE_CENTER_X - off_center_x) * layout_progress
         icon_size = FOLLOW_GAP_LANE_ICON_SIZE
         icon_center_y = TURN_SIGNAL_CENTER_Y
         icon_top_y = icon_center_y - icon_size * 0.5
@@ -3067,7 +3103,7 @@ class ClusterUiRenderer:
         distance_text = f"{distance_m:.0f}m" if distance_m is not None else "--m"
         self._draw_text(
             distance_text,
-            FOLLOW_GAP_LANE_CENTER_X,
+            icon_center_x,
             TOP_STATUS_DETAIL_CENTER_Y,
             TOP_STATUS_DETAIL_FONT_SIZE,
             tint,
@@ -3100,37 +3136,48 @@ class ClusterUiRenderer:
         speed_spacing = max(1.0, TOP_CRUISE_FONT_SIZE * 0.02)
         _, speed_h = self._measure_text(speed_text, TOP_CRUISE_FONT_SIZE, speed_spacing)
         text_center_y = TURN_SIGNAL_CENTER_Y
-        self._draw_text(speed_text, TOP_CRUISE_CENTER_X, text_center_y, TOP_CRUISE_FONT_SIZE, speed_color, anchor="center")
+        layout_progress = self._acc_layout_progress if self._acc_layout_progress is not None else 1.0
+        off_center_x = DESIGN_WIDTH * 0.5 - ACC_OFF_TOP_ROW_SPACING
+        center_x = off_center_x + (TOP_CRUISE_CENTER_X - off_center_x) * layout_progress
+        self._draw_text(speed_text, center_x, text_center_y, TOP_CRUISE_FONT_SIZE, speed_color, anchor="center")
 
-    def _draw_lfa_status_icon(self, state: ClusterUiState, bottom_y: float) -> None:
+    def _draw_lfa_status_icon(self, state: ClusterUiState, bottom_y: float, layout_progress: float) -> None:
         theme = self._current_theme()
         active = bool(state.lfa_active)
         texture = self._lfa_active_texture if active and self._lfa_active_texture is not None else self._lfa_texture
         tint = WHITE if active else theme.muted
         alpha = 255 if active else 190
         rotation_deg = -float(state.steering_angle_deg or 0.0)
-        # Pass TURN_SIGNAL_CENTER_Y (not bottom_y) so the wheel.png texture's vertical center
-        # lines up with the turn signals / ACC speed / gear text on the same row.
+        icon_scale = 2.0 - layout_progress
+        icon_size = LFA_STATUS_ICON_SIZE * icon_scale
+        detail_font_size = TOP_STATUS_DETAIL_FONT_SIZE * icon_scale
+        icon_center_x = LFA_STATUS_CENTER_X + (DESIGN_WIDTH * 0.5 - LFA_STATUS_CENTER_X) * (1.0 - layout_progress)
+        acc_off_center_y = DESIGN_HEIGHT * 0.5 - detail_font_size * 0.625
+        icon_center_y = TURN_SIGNAL_CENTER_Y + (acc_off_center_y - TURN_SIGNAL_CENTER_Y) * (1.0 - layout_progress)
+        detail_center_y = TOP_STATUS_DETAIL_CENTER_Y + (
+            icon_center_y + icon_size * 0.5 + detail_font_size * 0.75 - TOP_STATUS_DETAIL_CENTER_Y
+        ) * (1.0 - layout_progress)
         if self._draw_bottom_aligned_texture_icon(
             texture,
-            LFA_STATUS_CENTER_X,
-            TURN_SIGNAL_CENTER_Y + LFA_STATUS_ICON_SIZE * 0.5,
-            LFA_STATUS_ICON_SIZE,
-            LFA_STATUS_ICON_SIZE,
+            icon_center_x,
+            icon_center_y + icon_size * 0.5,
+            icon_size,
+            icon_size,
             tint,
             alpha,
             rotation_deg,
         ):
-            self._draw_steering_angle_text(state, tint)
+            self._draw_steering_angle_text(state, tint, icon_center_x, detail_center_y, detail_font_size)
             return
 
         outline = GREEN if active else theme.muted
         fill_alpha = 46 if active else 26
-        center = rl.Vector2(LFA_STATUS_CENTER_X, TURN_SIGNAL_CENTER_Y)
-        scale = TOP_ICON_SIZE / 34.0
-        rl.draw_circle_v(center, TOP_ICON_SIZE * 0.5, rl_color(outline, fill_alpha))
-        rl.draw_circle_lines(int(center.x), int(center.y), TOP_ICON_SIZE * 0.5, rl_color(outline, 210))
-        rl.draw_circle_lines(int(center.x), int(center.y + 1), TOP_ICON_SIZE * 0.26, rl_color(outline, 210))
+        center = rl.Vector2(icon_center_x, icon_center_y)
+        fallback_icon_size = TOP_ICON_SIZE * icon_scale
+        scale = fallback_icon_size / 34.0
+        rl.draw_circle_v(center, fallback_icon_size * 0.5, rl_color(outline, fill_alpha))
+        rl.draw_circle_lines(int(center.x), int(center.y), fallback_icon_size * 0.5, rl_color(outline, 210))
+        rl.draw_circle_lines(int(center.x), int(center.y + 1), fallback_icon_size * 0.26, rl_color(outline, 210))
         rl.draw_line_ex(
             rl.Vector2(center.x - 7 * scale, center.y + 5 * scale),
             rl.Vector2(center.x + 7 * scale, center.y + 5 * scale),
@@ -3143,20 +3190,23 @@ class ClusterUiRenderer:
             2.2 * scale,
             rl_color(outline, 210),
         )
-        self._draw_steering_angle_text(state, tint)
+        self._draw_steering_angle_text(state, tint, icon_center_x, detail_center_y, detail_font_size)
 
     def _draw_steering_angle_text(
         self,
         state: ClusterUiState,
         color: tuple[int, int, int],
+        center_x: float,
+        center_y: float,
+        font_size: float,
     ) -> None:
         angle = state.steering_angle_deg
         angle_text = f"{angle:+.1f}deg" if angle is not None and math.isfinite(angle) else "--deg"
         self._draw_text(
             angle_text,
-            LFA_STATUS_CENTER_X,
-            TOP_STATUS_DETAIL_CENTER_Y,
-            TOP_STATUS_DETAIL_FONT_SIZE,
+            center_x,
+            center_y,
+            font_size,
             color,
             anchor="center",
         )

@@ -284,7 +284,12 @@ speed but draws it gray, and inactive cruise draws gray `--- km/h`. The
 lane-change icon is not drawn; the LFA icon uses
 `selfdrive/assets/icons_mici/carrot_wheel_org.png`, rotates by
 `-carState.steeringAngleDeg`, and recolors its white pixels green when LFA is
-active.
+active. When cruise control has no set speed (`off`), the LFA wheel and angle
+move together to the screen center and grow to twice their normal size; the
+cruise, follow-gap, and Chestnut top-row items spread out with even spacing.
+When cruise control enters `paused` or `engaged`, those three items and the LFA
+smoothly return to their normal positions and size over 0.7 seconds.
+Turn-signal positions do not change.
 When `--fps` is omitted, `ClusterHudLiveFps` controls the render limit and is
 polled about once per second while running: `0` uncapped diagnostic mode, `1`
 10 Hz default, `2` 20 Hz, `3` 30 Hz, `4` 40 Hz, `5` 50 Hz, and `6` 60 Hz.
