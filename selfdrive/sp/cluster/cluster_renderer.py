@@ -2282,9 +2282,6 @@ class ClusterUiRenderer:
                 self._draw_speed_block(state)
                 self._profile_add("hud.speed_block", profile_stage)
                 profile_stage = self._profile_start()
-                self._draw_accel_block(state)
-                self._profile_add("hud.accel_block", profile_stage)
-                profile_stage = self._profile_start()
                 self._draw_debug_plot(
                     state.debug_plot,
                     DEBUG_PLOT_FULL_X,
@@ -2298,9 +2295,6 @@ class ClusterUiRenderer:
             profile_stage = self._profile_start()
             self._draw_speed_block(state)
             self._profile_add("hud.speed_block", profile_stage)
-            profile_stage = self._profile_start()
-            self._draw_accel_block(state)
-            self._profile_add("hud.accel_block", profile_stage)
             profile_stage = self._profile_start()
             self._draw_turn_signal("left", left_signal_lit, show_inactive=state.debug_ui_visible)
             self._profile_add("hud.turn_signal_left", profile_stage)
