@@ -358,6 +358,8 @@ confirmed while the HUD is running.
 The top HUD row uses 128x128 turn-signal assets with a 30px top margin. The
 follow-gap icon shows the nearest detected vehicle distance in the ego lane
 below it, and the LFA wheel shows the signed steering-wheel angle below it.
+With the acceleration gauge hidden, the speed digits and `km/h` label share
+an x=275 center in the left panel.
 When both raw camera-bus ADRV `0x1EA` and CCNC `0x162` corner messages are
 fresh, ADRV is preferred for LF/RF/LR/RR distance in the Hyundai `carState`
 DBC parsing path. The cluster consumes the DBC-parsed `carState` corner fields
