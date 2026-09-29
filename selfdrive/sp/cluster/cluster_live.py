@@ -27,7 +27,7 @@ from cluster_models import (
     ModelPathPoint,
     RadarPoint,
 )
-from cluster_route_replay import RouteLogParser, finite_float, frame_to_state, safe_get, safe_optional_float
+from cluster_route_replay import PRIUS_TSS2_GEAR_ADDRESS, PRIUS_TSS2_PLATFORM, RouteLogParser, finite_float, frame_to_state, safe_get, safe_optional_float
 from cluster_scene import (
     FRONT_VEHICLE_LANE_RANGE_LANES,
     LANE_RANGE_EXIT_HYSTERESIS_LANES,
@@ -156,6 +156,7 @@ class OpenpilotLiveSource:
         )
         self._service_aliases = {legacy: new for new, legacy in LIVE_SERVICE_LEGACY_NAMES.items()}
         self.sm = messaging.SubMaster(self.services)
+        self._gear_can_sock = None
         self.parser = RouteLogParser()
         self.timeout_ms = max(0, int(timeout_ms))
         self.last_state: ClusterUiState | None = None
@@ -267,6 +268,13 @@ class OpenpilotLiveSource:
             if service == "carState":
                 self._last_car_state_update_t = time.monotonic()
         self._profile_add("source.live.apply_updates", profile_stage)
+
+        if self._gear_can_sock is not None:
+            for event in self.messaging.drain_sock(self._gear_can_sock):
+                event_t = float(event.logMonoTime) / 1_000_000_000.0
+                for can_message in event.can:
+                    if can_message.address == PRIUS_TSS2_GEAR_ADDRESS:
+                        self.parser._update_prius_gear(can_message, event_t)
 
         if self._service_alive("carState"):
             profile_stage = self._profile_start()
@@ -1106,6 +1114,10 @@ class OpenpilotLiveSource:
             self.parser._update_driving_model(data)
         elif service == "carParams":
             self.parser._update_car_params(data)
+            if "can" in self.services and self.parser.car_fingerprint == PRIUS_TSS2_PLATFORM and self._gear_can_sock is None:
+                self._gear_can_sock = self.messaging.sub_sock("can", conflate=False)
+            elif self.parser.car_fingerprint != PRIUS_TSS2_PLATFORM:
+                self._gear_can_sock = None
         elif service == "modelV2":
             self.parser._update_model_v2(data, event_t)
         elif service == "lateralPlan":

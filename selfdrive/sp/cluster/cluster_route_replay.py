@@ -78,6 +78,7 @@ ADRV_CORNER_RADAR_ADDRESS = 0x1EA
 PRIUS_TSS2_GEAR_ADDRESS = 0x3BC
 PRIUS_TSS2_PLATFORM = "TOYOTA_PRIUS_TSS2"
 PRIUS_TSS2_GEAR_STALE_S = 2.5
+PRIUS_TSS2_GEAR_TIME_SKEW_S = 0.2
 HYUNDAI_CAMERA_CAN_BUS_MOD = 2
 CORNER_RADAR_DBC_MESSAGES = {
     CCNC_CORNER_RADAR_ADDRESS: "CCNC_0x162",
@@ -1539,11 +1540,7 @@ class RouteLogParser:
             except Exception:
                 continue
             if address == PRIUS_TSS2_GEAR_ADDRESS and self.car_fingerprint == PRIUS_TSS2_PLATFORM:
-                if int(safe_get(can_message, "src", -1)) == 0:
-                    data = bytes(safe_get(can_message, "dat", b""))
-                    if len(data) >= 6:
-                        self.prius_b_gear = (data[1] & 0x3F) == 0 and bool(data[5] & 0x02)
-                        self.prius_gear_t = event_t
+                self._update_prius_gear(can_message, event_t)
                 continue
             if address != CCNC_CORNER_RADAR_ADDRESS and address != ADRV_CORNER_RADAR_ADDRESS:
                 continue
@@ -1564,6 +1561,15 @@ class RouteLogParser:
             else:
                 self.ccnc_corner_detections = parsed
                 self.ccnc_corner_message_t = event_t
+
+    def _update_prius_gear(self, can_message: Any, event_t: float) -> None:
+        if self.car_fingerprint != PRIUS_TSS2_PLATFORM or int(safe_get(can_message, "src", -1)) != 0:
+            return
+        data = bytes(safe_get(can_message, "dat", b""))
+        if len(data) < 6 or event_t < self.prius_gear_t:
+            return
+        self.prius_b_gear = (data[1] & 0x3F) == 0 and bool(data[5] & 0x02)
+        self.prius_gear_t = event_t
 
     def _update_car_params(self, car_params: Any) -> None:
         fingerprint = str(safe_get(car_params, "carFingerprint", ""))
@@ -1815,7 +1821,7 @@ class RouteLogParser:
             self.car_fingerprint == PRIUS_TSS2_PLATFORM
             and gear_text == "D"
             and self.prius_b_gear is True
-            and 0.0 <= event_t - self.prius_gear_t <= PRIUS_TSS2_GEAR_STALE_S
+            and -PRIUS_TSS2_GEAR_TIME_SKEW_S <= event_t - self.prius_gear_t <= PRIUS_TSS2_GEAR_STALE_S
         ):
             return "B"
         return gear_text

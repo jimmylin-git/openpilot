@@ -316,7 +316,11 @@ identifies `TOYOTA_PRIUS_TSS2`. The bit is used only while the raw gear is D
 and the CAN sample is recent; missing or stale samples fall back to
 `carState.gearShifter`. This display-only override does not alter openpilot's
 vehicle gear or engagement decisions. Disabling live CAN input also disables
-the B display override.
+the B display override. Live mode uses a non-conflated, read-only CAN
+subscription for the Prius gear packet so slower cluster frame rates do not
+skip B/D changes and let the display fall back to D while B is held. A
+sub-frame timestamp skew between CAN and `carState` is tolerated while
+checking whether the B-gear sample is recent.
 When cruise control enters `paused` or `engaged`, the top-row items and the LFA
 smoothly return to their normal positions and size over 0.7 seconds.
 Turn-signal positions do not change.
