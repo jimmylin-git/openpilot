@@ -136,6 +136,7 @@ FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 0.99
 TOP_STATUS_ICON_SPACING = 115
 ACC_LAYOUT_TRANSITION_SECONDS = 0.7
 ACC_OFF_LFA_SCALE = 4.0
+ACC_OFF_LFA_OFFSET_Y = 50.0
 # Five equal slots when ACC has a set speed; four equal slots when LFA is centered.
 ACC_STATUS_CENTER_X = DESIGN_WIDTH * 0.5 - 2 * TOP_STATUS_ICON_SPACING
 FOLLOW_GAP_LANE_CENTER_X = ACC_STATUS_CENTER_X + TOP_STATUS_ICON_SPACING
@@ -3184,7 +3185,7 @@ class ClusterUiRenderer:
         icon_size = LFA_STATUS_ICON_SIZE * icon_scale
         detail_font_size = TOP_STATUS_DETAIL_FONT_SIZE * 0.9 * icon_scale
         icon_center_x = LFA_STATUS_CENTER_X + (DESIGN_WIDTH * 0.5 - LFA_STATUS_CENTER_X) * (1.0 - layout_progress)
-        acc_off_center_y = DESIGN_HEIGHT * 0.5 - detail_font_size * 0.625
+        acc_off_center_y = DESIGN_HEIGHT * 0.5 - detail_font_size * 0.625 + ACC_OFF_LFA_OFFSET_Y
         icon_center_y = TURN_SIGNAL_CENTER_Y + (acc_off_center_y - TURN_SIGNAL_CENTER_Y) * (1.0 - layout_progress)
         detail_center_y = TOP_STATUS_DETAIL_CENTER_Y + (
             icon_center_y + icon_size * 0.5 + detail_font_size * 0.75 - TOP_STATUS_DETAIL_CENTER_Y

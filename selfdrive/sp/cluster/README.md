@@ -292,8 +292,9 @@ remaining icons spread evenly while LFA is centered.
 The lane-change icon is not drawn; the LFA icon uses `assets/wheel.png`, rotates by
 `-carState.steeringAngleDeg`, and recolors its white pixels green when LFA is
 active. When cruise control has no set speed (`off`), the LFA wheel and angle
-move together to the screen center and grow to four times their top-row size; the
-cruise, follow-gap, and Chestnut top-row items spread out with even spacing.
+move together near the screen center, 50 design pixels below their former
+position, and grow to four times their top-row size; the cruise, follow-gap,
+and Chestnut top-row items spread out with even spacing.
 The LFA wheel switches to the local orange `assets/wheel_critical.png` while an
 active `selfdriveState` alert requests `steerRequired` (take control), then
 returns to its normal gray/green icon when that alert clears. Other alerts do
