@@ -70,6 +70,7 @@ CLUSTER_FONT_DIR = CLUSTER_ASSETS_DIR / "fonts"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = CLUSTER_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = CLUSTER_FONT_DIR / "JetBrainsMono-Medium.ttf"
 ORBITRON_BLACK_FONT_PATH = CLUSTER_FONT_DIR / "OrbitronBlack.ttf"
+CLUSTER_FONT_CODEPOINTS = [*range(32, 127), 0x221E]
 # raylib centers text using the font's full em-box height (measure_text_ex's
 # y == the point size), but Orbitron's glyphs sit noticeably higher within
 # that box than the previous font, so anchor="center"/"left"/"right" text
@@ -1464,7 +1465,7 @@ class ClusterUiRenderer:
         for candidate in self._font_candidates():
             if candidate.exists():
                 try:
-                    font = rl.load_font_ex(str(candidate), 200, None, 0)
+                    font = rl.load_font_ex(str(candidate), 200, CLUSTER_FONT_CODEPOINTS, len(CLUSTER_FONT_CODEPOINTS))
                     if font.texture.id > 0:
                         rl.gen_texture_mipmaps(font.texture)
                         rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
@@ -3141,18 +3142,18 @@ class ClusterUiRenderer:
                 0.0,
             )
         distance_m = self._front_vehicle_distance_m
-        distance_text = "--" if self._acc_status(state) == "off" else ""
-        if not distance_text and distance_m is not None:
-            distance_text = f"{distance_m:.0f}"
-        if distance_text:
-            self._draw_text(
-                distance_text,
-                icon_center_x,
-                TOP_STATUS_DETAIL_CENTER_Y,
-                TOP_STATUS_LABEL_FONT_SIZE,
-                tint,
-                anchor="center",
-            )
+        if self._acc_status(state) == "off":
+            distance_text = "--"
+        else:
+            distance_text = f"{distance_m:.0f}" if distance_m is not None else "\u221e"
+        self._draw_text(
+            distance_text,
+            icon_center_x,
+            TOP_STATUS_DETAIL_CENTER_Y,
+            TOP_STATUS_LABEL_FONT_SIZE,
+            tint,
+            anchor="center",
+        )
 
     def _draw_bottom_aligned_texture_icon(
         self,
