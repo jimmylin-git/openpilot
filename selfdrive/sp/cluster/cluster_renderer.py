@@ -79,6 +79,7 @@ ORBITRON_BLACK_FONT_PATH = CLUSTER_FONT_DIR / "OrbitronBlack.ttf"
 TEXT_VERTICAL_CENTER_OFFSET_RATIO = 0.11
 VEHICLE_MODEL_PATH = CLUSTER_ASSETS_DIR / "models" / "car" / "cybertruck_cluster.obj"
 LFA_ICON_PATH = CLUSTER_ASSETS_DIR / "wheel.png"
+LFA_CRITICAL_ICON_PATH = CLUSTER_ASSETS_DIR / "wheel_critical.png"
 FOLLOW_GAP_LANE_ICON_PATH = CLUSTER_ASSETS_DIR / "FCD_Lane.png"
 BACKGROUND_IMAGE_PATH = CLUSTER_ASSETS_DIR / "bg.png"
 TURN_SIGNAL_LEFT_ICON_PATH = CLUSTER_ASSETS_DIR / "cluster_turn_signal_left.png"
@@ -547,6 +548,7 @@ class ClusterUiRenderer:
         self._vehicle_model_load_attempted = False
         self._lfa_texture = None
         self._lfa_active_texture = None
+        self._lfa_critical_texture = None
         self._acc_status_texture = None
         self._follow_gap_lane_texture = None
         self._left_turn_signal_texture = None
@@ -731,6 +733,9 @@ class ClusterUiRenderer:
         if self._lfa_active_texture is not None:
             rl.unload_texture(self._lfa_active_texture)
             self._lfa_active_texture = None
+        if self._lfa_critical_texture is not None:
+            rl.unload_texture(self._lfa_critical_texture)
+            self._lfa_critical_texture = None
         if self._acc_status_texture is not None:
             rl.unload_texture(self._acc_status_texture)
             self._acc_status_texture = None
@@ -1517,6 +1522,8 @@ class ClusterUiRenderer:
             self._lfa_texture = self._load_icon_texture(LFA_ICON_PATH, "LFA")
         if self._lfa_active_texture is None:
             self._lfa_active_texture = self._load_lfa_active_texture()
+        if self._lfa_critical_texture is None:
+            self._lfa_critical_texture = self._load_icon_texture(LFA_CRITICAL_ICON_PATH, "LFA critical")
         if self._follow_gap_lane_texture is None:
             self._follow_gap_lane_texture = self._load_icon_texture(FOLLOW_GAP_LANE_ICON_PATH, "Follow gap lane")
         if self._left_turn_signal_texture is None:
@@ -3190,6 +3197,10 @@ class ClusterUiRenderer:
         texture = self._lfa_active_texture if active and self._lfa_active_texture is not None else self._lfa_texture
         tint = WHITE if active else theme.muted
         alpha = 255 if active else 190
+        if state.wheel_critical and self._lfa_critical_texture is not None:
+            texture = self._lfa_critical_texture
+            tint = WHITE
+            alpha = 255
         rotation_deg = -float(state.steering_angle_deg or 0.0)
         icon_scale = 1.0 + (ACC_OFF_LFA_SCALE - 1.0) * (1.0 - layout_progress)
         icon_size = LFA_STATUS_ICON_SIZE * icon_scale

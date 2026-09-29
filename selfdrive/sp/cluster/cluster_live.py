@@ -275,6 +275,8 @@ class OpenpilotLiveSource:
 
             profile_stage = self._profile_start()
             state = frame_to_state(frame)
+            if not self._service_alive("selfdriveState") or not self._service_valid("selfdriveState"):
+                state = replace(state, wheel_critical=False)
             self._profile_add("source.live.frame_to_state", profile_stage)
 
             profile_stage = self._profile_start()

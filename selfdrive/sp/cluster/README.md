@@ -286,12 +286,15 @@ available but its set speed is missing, the readout remains `---`. The
 while ACC is off and green in standby (`paused`) or engaged; it moves with the
 set-speed text during the top-row transition. It indicates ACC availability,
 not a road speed limit.
-lane-change icon is not drawn; the LFA icon uses
-`selfdrive/assets/icons_mici/carrot_wheel_org.png`, rotates by
+The lane-change icon is not drawn; the LFA icon uses `assets/wheel.png`, rotates by
 `-carState.steeringAngleDeg`, and recolors its white pixels green when LFA is
 active. When cruise control has no set speed (`off`), the LFA wheel and angle
 move together to the screen center and grow to four times their top-row size; the
 cruise, follow-gap, and Chestnut top-row items spread out with even spacing.
+The LFA wheel switches to the local orange `assets/wheel_critical.png` while an
+active `selfdriveState` alert requests `steerRequired` (take control), then
+returns to its normal gray/green icon when that alert clears. Other alerts do
+not change the wheel icon.
 A normal/experimental-mode icon, using the same wheel/experimental PNGs as
 comma's onroad mode button (copied into `cluster/assets`), sits to the left of
 Chestnut and follows its

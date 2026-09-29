@@ -171,6 +171,7 @@ class RouteReplayFrame:
     detected_vehicles: tuple[DetectedVehicle, ...]
     radar_points: tuple[RadarPoint, ...] = ()
     experimental_mode: bool | None = None
+    wheel_critical: bool = False
     display_speed_kph: float | None = None
     planned_speed_kph: float | None = None
     planned_accel_mps2: float | None = None
@@ -915,6 +916,7 @@ class RouteLogParser:
         self.cruise_gap: int | None = None
         self.lfa_active: bool | None = None
         self.experimental_mode: bool | None = None
+        self.wheel_critical = False
         self.controls_enabled: bool | None = None
         self.lane_width_m = DEFAULT_LANE_WIDTH_M
         self.left_lane_y_m: float | None = None
@@ -1144,6 +1146,7 @@ class RouteLogParser:
             cruise_gap=cruise_gap,
             lfa_active=self.lfa_active,
             experimental_mode=self.experimental_mode,
+            wheel_critical=self.wheel_critical,
             left_signal=left_signal,
             right_signal=right_signal,
             left_blindspot=left_blindspot,
@@ -1453,6 +1456,10 @@ class RouteLogParser:
             self.controls_curvature_source = "controlsState"
 
     def _update_selfdrive_state(self, selfdrive_state: Any) -> None:
+        self.wheel_critical = (
+            enum_text(safe_get(selfdrive_state, "alertHudVisual", "none")) == "steerRequired"
+            and enum_text(safe_get(selfdrive_state, "alertSize", "none")) != "none"
+        )
         experimental_mode = safe_get(selfdrive_state, "experimentalMode", None)
         if experimental_mode is not None:
             self.experimental_mode = bool(experimental_mode)
@@ -2160,6 +2167,7 @@ def frame_to_state(frame: RouteReplayFrame) -> ClusterUiState:
         cruise_gap=frame.cruise_gap,
         lfa_active=frame.lfa_active,
         experimental_mode=frame.experimental_mode,
+        wheel_critical=frame.wheel_critical,
         left_signal=frame.left_signal,
         right_signal=frame.right_signal,
         left_blindspot=frame.left_blindspot,
@@ -2349,6 +2357,7 @@ def blend_frames(left: RouteReplayFrame, right: RouteReplayFrame, amount: float)
         cruise_gap=discrete.cruise_gap,
         lfa_active=discrete.lfa_active,
         experimental_mode=discrete.experimental_mode,
+        wheel_critical=discrete.wheel_critical,
         left_signal=discrete.left_signal,
         right_signal=discrete.right_signal,
         left_blindspot=discrete.left_blindspot,
