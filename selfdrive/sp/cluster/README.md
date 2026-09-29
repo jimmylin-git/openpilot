@@ -280,14 +280,19 @@ ratio and is taller than before while the gap bars keep their own size/spacing;
 all four gap bars stay visible, sit close together, and bottom-align to the
 vehicle while inactive bars are gray and active bars use `#bb3d91`. Cruise set
 speed and `km/h` use the same font size and color; paused cruise keeps the set
-speed but draws it gray, and inactive cruise draws gray `--- km/h`. The
+speed but draws it gray, and ACC-off cruise draws gray `OFF`. If ACC is
+available but its set speed is missing, the readout remains `---`. The
 lane-change icon is not drawn; the LFA icon uses
 `selfdrive/assets/icons_mici/carrot_wheel_org.png`, rotates by
 `-carState.steeringAngleDeg`, and recolors its white pixels green when LFA is
 active. When cruise control has no set speed (`off`), the LFA wheel and angle
 move together to the screen center and grow to four times their top-row size; the
 cruise, follow-gap, and Chestnut top-row items spread out with even spacing.
-When cruise control enters `paused` or `engaged`, those three items and the LFA
+A normal/experimental-mode icon, using the same wheel/experimental PNGs as
+comma's onroad mode button, sits to the left of Chestnut and follows its
+position during transitions. Live mode uses `selfdriveState.experimentalMode`;
+offroad uses the saved `ExperimentalMode` setting.
+When cruise control enters `paused` or `engaged`, the top-row items and the LFA
 smoothly return to their normal positions and size over 0.7 seconds.
 Turn-signal positions do not change.
 When `--fps` is omitted, `ClusterHudLiveFps` controls the render limit and is

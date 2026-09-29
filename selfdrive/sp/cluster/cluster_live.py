@@ -285,7 +285,10 @@ class OpenpilotLiveSource:
             return self.last_state
 
         profile_stage = self._profile_start()
-        state = self._standby_state
+        experimental_mode = self.parser.experimental_mode
+        if self.params is not None:
+            experimental_mode = self.params.get_bool("ExperimentalMode")
+        state = replace(self._standby_state, experimental_mode=experimental_mode)
         self._profile_add("source.live.standby_state", profile_stage)
 
         self._reset_stability_filters(time.monotonic())

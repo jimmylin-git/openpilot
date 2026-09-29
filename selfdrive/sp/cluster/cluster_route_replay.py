@@ -170,6 +170,7 @@ class RouteReplayFrame:
     brake: float
     detected_vehicles: tuple[DetectedVehicle, ...]
     radar_points: tuple[RadarPoint, ...] = ()
+    experimental_mode: bool | None = None
     display_speed_kph: float | None = None
     planned_speed_kph: float | None = None
     planned_accel_mps2: float | None = None
@@ -913,6 +914,7 @@ class RouteLogParser:
         self.cruise_kph: int | None = None
         self.cruise_gap: int | None = None
         self.lfa_active: bool | None = None
+        self.experimental_mode: bool | None = None
         self.controls_enabled: bool | None = None
         self.lane_width_m = DEFAULT_LANE_WIDTH_M
         self.left_lane_y_m: float | None = None
@@ -1141,6 +1143,7 @@ class RouteLogParser:
             gear_text=gear_text,
             cruise_gap=cruise_gap,
             lfa_active=self.lfa_active,
+            experimental_mode=self.experimental_mode,
             left_signal=left_signal,
             right_signal=right_signal,
             left_blindspot=left_blindspot,
@@ -1450,6 +1453,9 @@ class RouteLogParser:
             self.controls_curvature_source = "controlsState"
 
     def _update_selfdrive_state(self, selfdrive_state: Any) -> None:
+        experimental_mode = safe_get(selfdrive_state, "experimentalMode", None)
+        if experimental_mode is not None:
+            self.experimental_mode = bool(experimental_mode)
         cruise_gap = self._cruise_gap_from_personality(safe_get(selfdrive_state, "personality"))
         if cruise_gap is not None:
             self.cruise_gap = cruise_gap
@@ -2153,6 +2159,7 @@ def frame_to_state(frame: RouteReplayFrame) -> ClusterUiState:
         gear_text=frame.gear_text,
         cruise_gap=frame.cruise_gap,
         lfa_active=frame.lfa_active,
+        experimental_mode=frame.experimental_mode,
         left_signal=frame.left_signal,
         right_signal=frame.right_signal,
         left_blindspot=frame.left_blindspot,
@@ -2341,6 +2348,7 @@ def blend_frames(left: RouteReplayFrame, right: RouteReplayFrame, amount: float)
         gear_text=discrete.gear_text,
         cruise_gap=discrete.cruise_gap,
         lfa_active=discrete.lfa_active,
+        experimental_mode=discrete.experimental_mode,
         left_signal=discrete.left_signal,
         right_signal=discrete.right_signal,
         left_blindspot=discrete.left_blindspot,

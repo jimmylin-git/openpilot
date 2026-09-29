@@ -92,6 +92,10 @@ CHESTNUT_ICON_PATHS = {
     CHESTNUT_ACTIVE: SELFDRIVE_DIR / "assets" / "icons_mici" / "chestnut_green.png",
     CHESTNUT_FAILED: SELFDRIVE_DIR / "assets" / "icons_mici" / "chestnut_orange.png",
 }
+DRIVE_MODE_ICON_PATHS = {
+    False: SELFDRIVE_DIR / "assets" / "icons" / "chffr_wheel.png",
+    True: SELFDRIVE_DIR / "assets" / "icons" / "experimental.png",
+}
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
 TURN_SIGNAL_CENTER_Y = 94
@@ -141,6 +145,7 @@ FOLLOW_GAP_LANE_CENTER_X = DESIGN_WIDTH * 0.5 - TOP_STATUS_ICON_SPACING * 0.5
 LFA_STATUS_CENTER_X = FOLLOW_GAP_LANE_CENTER_X + TOP_STATUS_ICON_SPACING
 TOP_CRUISE_CENTER_X = FOLLOW_GAP_LANE_CENTER_X - TOP_STATUS_ICON_SPACING
 CHESTNUT_ICON_CENTER_X = LFA_STATUS_CENTER_X + TOP_STATUS_ICON_SPACING
+DRIVE_MODE_ICON_OFFSET_X = 70.0
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
 LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
 TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
@@ -547,6 +552,7 @@ class ClusterUiRenderer:
         self._left_turn_signal_texture = None
         self._right_turn_signal_texture = None
         self._chestnut_textures: dict[str, object] = {}
+        self._drive_mode_textures: dict[bool, object] = {}
         self._background_texture = None
         self._route_video_texture = None
         self._route_video_size: tuple[int, int] | None = None
@@ -738,6 +744,10 @@ class ClusterUiRenderer:
             if texture is not None:
                 rl.unload_texture(texture)
         self._chestnut_textures.clear()
+        for texture in self._drive_mode_textures.values():
+            if texture is not None:
+                rl.unload_texture(texture)
+        self._drive_mode_textures.clear()
         if self._background_texture is not None:
             rl.unload_texture(self._background_texture)
             self._background_texture = None
@@ -3004,6 +3014,27 @@ class ClusterUiRenderer:
         self._draw_top_cruise_set(state, bottom_y)
         self._draw_follow_gap_lane_icon(state, bottom_y, layout_progress)
         self._draw_lfa_status_icon(state, bottom_y, layout_progress)
+        self._draw_drive_mode_icon(state, layout_progress)
+
+    def _draw_drive_mode_icon(self, state: ClusterUiState, layout_progress: float) -> None:
+        mode = state.experimental_mode
+        if mode is None:
+            return
+        if mode not in self._drive_mode_textures:
+            self._drive_mode_textures[mode] = self._load_icon_texture(
+                DRIVE_MODE_ICON_PATHS[mode], "Experimental mode" if mode else "Normal mode",
+            )
+        texture = self._drive_mode_textures[mode]
+        if texture is None:
+            return
+        chestnut_off_x = DESIGN_WIDTH * 0.5 + ACC_OFF_TOP_ROW_SPACING
+        chestnut_x = chestnut_off_x + (CHESTNUT_ICON_CENTER_X - chestnut_off_x) * layout_progress
+        height = LFA_STATUS_ICON_SIZE
+        width = height * texture.width / max(1, texture.height)
+        self._draw_bottom_aligned_texture_icon(
+            texture, chestnut_x - DRIVE_MODE_ICON_OFFSET_X,
+            TURN_SIGNAL_CENTER_Y + height * 0.5, width, height, WHITE,
+        )
 
     def _update_acc_layout_progress(self, state: ClusterUiState) -> float:
         target = 0.0 if state.cruise_display_state == "off" else 1.0
@@ -3272,7 +3303,9 @@ class ClusterUiRenderer:
 
     @staticmethod
     def _cruise_set_speed_text(state: ClusterUiState) -> str:
-        if state.cruise_display_state == "off" or state.cruise_kph is None:
+        if state.cruise_display_state == "off":
+            return "OFF"
+        if state.cruise_kph is None:
             return "---"
         return str(int(round(state.cruise_kph)))
 
