@@ -309,6 +309,13 @@ The cluster loads its icons, background, vehicle model, and font candidates
 from `selfdrive/sp/cluster/assets`; copies of the Chestnut, mode, and
 JetBrainsMono assets are kept there so the HUD does not depend on the main
 comma UI asset paths.
+For 2021-22 Prius/Prius Prime TSS2, the gear display reads the B-gear bit
+from incoming bus-0 `GEAR_PACKET` (0x3BC) when `carParams.carFingerprint`
+identifies `TOYOTA_PRIUS_TSS2`. The bit is used only while the raw gear is D
+and the CAN sample is recent; missing or stale samples fall back to
+`carState.gearShifter`. This display-only override does not alter openpilot's
+vehicle gear or engagement decisions. Disabling live CAN input also disables
+the B display override.
 When cruise control enters `paused` or `engaged`, the top-row items and the LFA
 smoothly return to their normal positions and size over 0.7 seconds.
 Turn-signal positions do not change.

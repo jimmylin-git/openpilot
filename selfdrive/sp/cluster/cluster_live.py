@@ -44,6 +44,7 @@ if str(REPO_ROOT) not in sys.path:
 
 LIVE_SERVICES_BASE = (
     "carState",
+    "carParams",
     "modelV2",
     "radarState",
     "radarTracks",
@@ -1103,6 +1104,8 @@ class OpenpilotLiveSource:
         service = self._service_aliases.get(service, service)
         if service == "drivingModelData":
             self.parser._update_driving_model(data)
+        elif service == "carParams":
+            self.parser._update_car_params(data)
         elif service == "modelV2":
             self.parser._update_model_v2(data, event_t)
         elif service == "lateralPlan":

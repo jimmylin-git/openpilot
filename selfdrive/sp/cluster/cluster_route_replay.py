@@ -75,6 +75,9 @@ RADAR_FRONT_MAX_LONGITUDINAL_M = 180.0
 CORNER_RADAR_REAR_MIN_LONGITUDINAL_M = -180.0
 CCNC_CORNER_RADAR_ADDRESS = 0x162
 ADRV_CORNER_RADAR_ADDRESS = 0x1EA
+PRIUS_TSS2_GEAR_ADDRESS = 0x3BC
+PRIUS_TSS2_PLATFORM = "TOYOTA_PRIUS_TSS2"
+PRIUS_TSS2_GEAR_STALE_S = 2.5
 HYUNDAI_CAMERA_CAN_BUS_MOD = 2
 CORNER_RADAR_DBC_MESSAGES = {
     CCNC_CORNER_RADAR_ADDRESS: "CCNC_0x162",
@@ -904,6 +907,9 @@ class RouteVideoFrameReader:
 
 class RouteLogParser:
     def __init__(self) -> None:
+        self.car_fingerprint: str | None = None
+        self.prius_b_gear: bool | None = None
+        self.prius_gear_t = -999.0
         self.speed_limit_kph: int | None = None
         self.speed_limit_source: str | None = None
         # Populated from longitudinalPlanSP.speedLimit.resolver, which sunnypilot's
@@ -1039,6 +1045,8 @@ class RouteLogParser:
             event_t = float(getattr(event, "logMonoTime", 0)) / 1_000_000_000.0
             if event_type == "carState":
                 frames.append(self._frame_from_car_state(event.carState, event_t))
+            elif event_type == "carParams":
+                self._update_car_params(event.carParams)
             elif event_type == "drivingModelData":
                 self._update_driving_model(event.drivingModelData)
             elif event_type == "modelV2":
@@ -1088,7 +1096,7 @@ class RouteLogParser:
         cruise_state = safe_get(car_state, "cruiseState")
         available = safe_get(cruise_state, "available") if cruise_state is not None else None
         cruise_available = bool(available) if available is not None else None
-        gear_text = self._gear_text_from_car_state(car_state)
+        gear_text = self._display_gear_text(car_state, event_t)
         car_cruise_gap = self._cruise_gap_from_car_state(car_state)
         if car_cruise_gap is not None:
             self.cruise_gap = car_cruise_gap
@@ -1522,13 +1530,20 @@ class RouteLogParser:
         self.radar_detection_t = event_t
 
     def _update_can_detections(self, can_messages: Any, event_t: float, source_service: str = "can") -> None:
-        # Only camera-bus corner radar frames on "can" are used; check the cheap fields before copying data.
+        # Only incoming CAN frames carry the Prius gear flag and corner radar detections.
         if source_service == "sendcan":
             return
         for can_message in can_messages:
             try:
                 address = can_message.address
             except Exception:
+                continue
+            if address == PRIUS_TSS2_GEAR_ADDRESS and self.car_fingerprint == PRIUS_TSS2_PLATFORM:
+                if int(safe_get(can_message, "src", -1)) == 0:
+                    data = bytes(safe_get(can_message, "dat", b""))
+                    if len(data) >= 6:
+                        self.prius_b_gear = (data[1] & 0x3F) == 0 and bool(data[5] & 0x02)
+                        self.prius_gear_t = event_t
                 continue
             if address != CCNC_CORNER_RADAR_ADDRESS and address != ADRV_CORNER_RADAR_ADDRESS:
                 continue
@@ -1549,6 +1564,13 @@ class RouteLogParser:
             else:
                 self.ccnc_corner_detections = parsed
                 self.ccnc_corner_message_t = event_t
+
+    def _update_car_params(self, car_params: Any) -> None:
+        fingerprint = str(safe_get(car_params, "carFingerprint", ""))
+        if fingerprint != self.car_fingerprint:
+            self.prius_b_gear = None
+            self.prius_gear_t = -999.0
+        self.car_fingerprint = fingerprint
 
     def _update_live_tracks(self, live_tracks: Any, event_t: float) -> None:
         points: dict[str, RadarPoint] = {}
@@ -1786,6 +1808,17 @@ class RouteLogParser:
         if "unknown" in gear_name:
             return "U"
         return "M"
+
+    def _display_gear_text(self, car_state: Any, event_t: float) -> str | None:
+        gear_text = self._gear_text_from_car_state(car_state)
+        if (
+            self.car_fingerprint == PRIUS_TSS2_PLATFORM
+            and gear_text == "D"
+            and self.prius_b_gear is True
+            and 0.0 <= event_t - self.prius_gear_t <= PRIUS_TSS2_GEAR_STALE_S
+        ):
+            return "B"
+        return gear_text
 
     def _cruise_gap_from_car_state(self, car_state: Any) -> int | None:
         cruise_gap = safe_optional_int(car_state, "pcmCruiseGap")
