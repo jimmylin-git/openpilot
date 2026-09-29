@@ -133,6 +133,7 @@ FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 0.99
 TOP_STATUS_ICON_SPACING = 142
 ACC_LAYOUT_TRANSITION_SECONDS = 0.7
 ACC_OFF_TOP_ROW_SPACING = TOP_STATUS_ICON_SPACING * 1.7
+ACC_OFF_LFA_SCALE = 4.0
 # The top row holds cruise set speed, follow gap, LFA and the Chestnut icon at equal
 # spacing; shift it left by half a slot so the four slots stay centered between the
 # turn signals and the Chestnut slot clears the right turn signal.
@@ -784,6 +785,8 @@ class ClusterUiRenderer:
             or layout_progress < 1.0
         ):
             self._clear_world()
+            if self.screen_mode != CLUSTER_SCREEN_MODE_DEBUG_GRAPH:
+                self._draw_background_image(self._current_theme())
         else:
             self._render_world(state, signal_lights)
         self._profile_add("render.world", profile_stage)
@@ -3150,7 +3153,7 @@ class ClusterUiRenderer:
         tint = WHITE if active else theme.muted
         alpha = 255 if active else 190
         rotation_deg = -float(state.steering_angle_deg or 0.0)
-        icon_scale = 2.0 - layout_progress
+        icon_scale = 1.0 + (ACC_OFF_LFA_SCALE - 1.0) * (1.0 - layout_progress)
         icon_size = LFA_STATUS_ICON_SIZE * icon_scale
         detail_font_size = TOP_STATUS_DETAIL_FONT_SIZE * icon_scale
         icon_center_x = LFA_STATUS_CENTER_X + (DESIGN_WIDTH * 0.5 - LFA_STATUS_CENTER_X) * (1.0 - layout_progress)

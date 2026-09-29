@@ -285,7 +285,7 @@ lane-change icon is not drawn; the LFA icon uses
 `selfdrive/assets/icons_mici/carrot_wheel_org.png`, rotates by
 `-carState.steeringAngleDeg`, and recolors its white pixels green when LFA is
 active. When cruise control has no set speed (`off`), the LFA wheel and angle
-move together to the screen center and grow to twice their normal size; the
+move together to the screen center and grow to four times their top-row size; the
 cruise, follow-gap, and Chestnut top-row items spread out with even spacing.
 When cruise control enters `paused` or `engaged`, those three items and the LFA
 smoothly return to their normal positions and size over 0.7 seconds.
@@ -482,12 +482,12 @@ to `/data/media/0/cluster_vehicle_objects.jsonl`, which costs CPU and flash
 writes on every drive. Set `CLUSTER_VEHICLE_LOG=1` (accepted truthy values:
 `1`, `true`, `yes`, `on`) to turn the logging back on for a tuning session;
 `CLUSTER_VEHICLE_LOG_PATH` still overrides the output file.
-The 3D driving scene is hidden while ACC is off and appears when ACC is
-available in standby or engaged. On ACC activation, 3D rendering remains hidden
-until the LFA/top-row layout transition has completed, preventing the centered
-LFA animation from overlapping the 3D scene. While ACC is engaged, the ego-lane
-floor uses the original solid green fill (no moving rainbow animation). During ACC
-lane-change states the planned path, ego-lane floor, target-lane floor
+The 3D driving scene is hidden while ACC is off, but the background image remains
+visible. On ACC activation, 3D rendering remains hidden until the LFA/top-row
+layout transition has completed, preventing the centered LFA animation from
+overlapping the 3D scene. While ACC is engaged, the ego-lane floor uses the
+original solid green fill (no moving rainbow animation). During ACC lane-change
+states the planned path, ego-lane floor, target-lane floor
 highlight, ego vehicle box, and detected/radar vehicle boxes follow the
 animated lane-change offset.
 Radar-track vehicle classification rejects points outside model road edges, but
