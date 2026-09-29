@@ -303,8 +303,9 @@ position during transitions. It uses `assets/experimental_white.png` tinted
 gray when ACC is off or green in normal mode while ACC is available, and the
 original-colored `assets/experimental.png` in experimental mode while ACC is
 available. The mode icon displays `std.` or `exp.` underneath at the same
-size and height as the front-distance and ACC speed labels. Live mode uses
-`selfdriveState.experimentalMode`; offroad uses the
+size and height as the front-distance and ACC speed labels. The text reflects
+the actual mode even while ACC is off and remains blank until the mode is
+known. Live mode uses `selfdriveState.experimentalMode`; offroad uses the
 saved `ExperimentalMode` setting. LFA steering angle and front-vehicle distance
 labels omit their `deg` and `m` suffixes. Missing gear, angle, distance, and
 system metric values are left blank rather than drawing dash placeholders.

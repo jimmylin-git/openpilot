@@ -3052,14 +3052,15 @@ class ClusterUiRenderer:
             TURN_SIGNAL_CENTER_Y + height * 0.5, width, height,
             self._current_theme().muted if status == "off" else WHITE if mode else GREEN,
         )
-        self._draw_text(
-            "exp." if mode else "std.",
-            center_x,
-            TOP_STATUS_DETAIL_CENTER_Y,
-            TOP_STATUS_LABEL_FONT_SIZE,
-            self._current_theme().muted if status == "off" else GREEN,
-            anchor="center",
-        )
+        if state.experimental_mode is not None:
+            self._draw_text(
+                "exp." if state.experimental_mode else "std.",
+                center_x,
+                TOP_STATUS_DETAIL_CENTER_Y,
+                TOP_STATUS_LABEL_FONT_SIZE,
+                self._current_theme().muted if status == "off" else GREEN,
+                anchor="center",
+            )
 
     def _update_acc_layout_progress(self, state: ClusterUiState) -> float:
         target = 0.0 if state.cruise_display_state == "off" else 1.0
