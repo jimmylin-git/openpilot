@@ -329,7 +329,7 @@ skip B/D changes and let the display fall back to D while B is held. A
 sub-frame timestamp skew between CAN and `carState` is tolerated while
 checking whether the B-gear sample is recent.
 When cruise control enters `paused` or `engaged`, the top-row items and the LFA
-smoothly return to their normal positions and size over 2 seconds.
+smoothly return to their normal positions and size over 1.5 seconds.
 Turn-signal positions do not change.
 When `--fps` is omitted, `ClusterHudLiveFps` controls the render limit and is
 polled about once per second while running: `0` uncapped diagnostic mode, `1`
