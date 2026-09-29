@@ -70,7 +70,6 @@ CLUSTER_FONT_DIR = CLUSTER_ASSETS_DIR / "fonts"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = CLUSTER_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = CLUSTER_FONT_DIR / "JetBrainsMono-Medium.ttf"
 ORBITRON_BLACK_FONT_PATH = CLUSTER_FONT_DIR / "OrbitronBlack.ttf"
-CLUSTER_FONT_CODEPOINTS = [*range(32, 127), 0x221E]
 # raylib centers text using the font's full em-box height (measure_text_ex's
 # y == the point size), but Orbitron's glyphs sit noticeably higher within
 # that box than the previous font, so anchor="center"/"left"/"right" text
@@ -1465,7 +1464,7 @@ class ClusterUiRenderer:
         for candidate in self._font_candidates():
             if candidate.exists():
                 try:
-                    font = rl.load_font_ex(str(candidate), 200, CLUSTER_FONT_CODEPOINTS, len(CLUSTER_FONT_CODEPOINTS))
+                    font = rl.load_font_ex(str(candidate), 200, None, 0)
                     if font.texture.id > 0:
                         rl.gen_texture_mipmaps(font.texture)
                         rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
@@ -3145,7 +3144,7 @@ class ClusterUiRenderer:
         if self._acc_status(state) == "off":
             distance_text = "--"
         else:
-            distance_text = f"{distance_m:.0f}" if distance_m is not None else "\u221e"
+            distance_text = f"{distance_m:.0f}" if distance_m is not None else "na."
         self._draw_text(
             distance_text,
             icon_center_x,

@@ -284,7 +284,7 @@ unavailable, no text in standby until a set speed arrives, and the set speed
 when paused or engaged at the same size as the front-distance label.
 The front-distance label likewise shows `--` while ACC is off, even when
 a distance is available; at other times it shows the measured distance or
-`∞` when no distance is available.
+`na.` when no distance is available.
 The icon is orange in standby/paused, green
 when engaged and gray when off. Standby is determined by
 `carState.cruiseState.available` even before a set speed arrives. This
