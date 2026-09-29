@@ -281,7 +281,7 @@ vehicle while inactive bars are gray and active bars use `#bb3d91`. The ACC
 status icon (`assets/speed_limit.png`) has the set speed directly underneath:
 gray `--` at the same size and height as the front-distance label when
 unavailable, no text in standby until a set speed arrives, and the set speed
-when paused or engaged.
+when paused or engaged at the same size as the front-distance label.
 The icon is orange in standby/paused, green
 when engaged and gray when off. Standby is determined by
 `carState.cruiseState.available` even before a set speed arrives. This
@@ -302,7 +302,9 @@ A normal/experimental-mode icon sits next to Chestnut and follows its
 position during transitions. It uses `assets/experimental_white.png` tinted
 gray when ACC is off or green in normal mode while ACC is available, and the
 original-colored `assets/experimental.png` in experimental mode while ACC is
-available. Live mode uses `selfdriveState.experimentalMode`; offroad uses the
+available. The mode icon displays `std.` or `exp.` underneath at the same
+size and height as the front-distance and ACC speed labels. Live mode uses
+`selfdriveState.experimentalMode`; offroad uses the
 saved `ExperimentalMode` setting. LFA steering angle and front-vehicle distance
 labels omit their `deg` and `m` suffixes. Missing gear, angle, distance, and
 system metric values are left blank rather than drawing dash placeholders.

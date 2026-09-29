@@ -145,16 +145,15 @@ CHESTNUT_ICON_CENTER_X = DRIVE_MODE_ICON_CENTER_X + TOP_STATUS_ICON_SPACING
 ACC_OFF_ROW_SPACING = (CHESTNUT_ICON_CENTER_X - ACC_STATUS_CENTER_X) / 3.0
 FOLLOW_GAP_OFF_CENTER_X = ACC_STATUS_CENTER_X + ACC_OFF_ROW_SPACING
 DRIVE_MODE_OFF_CENTER_X = ACC_STATUS_CENTER_X + 2 * ACC_OFF_ROW_SPACING
-TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
 LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
 TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 TOP_STATUS_DETAIL_FONT_SIZE = 14.0 * DRIVE_STATUS_SCALE
+TOP_STATUS_LABEL_FONT_SIZE = TOP_STATUS_DETAIL_FONT_SIZE * 0.9
 TOP_STATUS_DETAIL_CENTER_Y = (
     TURN_SIGNAL_CENTER_Y
     + max(FOLLOW_GAP_LANE_ICON_SIZE, LFA_STATUS_ICON_SIZE) * 0.5
     + TOP_STATUS_DETAIL_FONT_SIZE * 0.75
 )
-ACC_SET_SPEED_CENTER_Y = TURN_SIGNAL_CENTER_Y + LFA_STATUS_ICON_SIZE * 0.5 + TOP_CRUISE_FONT_SIZE * 0.65
 # The acceleration gauge is hidden, so move the entire speed readout left
 # within the left panel (~92-582 at y=350).
 SPEED_VALUE_CENTER_X = 275
@@ -3029,8 +3028,8 @@ class ClusterUiRenderer:
             self._draw_text(
                 speed_text,
                 ACC_STATUS_CENTER_X,
-                TOP_STATUS_DETAIL_CENTER_Y if status == "off" else ACC_SET_SPEED_CENTER_Y,
-                TOP_STATUS_DETAIL_FONT_SIZE * 0.9 if status == "off" else TOP_CRUISE_FONT_SIZE,
+                TOP_STATUS_DETAIL_CENTER_Y,
+                TOP_STATUS_LABEL_FONT_SIZE,
                 self._cruise_set_color(state, theme),
                 anchor="center",
             )
@@ -3052,6 +3051,14 @@ class ClusterUiRenderer:
             texture, center_x,
             TURN_SIGNAL_CENTER_Y + height * 0.5, width, height,
             self._current_theme().muted if status == "off" else WHITE if mode else GREEN,
+        )
+        self._draw_text(
+            "exp." if mode else "std.",
+            center_x,
+            TOP_STATUS_DETAIL_CENTER_Y,
+            TOP_STATUS_LABEL_FONT_SIZE,
+            self._current_theme().muted if status == "off" else GREEN,
+            anchor="center",
         )
 
     def _update_acc_layout_progress(self, state: ClusterUiState) -> float:
@@ -3137,7 +3144,7 @@ class ClusterUiRenderer:
                 f"{distance_m:.0f}",
                 icon_center_x,
                 TOP_STATUS_DETAIL_CENTER_Y,
-                TOP_STATUS_DETAIL_FONT_SIZE * 0.9,
+                TOP_STATUS_LABEL_FONT_SIZE,
                 tint,
                 anchor="center",
             )
