@@ -135,7 +135,9 @@ FOLLOW_GAP_BAR_SPAN_TOP_FRAC = 0.5
 FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 0.99
 TOP_STATUS_ICON_SPACING = 115
 ACC_LAYOUT_TRANSITION_SECONDS = 1.5
-ACC_LAYOUT_EASE_STRENGTH = 0.25
+ACC_LAYOUT_SETTLE_SCALE = 1.05
+ACC_LAYOUT_SETTLE_START = 0.40
+ACC_LAYOUT_SETTLE_PEAK = 0.55
 ACC_OFF_LFA_SCALE = 4.0
 ACC_OFF_LFA_OFFSET_Y = 50.0
 # Five equal slots when ACC has a set speed; four equal slots when LFA is centered.
@@ -564,6 +566,8 @@ class ClusterUiRenderer:
         self._acc_layout_target: float | None = None
         self._acc_layout_from = 1.0
         self._acc_layout_transition_started_at = 0.0
+        self._acc_layout_settle_scale = 1.0
+        self._acc_layout_settle_from = 1.0
         self.blink_fps = float(target_fps)
         self._triangle_strip_point_cache: OrderedDict[
             tuple[int, int],
@@ -3070,18 +3074,34 @@ class ClusterUiRenderer:
         if self._acc_layout_progress is None:
             self._acc_layout_progress = target
             self._acc_layout_target = target
+            self._acc_layout_settle_scale = 1.0
+            self._acc_layout_settle_from = 1.0
             return target
         if target != self._acc_layout_target:
             self._acc_layout_from = self._acc_layout_progress
             self._acc_layout_target = target
             self._acc_layout_transition_started_at = now
+            self._acc_layout_settle_from = self._acc_layout_settle_scale
 
         elapsed = now - self._acc_layout_transition_started_at
         transition = clamp(elapsed / ACC_LAYOUT_TRANSITION_SECONDS, 0.0, 1.0)
-        eased = transition + ACC_LAYOUT_EASE_STRENGTH * (smoothstep(transition) - transition)
+        eased = 1.0 - (1.0 - transition) ** 2
         self._acc_layout_progress = self._acc_layout_from + (
             target - self._acc_layout_from
         ) * eased
+        settle_from = max(0.0, self._acc_layout_settle_from - 1.0) * (1.0 - smoothstep(transition))
+        settle_room = max(0.0, ACC_LAYOUT_SETTLE_SCALE - 1.0 - settle_from)
+        if transition <= ACC_LAYOUT_SETTLE_START:
+            settle_progress = 0.0
+        elif transition < ACC_LAYOUT_SETTLE_PEAK:
+            settle_progress = smoothstep(
+                (transition - ACC_LAYOUT_SETTLE_START) / (ACC_LAYOUT_SETTLE_PEAK - ACC_LAYOUT_SETTLE_START)
+            )
+        else:
+            settle_progress = 1.0 - smoothstep(
+                (transition - ACC_LAYOUT_SETTLE_PEAK) / (1.0 - ACC_LAYOUT_SETTLE_PEAK)
+            )
+        self._acc_layout_settle_scale = 1.0 + settle_from + settle_room * settle_progress
         return self._acc_layout_progress
 
     def _draw_follow_gap_lane_icon(
@@ -3185,7 +3205,9 @@ class ClusterUiRenderer:
             tint = WHITE
             alpha = 255
         rotation_deg = -float(state.steering_angle_deg or 0.0)
-        icon_scale = 1.0 + (ACC_OFF_LFA_SCALE - 1.0) * (1.0 - layout_progress)
+        icon_scale = (
+            1.0 + (ACC_OFF_LFA_SCALE - 1.0) * (1.0 - layout_progress)
+        ) * self._acc_layout_settle_scale
         icon_size = LFA_STATUS_ICON_SIZE * icon_scale
         detail_font_size = TOP_STATUS_DETAIL_FONT_SIZE * 0.9 * icon_scale
         icon_center_x = LFA_STATUS_CENTER_X + (DESIGN_WIDTH * 0.5 - LFA_STATUS_CENTER_X) * (1.0 - layout_progress)
