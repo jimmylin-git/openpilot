@@ -135,6 +135,7 @@ FOLLOW_GAP_BAR_SPAN_TOP_FRAC = 0.5
 FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 0.99
 TOP_STATUS_ICON_SPACING = 115
 ACC_LAYOUT_TRANSITION_SECONDS = 1.5
+ACC_LAYOUT_EASE_STRENGTH = 0.25
 ACC_OFF_LFA_SCALE = 4.0
 ACC_OFF_LFA_OFFSET_Y = 50.0
 # Five equal slots when ACC has a set speed; four equal slots when LFA is centered.
@@ -3077,7 +3078,7 @@ class ClusterUiRenderer:
 
         elapsed = now - self._acc_layout_transition_started_at
         transition = clamp(elapsed / ACC_LAYOUT_TRANSITION_SECONDS, 0.0, 1.0)
-        eased = smoothstep(transition)
+        eased = transition + ACC_LAYOUT_EASE_STRENGTH * (smoothstep(transition) - transition)
         self._acc_layout_progress = self._acc_layout_from + (
             target - self._acc_layout_from
         ) * eased
