@@ -280,12 +280,14 @@ ratio and is taller than before while the gap bars keep their own size/spacing;
 all four gap bars stay visible, sit close together, and bottom-align to the
 vehicle while inactive bars are gray and active bars use `#bb3d91`. Cruise set
 speed and `km/h` use the same font size and color; paused cruise keeps the set
-speed but draws it gray, and ACC-off cruise draws gray `OFF`. If ACC is
-available but its set speed is missing, the readout remains `---`. The
-`assets/speed_limit.png` ACC icon to the right of the set-speed text is gray
-while ACC is off and green in standby (`paused`) or engaged; it moves with the
-set-speed text during the top-row transition. It indicates ACC availability,
-not a road speed limit.
+speed but draws it gray, and cruise without a set speed displays gray `OFF`.
+The `assets/speed_limit.png` icon to the right of the set-speed text uses
+`carState.cruiseState.available`: green when ACC is available (including
+standby before a set speed arrives) and gray when unavailable. If the field is
+missing, it falls back to the set-speed display state. The icon moves with the
+set-speed text during the top-row transition; it indicates ACC availability,
+not a road speed limit. Icon color does not enable the 3D scene or move LFA:
+those still require the existing set-speed display state.
 The lane-change icon is not drawn; the LFA icon uses `assets/wheel.png`, rotates by
 `-carState.steeringAngleDeg`, and recolors its white pixels green when LFA is
 active. When cruise control has no set speed (`off`), the LFA wheel and angle

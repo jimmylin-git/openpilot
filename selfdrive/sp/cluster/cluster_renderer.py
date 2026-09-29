@@ -3026,7 +3026,11 @@ class ClusterUiRenderer:
         off_center_x = DESIGN_WIDTH * 0.5 - ACC_OFF_TOP_ROW_SPACING
         cruise_center_x = off_center_x + (TOP_CRUISE_CENTER_X - off_center_x) * layout_progress
         icon_size = LFA_STATUS_ICON_SIZE
-        active = state.cruise_display_state in ("paused", "engaged")
+        active = (
+            state.cruise_available
+            if state.cruise_available is not None
+            else state.cruise_display_state in ("paused", "engaged")
+        )
         self._draw_bottom_aligned_texture_icon(
             texture, cruise_center_x + ACC_STATUS_ICON_OFFSET_X,
             TURN_SIGNAL_CENTER_Y + icon_size * 0.5, icon_size, icon_size,

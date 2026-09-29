@@ -210,6 +210,7 @@ class ClusterUiState:
     lanes: tuple[LaneMarking, ...]
     experimental_mode: bool | None = None
     wheel_critical: bool = False
+    cruise_available: bool | None = None
     camera_view_mode: int = 0
     extra_left_lane_visible: bool = False
     extra_right_lane_visible: bool = False

@@ -172,6 +172,7 @@ class RouteReplayFrame:
     radar_points: tuple[RadarPoint, ...] = ()
     experimental_mode: bool | None = None
     wheel_critical: bool = False
+    cruise_available: bool | None = None
     display_speed_kph: float | None = None
     planned_speed_kph: float | None = None
     planned_accel_mps2: float | None = None
@@ -1084,6 +1085,9 @@ class RouteLogParser:
 
         self.cruise_kph = self._cruise_kph_from_car_state(car_state)
         cruise_display_state = self._cruise_display_state_from_car_state(car_state, self.cruise_kph)
+        cruise_state = safe_get(car_state, "cruiseState")
+        available = safe_get(cruise_state, "available") if cruise_state is not None else None
+        cruise_available = bool(available) if available is not None else None
         gear_text = self._gear_text_from_car_state(car_state)
         car_cruise_gap = self._cruise_gap_from_car_state(car_state)
         if car_cruise_gap is not None:
@@ -1142,6 +1146,7 @@ class RouteLogParser:
             speed_limit_source=self.speed_limit_source,
             cruise_kph=self.cruise_kph,
             cruise_display_state=cruise_display_state,
+            cruise_available=cruise_available,
             gear_text=gear_text,
             cruise_gap=cruise_gap,
             lfa_active=self.lfa_active,
@@ -2163,6 +2168,7 @@ def frame_to_state(frame: RouteReplayFrame) -> ClusterUiState:
         speed_limit_source=frame.speed_limit_source,
         cruise_kph=frame.cruise_kph,
         cruise_display_state=frame.cruise_display_state,
+        cruise_available=frame.cruise_available,
         gear_text=frame.gear_text,
         cruise_gap=frame.cruise_gap,
         lfa_active=frame.lfa_active,
@@ -2353,6 +2359,7 @@ def blend_frames(left: RouteReplayFrame, right: RouteReplayFrame, amount: float)
         speed_limit_source=discrete.speed_limit_source,
         cruise_kph=discrete.cruise_kph,
         cruise_display_state=discrete.cruise_display_state,
+        cruise_available=discrete.cruise_available,
         gear_text=discrete.gear_text,
         cruise_gap=discrete.cruise_gap,
         lfa_active=discrete.lfa_active,
