@@ -3141,9 +3141,12 @@ class ClusterUiRenderer:
                 0.0,
             )
         distance_m = self._front_vehicle_distance_m
-        if distance_m is not None:
+        distance_text = "--" if self._acc_status(state) == "off" else ""
+        if not distance_text and distance_m is not None:
+            distance_text = f"{distance_m:.0f}"
+        if distance_text:
             self._draw_text(
-                f"{distance_m:.0f}",
+                distance_text,
                 icon_center_x,
                 TOP_STATUS_DETAIL_CENTER_Y,
                 TOP_STATUS_LABEL_FONT_SIZE,

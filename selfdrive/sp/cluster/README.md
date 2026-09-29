@@ -282,6 +282,9 @@ status icon (`assets/speed_limit.png`) has the set speed directly underneath:
 gray `--` at the same size and height as the front-distance label when
 unavailable, no text in standby until a set speed arrives, and the set speed
 when paused or engaged at the same size as the front-distance label.
+The front-distance label likewise shows `--` while ACC is off, even when
+a distance is available; at other times it shows the measured distance or
+remains blank when no distance is available.
 The icon is orange in standby/paused, green
 when engaged and gray when off. Standby is determined by
 `carState.cruiseState.available` even before a set speed arrives. This
