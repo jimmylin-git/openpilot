@@ -60,17 +60,15 @@ from cluster_scene import (
     build_cluster_scene,
 )
 from cluster_gles_dmabuf import DirectNv12DmabufError, create_tici_nv12_dmabuf_pool
-from cluster_paths import SELFDRIVE_DIR
+from cluster_paths import CLUSTER_ASSETS_DIR
 from cluster_system_monitor import CHESTNUT_ACTIVE, CHESTNUT_FAILED, CHESTNUT_LOADING, SystemStats, SystemStatsSampler
 from cluster_utils import blink_visible, clamp, smoothstep
 
 
 CLUSTER_DIR = Path(__file__).resolve().parent
-CLUSTER_FONT_DIR = CLUSTER_DIR / "assets" / "fonts"
-OPENPILOT_FONT_DIR = SELFDRIVE_DIR / "assets" / "fonts"
-OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
+CLUSTER_FONT_DIR = CLUSTER_ASSETS_DIR / "fonts"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = CLUSTER_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
-JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
+JETBRAINS_MONO_FONT_PATH = CLUSTER_FONT_DIR / "JetBrainsMono-Medium.ttf"
 ORBITRON_BLACK_FONT_PATH = CLUSTER_FONT_DIR / "OrbitronBlack.ttf"
 # raylib centers text using the font's full em-box height (measure_text_ex's
 # y == the point size), but Orbitron's glyphs sit noticeably higher within
@@ -79,22 +77,22 @@ ORBITRON_BLACK_FONT_PATH = CLUSTER_FONT_DIR / "OrbitronBlack.ttf"
 # font size to compensate (measured from the glyph bbox vs. em-box center
 # across a range of sizes with this font, consistently ~0.11).
 TEXT_VERTICAL_CENTER_OFFSET_RATIO = 0.11
-#VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "car.obj"
-VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "car" / "cybertruck_cluster.obj"
-LFA_ICON_PATH = CLUSTER_DIR / "assets" / "wheel.png"
-FOLLOW_GAP_LANE_ICON_PATH = CLUSTER_DIR / "assets" / "FCD_Lane.png"
-BACKGROUND_IMAGE_PATH = CLUSTER_DIR / "assets" / "bg.png"
-TURN_SIGNAL_LEFT_ICON_PATH = CLUSTER_DIR / "assets" / "cluster_turn_signal_left.png"
-TURN_SIGNAL_RIGHT_ICON_PATH = CLUSTER_DIR / "assets" / "cluster_turn_signal_right.png"
+VEHICLE_MODEL_PATH = CLUSTER_ASSETS_DIR / "models" / "car" / "cybertruck_cluster.obj"
+LFA_ICON_PATH = CLUSTER_ASSETS_DIR / "wheel.png"
+FOLLOW_GAP_LANE_ICON_PATH = CLUSTER_ASSETS_DIR / "FCD_Lane.png"
+BACKGROUND_IMAGE_PATH = CLUSTER_ASSETS_DIR / "bg.png"
+TURN_SIGNAL_LEFT_ICON_PATH = CLUSTER_ASSETS_DIR / "cluster_turn_signal_left.png"
+TURN_SIGNAL_RIGHT_ICON_PATH = CLUSTER_ASSETS_DIR / "cluster_turn_signal_right.png"
+ACC_STATUS_ICON_PATH = CLUSTER_ASSETS_DIR / "speed_limit.png"
 # Same icons the mici UI uses for the Chestnut eGPU: white=loading, green=active, orange=failed.
 CHESTNUT_ICON_PATHS = {
-    CHESTNUT_LOADING: SELFDRIVE_DIR / "assets" / "icons_mici" / "chestnut.png",
-    CHESTNUT_ACTIVE: SELFDRIVE_DIR / "assets" / "icons_mici" / "chestnut_green.png",
-    CHESTNUT_FAILED: SELFDRIVE_DIR / "assets" / "icons_mici" / "chestnut_orange.png",
+    CHESTNUT_LOADING: CLUSTER_ASSETS_DIR / "chestnut.png",
+    CHESTNUT_ACTIVE: CLUSTER_ASSETS_DIR / "chestnut_green.png",
+    CHESTNUT_FAILED: CLUSTER_ASSETS_DIR / "chestnut_orange.png",
 }
 DRIVE_MODE_ICON_PATHS = {
-    False: SELFDRIVE_DIR / "assets" / "icons" / "chffr_wheel.png",
-    True: SELFDRIVE_DIR / "assets" / "icons" / "experimental.png",
+    False: CLUSTER_ASSETS_DIR / "chffr_wheel.png",
+    True: CLUSTER_ASSETS_DIR / "experimental.png",
 }
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
@@ -144,6 +142,7 @@ ACC_OFF_LFA_SCALE = 4.0
 FOLLOW_GAP_LANE_CENTER_X = DESIGN_WIDTH * 0.5 - TOP_STATUS_ICON_SPACING * 0.5
 LFA_STATUS_CENTER_X = FOLLOW_GAP_LANE_CENTER_X + TOP_STATUS_ICON_SPACING
 TOP_CRUISE_CENTER_X = FOLLOW_GAP_LANE_CENTER_X - TOP_STATUS_ICON_SPACING
+ACC_STATUS_ICON_OFFSET_X = 78.0
 CHESTNUT_ICON_CENTER_X = LFA_STATUS_CENTER_X + TOP_STATUS_ICON_SPACING
 DRIVE_MODE_ICON_OFFSET_X = 70.0
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
@@ -548,6 +547,7 @@ class ClusterUiRenderer:
         self._vehicle_model_load_attempted = False
         self._lfa_texture = None
         self._lfa_active_texture = None
+        self._acc_status_texture = None
         self._follow_gap_lane_texture = None
         self._left_turn_signal_texture = None
         self._right_turn_signal_texture = None
@@ -731,6 +731,9 @@ class ClusterUiRenderer:
         if self._lfa_active_texture is not None:
             rl.unload_texture(self._lfa_active_texture)
             self._lfa_active_texture = None
+        if self._acc_status_texture is not None:
+            rl.unload_texture(self._acc_status_texture)
+            self._acc_status_texture = None
         if self._follow_gap_lane_texture is not None:
             rl.unload_texture(self._follow_gap_lane_texture)
             self._follow_gap_lane_texture = None
@@ -1472,20 +1475,10 @@ class ClusterUiRenderer:
 
     def _font_candidates(self) -> list[Path]:
         return [
-            # Preferred cluster font.
             ORBITRON_BLACK_FONT_PATH,
-            OPENPILOT_FONT_DIR / "OrbitronBlack.ttf",
-            # 以下保留原本的候選路徑...
             CLUSTER_FONT_DIR / "GeistMono-Light.ttf",
-            OPENPILOT_FONT_DIR / "GeistMono-Light.ttf",
             KAIGEN_GOTHIC_KR_BOLD_FONT_PATH,
-            OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf",
-            OPENPILOT_ADDON_FONT_DIR / "KaiGenGothicKR-Bold.ttf",
             JETBRAINS_MONO_FONT_PATH,
-            OPENPILOT_FONT_DIR / "JetBrainsMono-Bold.ttf",
-            Path("/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Medium.ttf"),
-            Path("/usr/share/fonts/TTF/JetBrainsMono-Medium.ttf"),
-            Path("/usr/local/share/fonts/JetBrainsMono-Medium.ttf"),
         ]
 
     def _load_vehicle_model(self) -> None:
@@ -1513,6 +1506,8 @@ class ClusterUiRenderer:
             self._vehicle_model = None
 
     def _load_drive_status_textures(self) -> None:
+        if self._acc_status_texture is None:
+            self._acc_status_texture = self._load_icon_texture(ACC_STATUS_ICON_PATH, "ACC status")
         if self._background_texture is None:
             self._background_texture = self._load_icon_texture(
                 BACKGROUND_IMAGE_PATH,
@@ -3012,9 +3007,24 @@ class ClusterUiRenderer:
         )
 
         self._draw_top_cruise_set(state, bottom_y)
+        self._draw_acc_status_icon(state, layout_progress)
         self._draw_follow_gap_lane_icon(state, bottom_y, layout_progress)
         self._draw_lfa_status_icon(state, bottom_y, layout_progress)
         self._draw_drive_mode_icon(state, layout_progress)
+
+    def _draw_acc_status_icon(self, state: ClusterUiState, layout_progress: float) -> None:
+        texture = self._acc_status_texture
+        if texture is None:
+            return
+        off_center_x = DESIGN_WIDTH * 0.5 - ACC_OFF_TOP_ROW_SPACING
+        cruise_center_x = off_center_x + (TOP_CRUISE_CENTER_X - off_center_x) * layout_progress
+        icon_size = LFA_STATUS_ICON_SIZE
+        active = state.cruise_display_state in ("paused", "engaged")
+        self._draw_bottom_aligned_texture_icon(
+            texture, cruise_center_x + ACC_STATUS_ICON_OFFSET_X,
+            TURN_SIGNAL_CENTER_Y + icon_size * 0.5, icon_size, icon_size,
+            GREEN if active else self._current_theme().muted,
+        )
 
     def _draw_drive_mode_icon(self, state: ClusterUiState, layout_progress: float) -> None:
         mode = state.experimental_mode

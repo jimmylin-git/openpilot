@@ -282,6 +282,10 @@ vehicle while inactive bars are gray and active bars use `#bb3d91`. Cruise set
 speed and `km/h` use the same font size and color; paused cruise keeps the set
 speed but draws it gray, and ACC-off cruise draws gray `OFF`. If ACC is
 available but its set speed is missing, the readout remains `---`. The
+`assets/speed_limit.png` ACC icon to the right of the set-speed text is gray
+while ACC is off and green in standby (`paused`) or engaged; it moves with the
+set-speed text during the top-row transition. It indicates ACC availability,
+not a road speed limit.
 lane-change icon is not drawn; the LFA icon uses
 `selfdrive/assets/icons_mici/carrot_wheel_org.png`, rotates by
 `-carState.steeringAngleDeg`, and recolors its white pixels green when LFA is
@@ -289,9 +293,14 @@ active. When cruise control has no set speed (`off`), the LFA wheel and angle
 move together to the screen center and grow to four times their top-row size; the
 cruise, follow-gap, and Chestnut top-row items spread out with even spacing.
 A normal/experimental-mode icon, using the same wheel/experimental PNGs as
-comma's onroad mode button, sits to the left of Chestnut and follows its
+comma's onroad mode button (copied into `cluster/assets`), sits to the left of
+Chestnut and follows its
 position during transitions. Live mode uses `selfdriveState.experimentalMode`;
 offroad uses the saved `ExperimentalMode` setting.
+The cluster loads its icons, background, vehicle model, and font candidates
+from `selfdrive/sp/cluster/assets`; copies of the Chestnut, mode, and
+JetBrainsMono assets are kept there so the HUD does not depend on the main
+comma UI asset paths.
 When cruise control enters `paused` or `engaged`, the top-row items and the LFA
 smoothly return to their normal positions and size over 0.7 seconds.
 Turn-signal positions do not change.
