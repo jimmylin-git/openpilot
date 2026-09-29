@@ -279,8 +279,9 @@ ratio and is taller than before while the gap bars keep their own size/spacing;
 all four gap bars stay visible, sit close together, and bottom-align to the
 vehicle while inactive bars are gray and active bars use `#bb3d91`. The ACC
 status icon (`assets/speed_limit.png`) has the set speed directly underneath:
-gray `off` when unavailable, `-` in standby until a set speed arrives, and the
-set speed when paused or engaged. The icon is orange in standby/paused, green
+gray `off` slightly narrower than the icon when unavailable, no text in
+standby until a set speed arrives, and the set speed when paused or engaged.
+The icon is orange in standby/paused, green
 when engaged and gray when off. Standby is determined by
 `carState.cruiseState.available` even before a set speed arrives. This
 availability does not enable the 3D scene or move LFA: those still require
@@ -302,7 +303,8 @@ gray when ACC is off or green in normal mode while ACC is available, and the
 original-colored `assets/experimental.png` in experimental mode while ACC is
 available. Live mode uses `selfdriveState.experimentalMode`; offroad uses the
 saved `ExperimentalMode` setting. LFA steering angle and front-vehicle distance
-labels omit their `deg` and `m` suffixes.
+labels omit their `deg` and `m` suffixes. Missing gear, angle, distance, and
+system metric values are left blank rather than drawing dash placeholders.
 The cluster loads its icons, background, vehicle model, and font candidates
 from `selfdrive/sp/cluster/assets`; copies of the Chestnut, mode, and
 JetBrainsMono assets are kept there so the HUD does not depend on the main

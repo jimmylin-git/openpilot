@@ -2551,33 +2551,31 @@ class ClusterUiRenderer:
             None if temperature is None else min(100.0, temperature)
         )
         self._draw_text("TEMP", panel_x + pad_x, panel_y + 62, 17, theme.muted)
-        self._draw_text(
-            "-- °C" if temperature is None else f"{temperature:.1f} °C",
-            panel_x + panel_w - pad_x,
-            panel_y + 62,
-            17,
-            temperature_color if temperature is not None else theme.muted,
-            anchor="right",
-        )
+        if temperature is not None:
+            self._draw_text(
+                f"{temperature:.1f} °C",
+                panel_x + panel_w - pad_x,
+                panel_y + 62,
+                17,
+                temperature_color,
+                anchor="right",
+            )
 
         mem_percent = stats.memory_used_percent
         mem_color = self._system_metric_color(mem_percent)
         self._draw_text("MEM", panel_x + pad_x, panel_y + 86, 17, theme.muted)
-        self._draw_text(
-            self._memory_text(stats),
-            panel_x + 86,
-            panel_y + 86,
-            17,
-            theme.text if stats.memory_used_bytes is not None else theme.muted,
-        )
-        self._draw_text(
-            self._percent_text(mem_percent),
-            panel_x + panel_w - pad_x,
-            panel_y + 86,
-            17,
-            mem_color,
-            anchor="right",
-        )
+        memory_text = self._memory_text(stats)
+        if memory_text:
+            self._draw_text(memory_text, panel_x + 86, panel_y + 86, 17, theme.text)
+        if mem_percent is not None:
+            self._draw_text(
+                self._percent_text(mem_percent),
+                panel_x + panel_w - pad_x,
+                panel_y + 86,
+                17,
+                mem_color,
+                anchor="right",
+            )
         self._draw_percent_bar(panel_x + pad_x, panel_y + 104, panel_w - pad_x * 2, 12, mem_percent, mem_color)
 
         cpu_header_y = panel_y + 128
@@ -2606,7 +2604,8 @@ class ClusterUiRenderer:
             color = self._system_metric_color(percent)
             text_size = 15 if columns == 2 else 12
             self._draw_text(f"C{index}", cell_x, line_y + 8, text_size, theme.muted)
-            self._draw_text(self._percent_text(percent), cell_x + cell_w, line_y + 8, text_size, color, anchor="right")
+            if percent is not None:
+                self._draw_text(self._percent_text(percent), cell_x + cell_w, line_y + 8, text_size, color, anchor="right")
             self._draw_percent_bar(cell_x, line_y + 19, cell_w, 6, percent, color)
 
     def _draw_system_top_metrics(self) -> None:
@@ -2614,34 +2613,34 @@ class ClusterUiRenderer:
         stats = self._system_stats.sample()
         temperature = stats.temperature_c
         memory_percent = stats.memory_used_percent
-        temperature_text = "--" if temperature is None else f"{temperature:.0f}C"
-        memory_text = "--" if memory_percent is None else f"{memory_percent:.0f}%"
-        self._draw_text(
-            f"TEMP {temperature_text}",
-            TOP_SYSTEM_METRIC_RIGHT_X,
-            TOP_SYSTEM_METRIC_Y,
-            TOP_SYSTEM_METRIC_FONT_SIZE,
-            theme.text,
-            anchor="center",
-        )
-        self._draw_text(
-            f"MEM {memory_text}",
-            TOP_SYSTEM_METRIC_LEFT_X,
-            TOP_SYSTEM_METRIC_Y,
-            TOP_SYSTEM_METRIC_FONT_SIZE,
-            theme.text,
-            anchor="center",
-        )
+        if temperature is not None:
+            self._draw_text(
+                f"TEMP {temperature:.0f}C",
+                TOP_SYSTEM_METRIC_RIGHT_X,
+                TOP_SYSTEM_METRIC_Y,
+                TOP_SYSTEM_METRIC_FONT_SIZE,
+                theme.text,
+                anchor="center",
+            )
+        if memory_percent is not None:
+            self._draw_text(
+                f"MEM {memory_percent:.0f}%",
+                TOP_SYSTEM_METRIC_LEFT_X,
+                TOP_SYSTEM_METRIC_Y,
+                TOP_SYSTEM_METRIC_FONT_SIZE,
+                theme.text,
+                anchor="center",
+            )
         cpu_percent = stats.cpu_total_percent
-        cpu_text = "--" if cpu_percent is None else f"{cpu_percent:.0f}%"
-        self._draw_text(
-            f"CPU {cpu_text}",
-            TOP_SYSTEM_METRIC_LEFT_X,
-            TOP_SYSTEM_METRIC_Y + TOP_SYSTEM_METRIC_LINE_GAP,
-            TOP_SYSTEM_METRIC_FONT_SIZE,
-            theme.text,
-            anchor="center",
-        )
+        if cpu_percent is not None:
+            self._draw_text(
+                f"CPU {cpu_percent:.0f}%",
+                TOP_SYSTEM_METRIC_LEFT_X,
+                TOP_SYSTEM_METRIC_Y + TOP_SYSTEM_METRIC_LINE_GAP,
+                TOP_SYSTEM_METRIC_FONT_SIZE,
+                theme.text,
+                anchor="center",
+            )
         self._draw_chestnut_icon(stats.chestnut_state)
 
     def _draw_chestnut_icon(self, chestnut_state: str | None) -> None:
@@ -2735,8 +2734,10 @@ class ClusterUiRenderer:
                         (
                             (
                                 "CAL / LAT",
-                                f"{self._optional_percent_text(live_debug.live_delay_calibration_percent)} / "
-                                f"{self._optional_seconds_text(live_debug.live_delay_lateral_s, 2)}",
+                                " / ".join(filter(None, (
+                                    self._optional_percent_text(live_debug.live_delay_calibration_percent),
+                                    self._optional_seconds_text(live_debug.live_delay_lateral_s, 2),
+                                ))),
                             ),
                         ),
                     )
@@ -2747,19 +2748,23 @@ class ClusterUiRenderer:
                 or live_debug.live_torque_lat_accel_factor is not None
                 or live_debug.live_torque_friction is not None
             ):
-                live_valid = "--" if live_debug.live_torque_valid is None else "ON" if live_debug.live_torque_valid else "OFF"
+                live_valid = "" if live_debug.live_torque_valid is None else "ON" if live_debug.live_torque_valid else "OFF"
                 sections.append(
                     (
                         "LIVE TORQUE",
                         (
                             (
                                 "STATE",
-                                f"{live_valid} / {self._optional_percent_text(live_debug.live_torque_calibration_percent)}",
+                                " / ".join(filter(None, (
+                                    live_valid, self._optional_percent_text(live_debug.live_torque_calibration_percent),
+                                ))),
                             ),
                             (
                                 "FACT / FRIC",
-                                f"{self._optional_float_text(live_debug.live_torque_lat_accel_factor, 2)} / "
-                                f"{self._optional_float_text(live_debug.live_torque_friction, 2)}",
+                                " / ".join(filter(None, (
+                                    self._optional_float_text(live_debug.live_torque_lat_accel_factor, 2),
+                                    self._optional_float_text(live_debug.live_torque_friction, 2),
+                                ))),
                             ),
                         ),
                     )
@@ -2775,8 +2780,10 @@ class ClusterUiRenderer:
                         (
                             (
                                 "SR LIVE / CUSTOM",
-                                f"{self._optional_float_text(live_debug.live_steer_ratio, 1)} / "
-                                f"{self._optional_float_text(live_debug.custom_steer_ratio, 1)}",
+                                " / ".join(filter(None, (
+                                    self._optional_float_text(live_debug.live_steer_ratio, 1),
+                                    self._optional_float_text(live_debug.custom_steer_ratio, 1),
+                                ))),
                             ),
                             ("SAD", self._optional_seconds_text(live_debug.steer_actuator_delay_s, 2)),
                         ),
@@ -2794,18 +2801,18 @@ class ClusterUiRenderer:
     @staticmethod
     def _optional_percent_text(value: float | None) -> str:
         if value is None or not math.isfinite(value):
-            return "--%"
+            return ""
         return f"{value:.0f}%"
 
     @staticmethod
     def _optional_float_text(value: float | None, digits: int) -> str:
         if value is None or not math.isfinite(value):
-            return "--"
+            return ""
         return f"{value:.{digits}f}"
 
     def _optional_seconds_text(self, value: float | None, digits: int) -> str:
         text = self._optional_float_text(value, digits)
-        return text if text == "--" else f"{text} s"
+        return f"{text} s" if text else ""
 
     def _draw_percent_bar(
         self,
@@ -2829,7 +2836,7 @@ class ClusterUiRenderer:
     @staticmethod
     def _memory_text(stats: SystemStats) -> str:
         if stats.memory_used_bytes is None or stats.memory_total_bytes is None:
-            return "--/-- GB"
+            return ""
         used_gib = stats.memory_used_bytes / (1024.0 ** 3)
         total_gib = stats.memory_total_bytes / (1024.0 ** 3)
         return f"{used_gib:.1f}/{total_gib:.1f} GB"
@@ -2837,7 +2844,7 @@ class ClusterUiRenderer:
     @staticmethod
     def _percent_text(percent: float | None) -> str:
         if percent is None:
-            return "--%"
+            return ""
         return f"{clamp(percent, 0.0, 100.0):3.0f}%"
 
     def _system_metric_color(self, percent: float | None) -> tuple[int, int, int]:
@@ -2993,16 +3000,15 @@ class ClusterUiRenderer:
     def _draw_drive_status(self, state: ClusterUiState) -> None:
         layout_progress = self._acc_layout_progress if self._acc_layout_progress is not None else 1.0
         gear_text = (state.gear_text or "").strip().upper()
-        # Keep the status row visible even when its live data is unavailable.
-        gear_display = gear_text[:2] if gear_text else "-"
-        self._draw_text(
-            gear_display,
-            GEAR_STATUS_CENTER_X,
-            GEAR_STATUS_CENTER_Y,
-            GEAR_STATUS_FONT_SIZE,
-            WHITE,
-            anchor="center",
-        )
+        if gear_text:
+            self._draw_text(
+                gear_text[:2],
+                GEAR_STATUS_CENTER_X,
+                GEAR_STATUS_CENTER_Y,
+                GEAR_STATUS_FONT_SIZE,
+                WHITE,
+                anchor="center",
+            )
 
         self._draw_acc_status_icon(state)
         self._draw_follow_gap_lane_icon(state, layout_progress)
@@ -3018,10 +3024,20 @@ class ClusterUiRenderer:
             self._acc_status_texture, ACC_STATUS_CENTER_X,
             TURN_SIGNAL_CENTER_Y + icon_size * 0.5, icon_size, icon_size, tint,
         )
-        self._draw_text(
-            self._cruise_set_speed_text(state), ACC_STATUS_CENTER_X, ACC_SET_SPEED_CENTER_Y,
-            TOP_CRUISE_FONT_SIZE, self._cruise_set_color(state, theme), anchor="center",
-        )
+        speed_text = self._cruise_set_speed_text(state)
+        if speed_text:
+            font_size = TOP_CRUISE_FONT_SIZE
+            if status == "off":
+                text_width, _ = self._measure_text(speed_text, font_size)
+                if text_width > 0:
+                    font_size = min(font_size, font_size * icon_size * 0.9 / text_width)
+                    fitted_width, _ = self._measure_text(speed_text, font_size)
+                    if fitted_width > icon_size * 0.9:
+                        font_size *= icon_size * 0.9 / fitted_width
+            self._draw_text(
+                speed_text, ACC_STATUS_CENTER_X, ACC_SET_SPEED_CENTER_Y,
+                font_size, self._cruise_set_color(state, theme), anchor="center",
+            )
 
     def _draw_drive_mode_icon(self, state: ClusterUiState, layout_progress: float) -> None:
         status = self._acc_status(state)
@@ -3120,15 +3136,15 @@ class ClusterUiRenderer:
                 0.0,
             )
         distance_m = self._front_vehicle_distance_m
-        distance_text = f"{distance_m:.0f}" if distance_m is not None else "--"
-        self._draw_text(
-            distance_text,
-            icon_center_x,
-            TOP_STATUS_DETAIL_CENTER_Y,
-            TOP_STATUS_DETAIL_FONT_SIZE * 0.9,
-            tint,
-            anchor="center",
-        )
+        if distance_m is not None:
+            self._draw_text(
+                f"{distance_m:.0f}",
+                icon_center_x,
+                TOP_STATUS_DETAIL_CENTER_Y,
+                TOP_STATUS_DETAIL_FONT_SIZE * 0.9,
+                tint,
+                anchor="center",
+            )
 
     def _draw_bottom_aligned_texture_icon(
         self,
@@ -3213,15 +3229,15 @@ class ClusterUiRenderer:
         font_size: float,
     ) -> None:
         angle = state.steering_angle_deg
-        angle_text = f"{angle:+.1f}" if angle is not None and math.isfinite(angle) else "--"
-        self._draw_text(
-            angle_text,
-            center_x,
-            center_y,
-            font_size,
-            color,
-            anchor="center",
-        )
+        if angle is not None and math.isfinite(angle):
+            self._draw_text(
+                f"{angle:+.1f}",
+                center_x,
+                center_y,
+                font_size,
+                color,
+                anchor="center",
+            )
 
     def _draw_speed_block(self, state: ClusterUiState) -> None:
         theme = self._current_theme()
@@ -3293,7 +3309,7 @@ class ClusterUiRenderer:
         if ClusterUiRenderer._acc_status(state) == "off":
             return "off"
         if state.cruise_kph is None:
-            return "-"
+            return ""
         return str(int(round(state.cruise_kph)))
 
     @staticmethod
