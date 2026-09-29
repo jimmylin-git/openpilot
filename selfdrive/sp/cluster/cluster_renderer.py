@@ -92,7 +92,7 @@ CHESTNUT_ICON_PATHS = {
     CHESTNUT_FAILED: CLUSTER_ASSETS_DIR / "chestnut_orange.png",
 }
 DRIVE_MODE_ICON_PATHS = {
-    False: CLUSTER_ASSETS_DIR / "chffr_wheel.png",
+    False: CLUSTER_ASSETS_DIR / "experimental_white.png",
     True: CLUSTER_ASSETS_DIR / "experimental.png",
 }
 TURN_SIGNAL_LEFT_CENTER_X = 610
@@ -133,19 +133,18 @@ FOLLOW_GAP_LANE_CONTENT_TOP_FRAC = 16.0 / 128.0
 FOLLOW_GAP_LANE_CONTENT_BOTTOM_FRAC = 111.0 / 128.0
 FOLLOW_GAP_BAR_SPAN_TOP_FRAC = 0.5
 FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 0.99
-TOP_STATUS_ICON_SPACING = 142
+TOP_STATUS_ICON_SPACING = 115
 ACC_LAYOUT_TRANSITION_SECONDS = 0.7
-ACC_OFF_TOP_ROW_SPACING = TOP_STATUS_ICON_SPACING * 1.7
 ACC_OFF_LFA_SCALE = 4.0
-# The top row holds cruise set speed, follow gap, LFA and the Chestnut icon at equal
-# spacing; shift it left by half a slot so the four slots stay centered between the
-# turn signals and the Chestnut slot clears the right turn signal.
-FOLLOW_GAP_LANE_CENTER_X = DESIGN_WIDTH * 0.5 - TOP_STATUS_ICON_SPACING * 0.5
+# Five equal slots when ACC has a set speed; four equal slots when LFA is centered.
+ACC_STATUS_CENTER_X = DESIGN_WIDTH * 0.5 - 2 * TOP_STATUS_ICON_SPACING
+FOLLOW_GAP_LANE_CENTER_X = ACC_STATUS_CENTER_X + TOP_STATUS_ICON_SPACING
 LFA_STATUS_CENTER_X = FOLLOW_GAP_LANE_CENTER_X + TOP_STATUS_ICON_SPACING
-TOP_CRUISE_CENTER_X = FOLLOW_GAP_LANE_CENTER_X - TOP_STATUS_ICON_SPACING
-ACC_STATUS_ICON_OFFSET_X = 78.0
-CHESTNUT_ICON_CENTER_X = LFA_STATUS_CENTER_X + TOP_STATUS_ICON_SPACING
-DRIVE_MODE_ICON_OFFSET_X = 70.0
+DRIVE_MODE_ICON_CENTER_X = LFA_STATUS_CENTER_X + TOP_STATUS_ICON_SPACING
+CHESTNUT_ICON_CENTER_X = DRIVE_MODE_ICON_CENTER_X + TOP_STATUS_ICON_SPACING
+ACC_OFF_ROW_SPACING = (CHESTNUT_ICON_CENTER_X - ACC_STATUS_CENTER_X) / 3.0
+FOLLOW_GAP_OFF_CENTER_X = ACC_STATUS_CENTER_X + ACC_OFF_ROW_SPACING
+DRIVE_MODE_OFF_CENTER_X = ACC_STATUS_CENTER_X + 2 * ACC_OFF_ROW_SPACING
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
 LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
 TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
@@ -155,13 +154,11 @@ TOP_STATUS_DETAIL_CENTER_Y = (
     + max(FOLLOW_GAP_LANE_ICON_SIZE, LFA_STATUS_ICON_SIZE) * 0.5
     + TOP_STATUS_DETAIL_FONT_SIZE * 0.75
 )
+ACC_SET_SPEED_CENTER_Y = TURN_SIGNAL_CENTER_Y + LFA_STATUS_ICON_SIZE * 0.5 + TOP_CRUISE_FONT_SIZE * 0.65
 # The acceleration gauge is hidden, so move the entire speed readout left
 # within the left panel (~92-582 at y=350).
 SPEED_VALUE_CENTER_X = 275
 SPEED_VALUE_CENTER_Y = 350
-# Speed limit sign is no longer drawn (source data unreliable), but this radius is
-# still used by _drive_status_bottom_y() to anchor the row below the turn signals.
-SPEED_LIMIT_SIGN_RADIUS = 56.0
 SYSTEM_PANEL_X = 1416
 SYSTEM_PANEL_Y = 118
 SYSTEM_PANEL_W = 476
@@ -2667,9 +2664,7 @@ class ClusterUiRenderer:
             alpha = int(255 * (0.35 + 0.65 * (0.5 - 0.5 * math.cos(time.monotonic() * 6.0))))
         height = LFA_STATUS_ICON_SIZE
         width = height * texture.width / max(1, texture.height)
-        layout_progress = self._acc_layout_progress if self._acc_layout_progress is not None else 1.0
-        off_center_x = DESIGN_WIDTH * 0.5 + ACC_OFF_TOP_ROW_SPACING
-        center_x = off_center_x + (CHESTNUT_ICON_CENTER_X - off_center_x) * layout_progress
+        center_x = CHESTNUT_ICON_CENTER_X
         self._draw_bottom_aligned_texture_icon(
             texture,
             center_x,
@@ -2998,11 +2993,7 @@ class ClusterUiRenderer:
     def _draw_drive_status(self, state: ClusterUiState) -> None:
         layout_progress = self._acc_layout_progress if self._acc_layout_progress is not None else 1.0
         gear_text = (state.gear_text or "").strip().upper()
-        # Always draw this row (gear / cruise set speed / follow gap / LFA), even
-        # offroad when every field is None. Each sub-draw already falls back to a
-        # muted/gray "no data" look (gear "-", cruise set "---", empty follow gap
-        # bars, muted LFA icon) instead of disappearing entirely.
-        bottom_y = self._drive_status_bottom_y(state)
+        # Keep the status row visible even when its live data is unavailable.
         gear_display = gear_text[:2] if gear_text else "-"
         self._draw_text(
             gear_display,
@@ -3013,34 +3004,28 @@ class ClusterUiRenderer:
             anchor="center",
         )
 
-        self._draw_top_cruise_set(state, bottom_y)
-        self._draw_acc_status_icon(state, layout_progress)
-        self._draw_follow_gap_lane_icon(state, bottom_y, layout_progress)
-        self._draw_lfa_status_icon(state, bottom_y, layout_progress)
+        self._draw_acc_status_icon(state)
+        self._draw_follow_gap_lane_icon(state, layout_progress)
+        self._draw_lfa_status_icon(state, layout_progress)
         self._draw_drive_mode_icon(state, layout_progress)
 
-    def _draw_acc_status_icon(self, state: ClusterUiState, layout_progress: float) -> None:
-        texture = self._acc_status_texture
-        if texture is None:
-            return
-        off_center_x = DESIGN_WIDTH * 0.5 - ACC_OFF_TOP_ROW_SPACING
-        cruise_center_x = off_center_x + (TOP_CRUISE_CENTER_X - off_center_x) * layout_progress
+    def _draw_acc_status_icon(self, state: ClusterUiState) -> None:
+        theme = self._current_theme()
+        status = self._acc_status(state)
+        tint = GREEN if status == "engaged" else AMBER if status in ("standby", "paused") else theme.muted
         icon_size = LFA_STATUS_ICON_SIZE
-        active = (
-            state.cruise_available
-            if state.cruise_available is not None
-            else state.cruise_display_state in ("paused", "engaged")
-        )
         self._draw_bottom_aligned_texture_icon(
-            texture, cruise_center_x + ACC_STATUS_ICON_OFFSET_X,
-            TURN_SIGNAL_CENTER_Y + icon_size * 0.5, icon_size, icon_size,
-            GREEN if active else self._current_theme().muted,
+            self._acc_status_texture, ACC_STATUS_CENTER_X,
+            TURN_SIGNAL_CENTER_Y + icon_size * 0.5, icon_size, icon_size, tint,
+        )
+        self._draw_text(
+            self._cruise_set_speed_text(state), ACC_STATUS_CENTER_X, ACC_SET_SPEED_CENTER_Y,
+            TOP_CRUISE_FONT_SIZE, self._cruise_set_color(state, theme), anchor="center",
         )
 
     def _draw_drive_mode_icon(self, state: ClusterUiState, layout_progress: float) -> None:
-        mode = state.experimental_mode
-        if mode is None:
-            return
+        status = self._acc_status(state)
+        mode = bool(state.experimental_mode) and status != "off"
         if mode not in self._drive_mode_textures:
             self._drive_mode_textures[mode] = self._load_icon_texture(
                 DRIVE_MODE_ICON_PATHS[mode], "Experimental mode" if mode else "Normal mode",
@@ -3048,13 +3033,13 @@ class ClusterUiRenderer:
         texture = self._drive_mode_textures[mode]
         if texture is None:
             return
-        chestnut_off_x = DESIGN_WIDTH * 0.5 + ACC_OFF_TOP_ROW_SPACING
-        chestnut_x = chestnut_off_x + (CHESTNUT_ICON_CENTER_X - chestnut_off_x) * layout_progress
+        center_x = DRIVE_MODE_OFF_CENTER_X + (DRIVE_MODE_ICON_CENTER_X - DRIVE_MODE_OFF_CENTER_X) * layout_progress
         height = LFA_STATUS_ICON_SIZE
         width = height * texture.width / max(1, texture.height)
         self._draw_bottom_aligned_texture_icon(
-            texture, chestnut_x - DRIVE_MODE_ICON_OFFSET_X,
-            TURN_SIGNAL_CENTER_Y + height * 0.5, width, height, WHITE,
+            texture, center_x,
+            TURN_SIGNAL_CENTER_Y + height * 0.5, width, height,
+            self._current_theme().muted if status == "off" else WHITE if mode else GREEN,
         )
 
     def _update_acc_layout_progress(self, state: ClusterUiState) -> float:
@@ -3077,26 +3062,9 @@ class ClusterUiRenderer:
         ) * eased
         return self._acc_layout_progress
 
-    def _drive_status_bottom_y(self, state: ClusterUiState) -> float:
-        speed_text = self._cruise_set_speed_text(state)
-        speed_spacing = max(1.0, TOP_CRUISE_FONT_SIZE * 0.02)
-        _, speed_h = self._measure_text(speed_text, TOP_CRUISE_FONT_SIZE, speed_spacing)
-        row_h = max(
-            LFA_STATUS_ICON_SIZE,
-            FOLLOW_GAP_LANE_ICON_SIZE,
-            speed_h,
-        )
-        # This row (cruise set speed / follow gap / LFA / Chestnut) lives at the same
-        # height as the turn signals; it used to reuse the speed limit sign's center Y
-        # as its anchor back when the sign was drawn on that row, but the sign has since
-        # moved (then been removed), so anchor on TURN_SIGNAL_CENTER_Y directly to keep
-        # this row's layout unchanged.
-        return TURN_SIGNAL_CENTER_Y - SPEED_LIMIT_SIGN_RADIUS + row_h
-
     def _draw_follow_gap_lane_icon(
         self,
         state: ClusterUiState,
-        bottom_y: float,
         layout_progress: float,
     ) -> None:
         theme = self._current_theme()
@@ -3106,14 +3074,12 @@ class ClusterUiRenderer:
         bar_active_color = (*tint, alpha)
         bar_inactive_color = (*theme.muted, 130)
 
-        off_center_x = DESIGN_WIDTH * 0.5
+        off_center_x = FOLLOW_GAP_OFF_CENTER_X
         icon_center_x = off_center_x + (FOLLOW_GAP_LANE_CENTER_X - off_center_x) * layout_progress
         icon_size = FOLLOW_GAP_LANE_ICON_SIZE
         icon_center_y = TURN_SIGNAL_CENTER_Y
         icon_top_y = icon_center_y - icon_size * 0.5
         if self._follow_gap_lane_texture is not None:
-            # Pass icon_center_y (not bottom_y) so the texture's vertical center lands on
-            # TURN_SIGNAL_CENTER_Y, matching the gap bars drawn below and the other top-row icons.
             self._draw_bottom_aligned_texture_icon(
                 self._follow_gap_lane_texture,
                 icon_center_x,
@@ -3154,12 +3120,12 @@ class ClusterUiRenderer:
                 0.0,
             )
         distance_m = self._front_vehicle_distance_m
-        distance_text = f"{distance_m:.0f}m" if distance_m is not None else "--m"
+        distance_text = f"{distance_m:.0f}" if distance_m is not None else "--"
         self._draw_text(
             distance_text,
             icon_center_x,
             TOP_STATUS_DETAIL_CENTER_Y,
-            TOP_STATUS_DETAIL_FONT_SIZE,
+            TOP_STATUS_DETAIL_FONT_SIZE * 0.9,
             tint,
             anchor="center",
         )
@@ -3183,19 +3149,7 @@ class ClusterUiRenderer:
         rl.draw_texture_pro(texture, source, dest, origin, rotation_deg, rl_color(tint, alpha))
         return True
 
-    def _draw_top_cruise_set(self, state: ClusterUiState, bottom_y: float) -> None:
-        theme = self._current_theme()
-        speed_text = self._cruise_set_speed_text(state)
-        speed_color = self._cruise_set_color(state, theme)
-        speed_spacing = max(1.0, TOP_CRUISE_FONT_SIZE * 0.02)
-        _, speed_h = self._measure_text(speed_text, TOP_CRUISE_FONT_SIZE, speed_spacing)
-        text_center_y = TURN_SIGNAL_CENTER_Y
-        layout_progress = self._acc_layout_progress if self._acc_layout_progress is not None else 1.0
-        off_center_x = DESIGN_WIDTH * 0.5 - ACC_OFF_TOP_ROW_SPACING
-        center_x = off_center_x + (TOP_CRUISE_CENTER_X - off_center_x) * layout_progress
-        self._draw_text(speed_text, center_x, text_center_y, TOP_CRUISE_FONT_SIZE, speed_color, anchor="center")
-
-    def _draw_lfa_status_icon(self, state: ClusterUiState, bottom_y: float, layout_progress: float) -> None:
+    def _draw_lfa_status_icon(self, state: ClusterUiState, layout_progress: float) -> None:
         theme = self._current_theme()
         active = bool(state.lfa_active)
         texture = self._lfa_active_texture if active and self._lfa_active_texture is not None else self._lfa_texture
@@ -3208,7 +3162,7 @@ class ClusterUiRenderer:
         rotation_deg = -float(state.steering_angle_deg or 0.0)
         icon_scale = 1.0 + (ACC_OFF_LFA_SCALE - 1.0) * (1.0 - layout_progress)
         icon_size = LFA_STATUS_ICON_SIZE * icon_scale
-        detail_font_size = TOP_STATUS_DETAIL_FONT_SIZE * icon_scale
+        detail_font_size = TOP_STATUS_DETAIL_FONT_SIZE * 0.9 * icon_scale
         icon_center_x = LFA_STATUS_CENTER_X + (DESIGN_WIDTH * 0.5 - LFA_STATUS_CENTER_X) * (1.0 - layout_progress)
         acc_off_center_y = DESIGN_HEIGHT * 0.5 - detail_font_size * 0.625
         icon_center_y = TURN_SIGNAL_CENTER_Y + (acc_off_center_y - TURN_SIGNAL_CENTER_Y) * (1.0 - layout_progress)
@@ -3259,7 +3213,7 @@ class ClusterUiRenderer:
         font_size: float,
     ) -> None:
         angle = state.steering_angle_deg
-        angle_text = f"{angle:+.1f}deg" if angle is not None and math.isfinite(angle) else "--deg"
+        angle_text = f"{angle:+.1f}" if angle is not None and math.isfinite(angle) else "--"
         self._draw_text(
             angle_text,
             center_x,
@@ -3323,21 +3277,31 @@ class ClusterUiRenderer:
             self._draw_text(ch, slot_center_x, center_y, font_size, color, anchor="center")
 
     @staticmethod
+    def _acc_status(state: ClusterUiState) -> str:
+        if state.cruise_display_state == "engaged":
+            return "engaged"
+        if state.cruise_display_state == "paused":
+            return "paused"
+        return "standby" if state.cruise_available else "off"
+
+    @staticmethod
     def _cruise_set_visible(state: ClusterUiState) -> bool:
         return state.cruise_kph is not None and state.cruise_display_state != "off"
 
     @staticmethod
     def _cruise_set_speed_text(state: ClusterUiState) -> str:
-        if state.cruise_display_state == "off":
-            return "OFF"
+        if ClusterUiRenderer._acc_status(state) == "off":
+            return "off"
         if state.cruise_kph is None:
-            return "---"
+            return "-"
         return str(int(round(state.cruise_kph)))
 
     @staticmethod
     def _cruise_set_color(state: ClusterUiState, theme: ClusterTheme) -> tuple[int, int, int]:
-        if state.cruise_display_state == "off" or state.cruise_kph is None:
+        if ClusterUiRenderer._acc_status(state) == "off":
             return theme.muted
+        if state.cruise_kph is None:
+            return AMBER
         if state.cruise_display_state == "paused":
             return theme.muted
         if state.speed_limit_kph is not None and state.cruise_kph == state.speed_limit_kph:

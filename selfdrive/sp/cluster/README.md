@@ -272,22 +272,21 @@ phase. The top HUD also uses `carState.gearShifter`, `gearStep`, `pcmCruiseGap`,
 `selfdriveState.personality`, and `carControl.latActive` to show gear
 (`P/R/N/D/1-8`) in a smaller transparent rounded-square outline, front gap bars,
 cruise set speed, and the LFA active icon. This top
-drive-status row uses the same top margin as the road speed-limit sign while
-bottom-aligning gear, gap, cruise set, and LFA elements to the measured
-bottom of the cruise-set text. The gap vehicle uses
+drive-status row places the ACC, gap, LFA, mode, and Chestnut icons at the
+turn-signal height. The gap vehicle uses
 `selfdrive/assets/icons_mici/carrot_cruse_gap_trimmed.png` at its source aspect
 ratio and is taller than before while the gap bars keep their own size/spacing;
 all four gap bars stay visible, sit close together, and bottom-align to the
-vehicle while inactive bars are gray and active bars use `#bb3d91`. Cruise set
-speed and `km/h` use the same font size and color; paused cruise keeps the set
-speed but draws it gray, and cruise without a set speed displays gray `OFF`.
-The `assets/speed_limit.png` icon to the right of the set-speed text uses
-`carState.cruiseState.available`: green when ACC is available (including
-standby before a set speed arrives) and gray when unavailable. If the field is
-missing, it falls back to the set-speed display state. The icon moves with the
-set-speed text during the top-row transition; it indicates ACC availability,
-not a road speed limit. Icon color does not enable the 3D scene or move LFA:
-those still require the existing set-speed display state.
+vehicle while inactive bars are gray and active bars use `#bb3d91`. The ACC
+status icon (`assets/speed_limit.png`) has the set speed directly underneath:
+gray `off` when unavailable, `-` in standby until a set speed arrives, and the
+set speed when paused or engaged. The icon is orange in standby/paused, green
+when engaged and gray when off. Standby is determined by
+`carState.cruiseState.available` even before a set speed arrives. This
+availability does not enable the 3D scene or move LFA: those still require
+the existing set-speed display state. The five top-row icons use evenly
+spaced slots between the fixed turn signals; without a set speed, the four
+remaining icons spread evenly while LFA is centered.
 The lane-change icon is not drawn; the LFA icon uses `assets/wheel.png`, rotates by
 `-carState.steeringAngleDeg`, and recolors its white pixels green when LFA is
 active. When cruise control has no set speed (`off`), the LFA wheel and angle
@@ -297,11 +296,13 @@ The LFA wheel switches to the local orange `assets/wheel_critical.png` while an
 active `selfdriveState` alert requests `steerRequired` (take control), then
 returns to its normal gray/green icon when that alert clears. Other alerts do
 not change the wheel icon.
-A normal/experimental-mode icon, using the same wheel/experimental PNGs as
-comma's onroad mode button (copied into `cluster/assets`), sits to the left of
-Chestnut and follows its
-position during transitions. Live mode uses `selfdriveState.experimentalMode`;
-offroad uses the saved `ExperimentalMode` setting.
+A normal/experimental-mode icon sits next to Chestnut and follows its
+position during transitions. It uses `assets/experimental_white.png` tinted
+gray when ACC is off or green in normal mode while ACC is available, and the
+original-colored `assets/experimental.png` in experimental mode while ACC is
+available. Live mode uses `selfdriveState.experimentalMode`; offroad uses the
+saved `ExperimentalMode` setting. LFA steering angle and front-vehicle distance
+labels omit their `deg` and `m` suffixes.
 The cluster loads its icons, background, vehicle model, and font candidates
 from `selfdrive/sp/cluster/assets`; copies of the Chestnut, mode, and
 JetBrainsMono assets are kept there so the HUD does not depend on the main
