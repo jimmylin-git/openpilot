@@ -279,8 +279,9 @@ ratio and is taller than before while the gap bars keep their own size/spacing;
 all four gap bars stay visible, sit close together, and bottom-align to the
 vehicle while inactive bars are gray and active bars use `#bb3d91`. The ACC
 status icon (`assets/speed_limit.png`) has the set speed directly underneath:
-gray `off` slightly narrower than the icon when unavailable, no text in
-standby until a set speed arrives, and the set speed when paused or engaged.
+gray `--` at the same size and height as the front-distance label when
+unavailable, no text in standby until a set speed arrives, and the set speed
+when paused or engaged.
 The icon is orange in standby/paused, green
 when engaged and gray when off. Standby is determined by
 `carState.cruiseState.available` even before a set speed arrives. This

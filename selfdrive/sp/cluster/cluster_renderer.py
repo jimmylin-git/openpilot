@@ -3026,17 +3026,13 @@ class ClusterUiRenderer:
         )
         speed_text = self._cruise_set_speed_text(state)
         if speed_text:
-            font_size = TOP_CRUISE_FONT_SIZE
-            if status == "off":
-                text_width, _ = self._measure_text(speed_text, font_size)
-                if text_width > 0:
-                    font_size = min(font_size, font_size * icon_size * 0.9 / text_width)
-                    fitted_width, _ = self._measure_text(speed_text, font_size)
-                    if fitted_width > icon_size * 0.9:
-                        font_size *= icon_size * 0.9 / fitted_width
             self._draw_text(
-                speed_text, ACC_STATUS_CENTER_X, ACC_SET_SPEED_CENTER_Y,
-                font_size, self._cruise_set_color(state, theme), anchor="center",
+                speed_text,
+                ACC_STATUS_CENTER_X,
+                TOP_STATUS_DETAIL_CENTER_Y if status == "off" else ACC_SET_SPEED_CENTER_Y,
+                TOP_STATUS_DETAIL_FONT_SIZE * 0.9 if status == "off" else TOP_CRUISE_FONT_SIZE,
+                self._cruise_set_color(state, theme),
+                anchor="center",
             )
 
     def _draw_drive_mode_icon(self, state: ClusterUiState, layout_progress: float) -> None:
@@ -3307,7 +3303,7 @@ class ClusterUiRenderer:
     @staticmethod
     def _cruise_set_speed_text(state: ClusterUiState) -> str:
         if ClusterUiRenderer._acc_status(state) == "off":
-            return "off"
+            return "--"
         if state.cruise_kph is None:
             return ""
         return str(int(round(state.cruise_kph)))
