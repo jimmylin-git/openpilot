@@ -434,6 +434,45 @@ class TestManagerImports(OpenpilotTestCase):
     assert connect > 0 and read > 0, "requests defaults to no timeout; downloads would hang forever"
 
 
+class TestDefaultDownloadQueue(OpenpilotTestCase):
+  def setUp(self):
+    super().setUp()
+    self.manager = ModelManagerSP.__new__(ModelManagerSP)
+    self.manager.params = mock.MagicMock()
+    self.store = {}
+    self.manager.params.get.side_effect = lambda key, *args, **kwargs: self.store.get(key)
+    self.manager.params.put.side_effect = lambda key, value, *args, **kwargs: self.store.__setitem__(key, value)
+
+  def test_new_chestnut_queues_default_big_bundle(self):
+    self.manager.chestnut_present = True
+    self.manager._queue_missing_default_bundle()
+    assert self.store["ModelManager_DownloadRef"] == manager_module.DEFAULT_BIG_MODEL_REF
+
+  def test_no_chestnut_queues_default_qcom_bundle(self):
+    self.manager.chestnut_present = False
+    self.manager._queue_missing_default_bundle()
+    assert self.store["ModelManager_DownloadRef"] == manager_module.DEFAULT_MODEL_REF
+
+  def test_chestnut_bundle_then_queues_missing_fallback_bundle(self):
+    self.manager.chestnut_present = True
+    self.store["ModelManager_ActiveBundleChestnut"] = self._bundle("big")
+    self.manager._queue_missing_default_bundle()
+    assert self.store["ModelManager_DownloadRef"] == manager_module.DEFAULT_MODEL_REF
+
+  def test_pending_request_is_not_replaced(self):
+    self.manager.chestnut_present = True
+    self.store["ModelManager_DownloadRef"] = "user-choice"
+    self.manager._queue_missing_default_bundle()
+    assert self.store["ModelManager_DownloadRef"] == "user-choice"
+
+  @staticmethod
+  def _bundle(ref: str) -> dict:
+    bundle = custom.ModelManagerSP.ModelBundle.new_message()
+    bundle.ref = ref
+    bundle.minimumSelectorVersion = helpers.REQUIRED_JSON_VERSION
+    return bundle.to_dict()
+
+
 class TestResolveBundleByRef(OpenpilotTestCase):
   """A ref resolves to (bundle, source) across both hardware manifests. Refs are
   unique per manifest and never overlap across sources, so a ref maps to exactly

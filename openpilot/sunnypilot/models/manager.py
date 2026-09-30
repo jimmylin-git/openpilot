@@ -19,6 +19,7 @@ from openpilot.cereal import messaging, custom
 from openpilot.sunnypilot.models.fetcher import ModelFetcher
 from openpilot.sunnypilot.models.helpers import (ACTIVE_BUNDLE_KEYS, get_active_bundle, get_selected_bundle,
                                                   resolve_bundle_by_ref, validate_active_bundles, verify_file)
+from openpilot.sunnypilot.models.model_name import DEFAULT_BIG_MODEL_REF, DEFAULT_MODEL_REF
 
 # (connect, read) seconds. read is per-request inactivity, not a total cap
 DOWNLOAD_TIMEOUT = (30, 30)
@@ -336,6 +337,22 @@ class ModelManagerSP:
         self._release_download_ref()
         self.selected_bundle = None
 
+  def _queue_missing_default_bundle(self) -> None:
+    if self.params.get("ModelManager_DownloadRef") is not None:
+      return
+
+    qcom_missing = get_selected_bundle(self.params, "qcom") is None
+    chestnut_missing = get_selected_bundle(self.params, "chestnut") is None
+    if self.chestnut_present and chestnut_missing:
+      default_ref = DEFAULT_BIG_MODEL_REF
+    elif qcom_missing:
+      default_ref = DEFAULT_MODEL_REF
+    else:
+      return
+
+    if default_ref:
+      self.params.put("ModelManager_DownloadRef", default_ref)
+
   def main_thread(self) -> None:
     """Main thread for model management"""
     rk = Ratekeeper(1, print_delay_threshold=None)
@@ -349,23 +366,10 @@ class ModelManagerSP:
         validate_active_bundles(self.params, self.source_models)
         self.active_bundle = get_active_bundle(self.params, chestnut=self.chestnut_present)
 
-        if get_selected_bundle(self.params, "chestnut") is not None and get_selected_bundle(self.params, "qcom") is None:
-          if self.params.get("ModelManager_DownloadRef") is None:
-            from openpilot.sunnypilot.models.model_name import DEFAULT_MODEL_REF
-            if DEFAULT_MODEL_REF:
-              self.params.put("ModelManager_DownloadRef", DEFAULT_MODEL_REF)
-
-        # First-boot default: no qcom bundle selected -> auto-use the default
-        # model (DEFAULT_MODEL_REF, i.e. CD210) instead of falling back to the
-        # stock selfdrive modeld. Mirrors upstream: the default model runs on
-        # first boot without any user selection (downloaded once, then active).
-        if (get_selected_bundle(self.params, "qcom") is None
-            and self.params.get("ModelManager_DownloadRef") is None
-            and not self.chestnut_present):
-          from openpilot.sunnypilot.models.model_name import DEFAULT_MODEL_REF
-          if DEFAULT_MODEL_REF:
-            self.params.put("ModelManager_DownloadRef", DEFAULT_MODEL_REF)
-
+        # Seed the active hardware slot first. A new Chestnut has no bundled
+        # big PKL, so without this request modeld tries a nonexistent fallback
+        # and immediately drops back to the small model.
+        self._queue_missing_default_bundle()
         self._process_download_requests()
 
         if self.params.get("ModelManager_ClearCache"):
