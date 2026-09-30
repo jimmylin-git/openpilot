@@ -154,6 +154,7 @@ LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
 TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 TOP_STATUS_DETAIL_FONT_SIZE = 14.0 * DRIVE_STATUS_SCALE
 TOP_STATUS_LABEL_FONT_SIZE = TOP_STATUS_DETAIL_FONT_SIZE * 0.9
+ACC_SET_SPEED_FONT_SIZE = TOP_STATUS_LABEL_FONT_SIZE * 1.15
 TOP_STATUS_DETAIL_CENTER_Y = (
     TURN_SIGNAL_CENTER_Y
     + max(FOLLOW_GAP_LANE_ICON_SIZE, LFA_STATUS_ICON_SIZE) * 0.5
@@ -161,7 +162,7 @@ TOP_STATUS_DETAIL_CENTER_Y = (
 )
 # The acceleration gauge is hidden, so move the entire speed readout left
 # within the left panel (~92-582 at y=350).
-SPEED_VALUE_CENTER_X = 275
+SPEED_VALUE_CENTER_X = 255
 SPEED_VALUE_CENTER_Y = 350
 SYSTEM_PANEL_X = 1416
 SYSTEM_PANEL_Y = 118
@@ -2992,7 +2993,7 @@ class ClusterUiRenderer:
                 speed_text,
                 ACC_STATUS_CENTER_X,
                 TOP_STATUS_DETAIL_CENTER_Y,
-                TOP_STATUS_LABEL_FONT_SIZE,
+                ACC_SET_SPEED_FONT_SIZE,
                 AMBER if b_standby else self._cruise_set_color(state, theme),
                 anchor="center",
             )
