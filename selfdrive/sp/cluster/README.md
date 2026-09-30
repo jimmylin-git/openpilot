@@ -313,14 +313,16 @@ known. Live mode uses `selfdriveState.experimentalMode`; offroad uses the
 saved `ExperimentalMode` setting. LFA steering angle and front-vehicle distance
 labels omit their `deg` and `m` suffixes. Missing gear, angle, distance, and
 system metric values are left blank rather than drawing dash placeholders.
-While the displayed gear is `B` and ACC is not off (standby, paused, or
-engaged), the ACC icon and set speed, the follow-gap icon with its bars and
-distance label, and the LFA wheel and angle are forced to the orange standby
-tint; the mode icon with `std.`/`exp.` and the Chestnut icon keep their normal
-colors. Any other gear keeps the normal colors, and the orange
-`wheel_critical` take-control icon still takes priority on the LFA wheel.
-Outside B gear, the follow-gap icon, bars, and distance label turn green while
-ACC is standby or paused, stay white while engaged, and stay gray while off.
+The top-row status items share one tint rule. In `B` gear every item — the ACC
+icon and set speed, the follow-gap icon with its bars and distance label, the
+LFA wheel and angle, and the mode icon with `std.`/`exp.` — is orange whenever
+ACC is not off, and gray when ACC is off. Outside `B` gear the follow-gap, LFA,
+and mode items are green while engaged, orange while paused, and gray in
+standby or off; the ACC icon is green while engaged, orange in standby or
+paused, and gray when off. The colored `assets/experimental.png` stays untinted
+while engaged so it keeps its original colors. The orange `wheel_critical`
+take-control icon still takes priority on the LFA wheel. The Chestnut icon
+follows its own loading/active/failed colors and is not affected.
 The cluster loads its icons, background, vehicle model, and font candidates
 from `selfdrive/sp/cluster/assets`; copies of the Chestnut, mode, and
 JetBrainsMono assets are kept there so the HUD does not depend on the main

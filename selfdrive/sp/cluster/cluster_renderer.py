@@ -3022,9 +3022,8 @@ class ClusterUiRenderer:
 
     def _draw_acc_status_icon(self, state: ClusterUiState) -> None:
         theme = self._current_theme()
-        status = self._acc_status(state)
         b_standby = self._b_gear_standby(state)
-        tint = AMBER if b_standby else GREEN if status == "engaged" else AMBER if status in ("standby", "paused") else theme.muted
+        tint = self._top_row_tint(state, amber_on_standby=True)
         icon_size = LFA_STATUS_ICON_SIZE
         self._draw_bottom_aligned_texture_icon(
             self._acc_status_texture, ACC_STATUS_CENTER_X,
@@ -3051,13 +3050,15 @@ class ClusterUiRenderer:
         texture = self._drive_mode_textures[mode]
         if texture is None:
             return
+        tint = self._top_row_tint(state)
         center_x = DRIVE_MODE_OFF_CENTER_X + (DRIVE_MODE_ICON_CENTER_X - DRIVE_MODE_OFF_CENTER_X) * layout_progress
         height = LFA_STATUS_ICON_SIZE
         width = height * texture.width / max(1, texture.height)
         self._draw_bottom_aligned_texture_icon(
             texture, center_x,
             TURN_SIGNAL_CENTER_Y + height * 0.5, width, height,
-            self._current_theme().muted if status == "off" else WHITE if mode else GREEN,
+            # The experimental asset is already colored, so keep it untinted while engaged.
+            WHITE if mode and status == "engaged" else tint,
         )
         if state.experimental_mode is not None:
             self._draw_text(
@@ -3065,7 +3066,7 @@ class ClusterUiRenderer:
                 center_x,
                 TOP_STATUS_DETAIL_CENTER_Y,
                 TOP_STATUS_LABEL_FONT_SIZE,
-                self._current_theme().muted if status == "off" else GREEN,
+                tint,
                 anchor="center",
             )
 
@@ -3112,17 +3113,8 @@ class ClusterUiRenderer:
     ) -> None:
         theme = self._current_theme()
         status = self._acc_status(state)
-        active = bool(state.cruise_display_state == "engaged")
-        b_standby = self._b_gear_standby(state)
-        if b_standby:
-            tint = AMBER
-        elif active:
-            tint = WHITE
-        elif status in ("standby", "paused"):
-            tint = GREEN
-        else:
-            tint = theme.muted
-        alpha = 190 if status == "off" else 255
+        tint = self._top_row_tint(state)
+        alpha = 190 if tint == theme.muted else 255
         bar_active_color = (*tint, alpha)
         bar_inactive_color = (*theme.muted, 130)
 
@@ -3208,9 +3200,8 @@ class ClusterUiRenderer:
         theme = self._current_theme()
         active = bool(state.lfa_active)
         texture = self._lfa_active_texture if active and self._lfa_active_texture is not None else self._lfa_texture
-        b_standby = self._b_gear_standby(state)
-        tint = AMBER if b_standby else WHITE if active else theme.muted
-        alpha = 255 if b_standby or active else 190
+        tint = self._top_row_tint(state)
+        alpha = 190 if tint == theme.muted else 255
         if state.wheel_critical and self._lfa_critical_texture is not None:
             texture = self._lfa_critical_texture
             tint = WHITE
@@ -3349,6 +3340,17 @@ class ClusterUiRenderer:
         if (state.gear_text or "").strip().upper() != "B":
             return False
         return ClusterUiRenderer._acc_status(state) != "off"
+
+    def _top_row_tint(self, state: ClusterUiState, amber_on_standby: bool = False) -> tuple[int, int, int]:
+        gear_b = (state.gear_text or "").strip().upper() == "B"
+        status = self._acc_status(state)
+        if gear_b:
+            return AMBER if status != "off" else self._current_theme().muted
+        if status == "engaged":
+            return GREEN
+        if status == "paused" or (amber_on_standby and status == "standby"):
+            return AMBER
+        return self._current_theme().muted
 
     @staticmethod
     def _cruise_set_visible(state: ClusterUiState) -> bool:
