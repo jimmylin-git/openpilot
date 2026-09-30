@@ -96,15 +96,21 @@ DRIVE_MODE_ICON_PATHS = {
     True: CLUSTER_ASSETS_DIR / "experimental.png",
 }
 EXPERIMENTAL_LABEL_SEGMENTS = (("e", AMBER), ("x", GREEN), ("p.", RED))
-TURN_SIGNAL_LEFT_CENTER_X = 610
-TURN_SIGNAL_RIGHT_CENTER_X = 1310
+# Scales every top-row item (turn signals, status icons, and their labels);
+# MEM/CPU/TEMP metrics and the gear readout are intentionally not affected.
+TOP_ROW_SCALE = 1.5
+# Signals sit just outside the status row and inside the side panels' curved
+# edges; re-fit together with TOP_STATUS_ICON_SPACING when TOP_ROW_SCALE changes.
+TURN_SIGNAL_LEFT_CENTER_X = 600
+TURN_SIGNAL_RIGHT_CENTER_X = 1320
 TURN_SIGNAL_CENTER_Y = 94
-TURN_SIGNAL_ICON_SIZE = 128.0
+TURN_SIGNAL_ICON_SIZE = 128.0 * TOP_ROW_SCALE
 TURN_SIGNAL_HEAD_HALF_HEIGHT = 38
 TURN_SIGNAL_MID_CENTER_X = (TURN_SIGNAL_LEFT_CENTER_X + TURN_SIGNAL_RIGHT_CENTER_X) * 0.5
 DRIVE_STATUS_BASE_BOX_SIZE = 46.0
 DRIVE_STATUS_ROW_HEIGHT = TURN_SIGNAL_HEAD_HALF_HEIGHT * 2.0
 DRIVE_STATUS_SCALE = DRIVE_STATUS_ROW_HEIGHT / DRIVE_STATUS_BASE_BOX_SIZE
+TOP_ROW_ITEM_SCALE = DRIVE_STATUS_SCALE * TOP_ROW_SCALE
 # Nudged left from the panel's visual mid-point (~1635) to keep the enlarged Orbitron
 # text clear of the right hex panel's edges (measured solid span ~1345-1871 at y=350).
 GEAR_STATUS_CENTER_X = 1615
@@ -116,14 +122,14 @@ TOP_SYSTEM_METRIC_Y = 100.0
 TOP_SYSTEM_METRIC_FONT_SIZE = 24.0
 TOP_SYSTEM_METRIC_LINE_GAP = 30.0
 FOLLOW_STATUS_GAP_BARS = 3
-FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
-FOLLOW_GAP_BAR_H = 6.0 * DRIVE_STATUS_SCALE
-FOLLOW_GAP_BAR_R = 1.2 * DRIVE_STATUS_SCALE
-FOLLOW_GAP_BAR_STEP_Y = 10.0 * DRIVE_STATUS_SCALE
+FOLLOW_GAP_LANE_ICON_SIZE = 34.0 * TOP_ROW_ITEM_SCALE
+FOLLOW_GAP_BAR_H = 6.0 * TOP_ROW_ITEM_SCALE
+FOLLOW_GAP_BAR_R = 1.2 * TOP_ROW_ITEM_SCALE
+FOLLOW_GAP_BAR_STEP_Y = 10.0 * TOP_ROW_ITEM_SCALE
 # 5px of clearance on each side between the bar and the FCD_Lane.png lane
 # lines, so the total margin subtracted from the lane-line span is 10px.
 FOLLOW_GAP_BAR_LANE_CLEARANCE_PX = 5.0
-FOLLOW_GAP_BAR_MARGIN_W = FOLLOW_GAP_BAR_LANE_CLEARANCE_PX * 2.0 * DRIVE_STATUS_SCALE
+FOLLOW_GAP_BAR_MARGIN_W = FOLLOW_GAP_BAR_LANE_CLEARANCE_PX * 2.0 * TOP_ROW_ITEM_SCALE
 # FCD_Lane.png (128x128) is transparent outside rows ~16-111; within that band
 # the two lane lines splay from ~50% of the icon width to ~99% of it. These
 # fractions were measured from the asset's opaque pixel span so each bar's
@@ -134,15 +140,20 @@ FOLLOW_GAP_LANE_CONTENT_TOP_FRAC = 16.0 / 128.0
 FOLLOW_GAP_LANE_CONTENT_BOTTOM_FRAC = 111.0 / 128.0
 FOLLOW_GAP_BAR_SPAN_TOP_FRAC = 0.5
 FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 0.99
-TOP_STATUS_ICON_SPACING = 115
+TOP_STATUS_ICON_SPACING = 108
+# Chestnut is wider than the ACC icon, so nudge the row left to balance the
+# visible clearance to each turn signal.
+TOP_STATUS_ROW_OFFSET_X = -7.0
 ACC_LAYOUT_TRANSITION_SECONDS = 1.5
 ACC_LAYOUT_SETTLE_SCALE = 1.05
 ACC_LAYOUT_SETTLE_START = 0.40
 ACC_LAYOUT_SETTLE_PEAK = 0.55
-ACC_OFF_LFA_SCALE = 4.0
+# Relative to the top-row LFA size; divided so the centered ACC-off wheel keeps
+# its original on-screen size when the top row is scaled.
+ACC_OFF_LFA_SCALE = 4.0 / TOP_ROW_SCALE
 ACC_OFF_LFA_OFFSET_Y = 50.0
 # Five equal slots when ACC has a set speed; four equal slots when LFA is centered.
-ACC_STATUS_CENTER_X = DESIGN_WIDTH * 0.5 - 2 * TOP_STATUS_ICON_SPACING
+ACC_STATUS_CENTER_X = DESIGN_WIDTH * 0.5 - 2 * TOP_STATUS_ICON_SPACING + TOP_STATUS_ROW_OFFSET_X
 FOLLOW_GAP_LANE_CENTER_X = ACC_STATUS_CENTER_X + TOP_STATUS_ICON_SPACING
 LFA_STATUS_CENTER_X = FOLLOW_GAP_LANE_CENTER_X + TOP_STATUS_ICON_SPACING
 DRIVE_MODE_ICON_CENTER_X = LFA_STATUS_CENTER_X + TOP_STATUS_ICON_SPACING
@@ -150,9 +161,9 @@ CHESTNUT_ICON_CENTER_X = DRIVE_MODE_ICON_CENTER_X + TOP_STATUS_ICON_SPACING
 ACC_OFF_ROW_SPACING = (CHESTNUT_ICON_CENTER_X - ACC_STATUS_CENTER_X) / 3.0
 FOLLOW_GAP_OFF_CENTER_X = ACC_STATUS_CENTER_X + ACC_OFF_ROW_SPACING
 DRIVE_MODE_OFF_CENTER_X = ACC_STATUS_CENTER_X + 2 * ACC_OFF_ROW_SPACING
-LFA_STATUS_ICON_SIZE = 28.0 * DRIVE_STATUS_SCALE
-TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
-TOP_STATUS_DETAIL_FONT_SIZE = 14.0 * DRIVE_STATUS_SCALE
+LFA_STATUS_ICON_SIZE = 28.0 * TOP_ROW_ITEM_SCALE
+TOP_ICON_SIZE = 34.0 * TOP_ROW_ITEM_SCALE
+TOP_STATUS_DETAIL_FONT_SIZE = 14.0 * TOP_ROW_ITEM_SCALE
 TOP_STATUS_LABEL_FONT_SIZE = TOP_STATUS_DETAIL_FONT_SIZE * 0.9
 ACC_SET_SPEED_FONT_SIZE = TOP_STATUS_LABEL_FONT_SIZE * 1.15
 TOP_STATUS_DETAIL_CENTER_Y = (
@@ -3457,11 +3468,11 @@ class ClusterUiRenderer:
         direction = -1 if side == "left" else 1
         fill = GREEN if lit else (*theme.muted, 42)
         outline = (8, 118, 65) if lit else (*theme.muted, 150)
-        tail_back = -36
-        tail_front = 12
-        tail_half_height = 16
-        head_tip_x = 60
-        head_half_height = TURN_SIGNAL_HEAD_HALF_HEIGHT
+        tail_back = -36 * TOP_ROW_SCALE
+        tail_front = 12 * TOP_ROW_SCALE
+        tail_half_height = 16 * TOP_ROW_SCALE
+        head_tip_x = 60 * TOP_ROW_SCALE
+        head_half_height = TURN_SIGNAL_HEAD_HALF_HEIGHT * TOP_ROW_SCALE
 
         def point(local_x: float, local_y: float) -> rl.Vector2:
             return rl.Vector2(cx + direction * local_x, cy + local_y)
