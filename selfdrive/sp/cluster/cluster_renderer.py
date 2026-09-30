@@ -3043,7 +3043,6 @@ class ClusterUiRenderer:
 
     def _draw_drive_mode_icon(self, state: ClusterUiState, layout_progress: float) -> None:
         status = self._acc_status(state)
-        b_standby = self._b_gear_standby(state)
         mode = bool(state.experimental_mode) and status != "off"
         if mode not in self._drive_mode_textures:
             self._drive_mode_textures[mode] = self._load_icon_texture(
@@ -3058,7 +3057,7 @@ class ClusterUiRenderer:
         self._draw_bottom_aligned_texture_icon(
             texture, center_x,
             TURN_SIGNAL_CENTER_Y + height * 0.5, width, height,
-            AMBER if b_standby else self._current_theme().muted if status == "off" else WHITE if mode else GREEN,
+            self._current_theme().muted if status == "off" else WHITE if mode else GREEN,
         )
         if state.experimental_mode is not None:
             self._draw_text(
@@ -3066,7 +3065,7 @@ class ClusterUiRenderer:
                 center_x,
                 TOP_STATUS_DETAIL_CENTER_Y,
                 TOP_STATUS_LABEL_FONT_SIZE,
-                AMBER if b_standby else self._current_theme().muted if status == "off" else GREEN,
+                self._current_theme().muted if status == "off" else GREEN,
                 anchor="center",
             )
 
@@ -3112,10 +3111,18 @@ class ClusterUiRenderer:
         layout_progress: float,
     ) -> None:
         theme = self._current_theme()
+        status = self._acc_status(state)
         active = bool(state.cruise_display_state == "engaged")
         b_standby = self._b_gear_standby(state)
-        tint = AMBER if b_standby else WHITE if active else theme.muted
-        alpha = 255 if b_standby or active else 190
+        if b_standby:
+            tint = AMBER
+        elif active:
+            tint = WHITE
+        elif status in ("standby", "paused"):
+            tint = GREEN
+        else:
+            tint = theme.muted
+        alpha = 190 if status == "off" else 255
         bar_active_color = (*tint, alpha)
         bar_inactive_color = (*theme.muted, 130)
 
