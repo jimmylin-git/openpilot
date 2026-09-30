@@ -95,6 +95,7 @@ DRIVE_MODE_ICON_PATHS = {
     False: CLUSTER_ASSETS_DIR / "experimental_white.png",
     True: CLUSTER_ASSETS_DIR / "experimental.png",
 }
+EXPERIMENTAL_LABEL_SEGMENTS = (("e", AMBER), ("x", GREEN), ("p.", RED))
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
 TURN_SIGNAL_CENTER_Y = 94
@@ -547,7 +548,6 @@ class ClusterUiRenderer:
         self._vehicle_model = None
         self._vehicle_model_load_attempted = False
         self._lfa_texture = None
-        self._lfa_active_texture = None
         self._lfa_critical_texture = None
         self._acc_status_texture = None
         self._follow_gap_lane_texture = None
@@ -732,9 +732,6 @@ class ClusterUiRenderer:
         if self._lfa_texture is not None:
             rl.unload_texture(self._lfa_texture)
             self._lfa_texture = None
-        if self._lfa_active_texture is not None:
-            rl.unload_texture(self._lfa_active_texture)
-            self._lfa_active_texture = None
         if self._lfa_critical_texture is not None:
             rl.unload_texture(self._lfa_critical_texture)
             self._lfa_critical_texture = None
@@ -1522,8 +1519,6 @@ class ClusterUiRenderer:
             )
         if self._lfa_texture is None:
             self._lfa_texture = self._load_icon_texture(LFA_ICON_PATH, "LFA")
-        if self._lfa_active_texture is None:
-            self._lfa_active_texture = self._load_lfa_active_texture()
         if self._lfa_critical_texture is None:
             self._lfa_critical_texture = self._load_icon_texture(LFA_CRITICAL_ICON_PATH, "LFA critical")
         if self._follow_gap_lane_texture is None:
@@ -1551,44 +1546,6 @@ class ClusterUiRenderer:
         except Exception as exc:
             print(f"{label} icon load failed: {exc}")
             return None
-
-    def _load_lfa_active_texture(self):
-        if not LFA_ICON_PATH.exists():
-            return None
-        image = None
-        try:
-            image = rl.load_image(str(LFA_ICON_PATH))
-            if not rl.is_image_valid(image):
-                return None
-            if image.format != rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8:
-                rl.image_format(image, rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
-
-            data = rl.ffi.cast("unsigned char *", image.data)
-            byte_count = image.width * image.height * 4
-            green_r, green_g, green_b = GREEN
-            for offset in range(0, byte_count, 4):
-                alpha = int(data[offset + 3])
-                if alpha == 0:
-                    continue
-                red = int(data[offset])
-                green = int(data[offset + 1])
-                blue = int(data[offset + 2])
-                if red >= 220 and green >= 220 and blue >= 220:
-                    data[offset] = green_r
-                    data[offset + 1] = green_g
-                    data[offset + 2] = green_b
-
-            texture = rl.load_texture_from_image(image)
-            if texture.id <= 0:
-                return None
-            rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
-            return texture
-        except Exception as exc:
-            print(f"LFA active icon load failed: {exc}")
-            return None
-        finally:
-            if image is not None and rl.is_image_valid(image):
-                rl.unload_image(image)
 
     def _load_obj_mesh(self, path: Path):
         vertices: list[tuple[float, float, float]] = []
@@ -3051,6 +3008,7 @@ class ClusterUiRenderer:
         if texture is None:
             return
         tint = self._top_row_tint(state)
+        colorful = mode and tint == GREEN
         center_x = DRIVE_MODE_OFF_CENTER_X + (DRIVE_MODE_ICON_CENTER_X - DRIVE_MODE_OFF_CENTER_X) * layout_progress
         height = LFA_STATUS_ICON_SIZE
         width = height * texture.width / max(1, texture.height)
@@ -3058,17 +3016,40 @@ class ClusterUiRenderer:
             texture, center_x,
             TURN_SIGNAL_CENTER_Y + height * 0.5, width, height,
             # The experimental asset is already colored, so keep it untinted while engaged.
-            WHITE if mode and status == "engaged" else tint,
+            WHITE if colorful else tint,
         )
-        if state.experimental_mode is not None:
-            self._draw_text(
-                "exp." if state.experimental_mode else "std.",
+        if state.experimental_mode is None:
+            return
+        if state.experimental_mode and colorful:
+            self._draw_multicolor_text(
+                EXPERIMENTAL_LABEL_SEGMENTS,
                 center_x,
                 TOP_STATUS_DETAIL_CENTER_Y,
                 TOP_STATUS_LABEL_FONT_SIZE,
-                tint,
-                anchor="center",
             )
+            return
+        self._draw_text(
+            "exp." if state.experimental_mode else "std.",
+            center_x,
+            TOP_STATUS_DETAIL_CENTER_Y,
+            TOP_STATUS_LABEL_FONT_SIZE,
+            tint,
+            anchor="center",
+        )
+
+    def _draw_multicolor_text(
+        self,
+        segments: tuple[tuple[str, tuple[int, int, int]], ...],
+        center_x: float,
+        center_y: float,
+        size: float,
+    ) -> None:
+        spacing = max(1.0, size * 0.02)
+        full_text = "".join(text for text, _ in segments)
+        x = center_x - self._measure_text(full_text, size, spacing)[0] * 0.5
+        for text, color in segments:
+            self._draw_text(text, x, center_y, size, color)
+            x += self._measure_text(text, size, spacing)[0] + spacing
 
     def _update_acc_layout_progress(self, state: ClusterUiState) -> float:
         target = 0.0 if state.cruise_display_state == "off" else 1.0
@@ -3198,8 +3179,7 @@ class ClusterUiRenderer:
 
     def _draw_lfa_status_icon(self, state: ClusterUiState, layout_progress: float) -> None:
         theme = self._current_theme()
-        active = bool(state.lfa_active)
-        texture = self._lfa_active_texture if active and self._lfa_active_texture is not None else self._lfa_texture
+        texture = self._lfa_texture
         tint = self._top_row_tint(state)
         alpha = 190 if tint == theme.muted else 255
         if state.wheel_critical and self._lfa_critical_texture is not None:
@@ -3215,9 +3195,11 @@ class ClusterUiRenderer:
         icon_center_x = LFA_STATUS_CENTER_X + (DESIGN_WIDTH * 0.5 - LFA_STATUS_CENTER_X) * (1.0 - layout_progress)
         acc_off_center_y = DESIGN_HEIGHT * 0.5 - detail_font_size * 0.625 + ACC_OFF_LFA_OFFSET_Y
         icon_center_y = TURN_SIGNAL_CENTER_Y + (acc_off_center_y - TURN_SIGNAL_CENTER_Y) * (1.0 - layout_progress)
-        detail_center_y = TOP_STATUS_DETAIL_CENTER_Y + (
-            icon_center_y + icon_size * 0.5 + detail_font_size * 0.75 - TOP_STATUS_DETAIL_CENTER_Y
-        ) * (1.0 - layout_progress)
+        # Anchor the angle text to the icon's current bottom edge so it never
+        # slides over the wheel while the icon moves and resizes.
+        top_row_text_gap = TOP_STATUS_DETAIL_CENTER_Y - (TURN_SIGNAL_CENTER_Y + LFA_STATUS_ICON_SIZE * 0.5)
+        text_gap = top_row_text_gap + (detail_font_size * 0.75 - top_row_text_gap) * (1.0 - layout_progress)
+        detail_center_y = icon_center_y + icon_size * 0.5 + text_gap
         if self._draw_bottom_aligned_texture_icon(
             texture,
             icon_center_x,
@@ -3231,8 +3213,8 @@ class ClusterUiRenderer:
             self._draw_steering_angle_text(state, tint, icon_center_x, detail_center_y, detail_font_size)
             return
 
-        outline = GREEN if active else theme.muted
-        fill_alpha = 46 if active else 26
+        outline = tint
+        fill_alpha = 26 if tint == theme.muted else 46
         center = rl.Vector2(icon_center_x, icon_center_y)
         fallback_icon_size = TOP_ICON_SIZE * icon_scale
         scale = fallback_icon_size / 34.0

@@ -293,11 +293,13 @@ the existing set-speed display state. The five top-row icons use evenly
 spaced slots between the fixed turn signals; without a set speed, the four
 remaining icons spread evenly while LFA is centered.
 The lane-change icon is not drawn; the LFA icon uses `assets/wheel.png`, rotates by
-`-carState.steeringAngleDeg`, and recolors its white pixels green when LFA is
-active. When cruise control has no set speed (`off`), the LFA wheel and angle
+`-carState.steeringAngleDeg`, and is tinted with the same shared top-row
+colors as the other status icons. When cruise control has no set speed (`off`), the LFA wheel and angle
 move together near the screen center, 50 design pixels below their former
 position, and grow to four times their top-row size; the cruise, follow-gap,
-and Chestnut top-row items spread out with even spacing.
+and Chestnut top-row items spread out with even spacing. During the layout
+transition the angle text stays anchored below the wheel's current bottom
+edge, so it never slides over the icon.
 The LFA wheel switches to the local orange `assets/wheel_critical.png` while an
 active `selfdriveState` alert requests `steerRequired` (take control), then
 returns to its normal gray/green icon when that alert clears. Other alerts do
@@ -319,8 +321,9 @@ LFA wheel and angle, and the mode icon with `std.`/`exp.` — is orange whenever
 ACC is not off, and gray when ACC is off. Outside `B` gear the follow-gap, LFA,
 and mode items are green while engaged, orange while paused, and gray in
 standby or off; the ACC icon is green while engaged, orange in standby or
-paused, and gray when off. The colored `assets/experimental.png` stays untinted
-while engaged so it keeps its original colors. The orange `wheel_critical`
+paused, and gray when off. Outside `B` gear while engaged, the colored
+`assets/experimental.png` stays untinted so it keeps its original colors, and
+its `exp.` label is drawn as orange `e`, green `x`, and red `p.`. The orange `wheel_critical`
 take-control icon still takes priority on the LFA wheel. The Chestnut icon
 follows its own loading/active/failed colors and is not affected.
 The cluster loads its icons, background, vehicle model, and font candidates
