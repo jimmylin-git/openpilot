@@ -2993,7 +2993,7 @@ class ClusterUiRenderer:
                 speed_text,
                 ACC_STATUS_CENTER_X,
                 TOP_STATUS_DETAIL_CENTER_Y,
-                ACC_SET_SPEED_FONT_SIZE,
+                TOP_STATUS_LABEL_FONT_SIZE if speed_text == "--" else ACC_SET_SPEED_FONT_SIZE,
                 AMBER if b_standby else self._cruise_set_color(state, theme),
                 anchor="center",
             )

@@ -278,10 +278,10 @@ turn-signal height. The gap vehicle uses
 ratio and is taller than before while the gap bars keep their own size/spacing;
 all four gap bars stay visible, sit close together, and bottom-align to the
 vehicle while inactive bars are gray and active bars use `#bb3d91`. The ACC
-status icon (`assets/speed_limit.png`) has the set speed directly underneath,
-drawn 1.15x the front-distance label size at the same height: gray `--` when
-unavailable, no text in standby until a set speed arrives, and the set speed
-when paused or engaged.
+status icon (`assets/speed_limit.png`) has the set speed directly underneath
+at the same height as the front-distance label: gray `--` at the same size as
+the front-distance label when unavailable, no text in standby until a set
+speed arrives, and the set speed at 1.15x that size when paused or engaged.
 The front-distance label likewise shows `--` while ACC is off, even when
 a distance is available; at other times it shows the measured distance or
 `na.` when no distance is available.
