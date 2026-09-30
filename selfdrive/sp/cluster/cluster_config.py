@@ -160,14 +160,15 @@ def vehicle_diagnostic_log_enabled() -> bool:
 
 AUTO_DARK_START_HOUR = 18
 AUTO_LIGHT_START_HOUR = 6
+CLUSTER_FIXED_FPS = 5.0
 CLUSTER_LIVE_FPS_BY_MODE = {
-    0: 0.0,
-    1: 10.0,
-    2: 20.0,
-    3: 30.0,
-    4: 40.0,
-    5: 50.0,
-    6: 60.0,
+    0: CLUSTER_FIXED_FPS,
+    1: CLUSTER_FIXED_FPS,
+    2: CLUSTER_FIXED_FPS,
+    3: CLUSTER_FIXED_FPS,
+    4: CLUSTER_FIXED_FPS,
+    5: CLUSTER_FIXED_FPS,
+    6: CLUSTER_FIXED_FPS,
 }
 
 LIGHT_CLUSTER_THEME = ClusterTheme(
@@ -259,12 +260,12 @@ def normalize_cluster_live_fps(value: object) -> float:
         try:
             value = int(normalized)
         except ValueError:
-            return 0.0
+            return CLUSTER_FIXED_FPS
     try:
         mode = int(value)
     except (TypeError, ValueError):
-        return 0.0
-    return CLUSTER_LIVE_FPS_BY_MODE.get(mode, 0.0)
+        return CLUSTER_FIXED_FPS
+    return CLUSTER_LIVE_FPS_BY_MODE.get(mode, CLUSTER_FIXED_FPS)
 
 
 def normalize_cluster_encoder_mode(value: object) -> int:

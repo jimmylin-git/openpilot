@@ -121,7 +121,7 @@ hardware path.
 `--usb-h264-orientation landscape` tests direct 1920x462 output, while
 `--usb-h264-align 16` deliberately tests macroblock-aligned output such as
 1920x464. When `--fps` is omitted, non-live H264 USB runs use
-`--usb-h264-fps 30` as the render cap; live H264 runs follow
+`--usb-h264-fps 5` as the render cap; live H264 runs follow
 `ClusterHudLiveFps`. The TURZX display frame-rate command follows the effective
 H264 FPS unless `--usb-display-fps 0` is passed explicitly. H264 chunks are no-ACK by
 default like JPEG frame uploads; use
@@ -177,17 +177,13 @@ Keep `--usb-h264-input-format nv12` for native hardware testing. Direct RGB
 USERPTR diagnostics were removed after measured device tests showed corrupted
 output across direct and hidden 32-bit RGB variants.
 
-Manager autostart omits `--fps` by default so live launches follow
-`ClusterHudLiveFps`. JPEG/PNG runs apply setting changes while running; H264
-runs exit and let `cluster_autorun` relaunch when the setting changes the
-encoder FPS because the V4L2 encoder timing, SPS timing, and automatic bitrate
-are fixed at startup. Set `CLUSTER_AUTORUN_FPS` only for fixed test overrides;
-`0` means uncapped. Autorun launches at 8 FPS (`CLUSTER_FPS` overrides); in live
-input the HUD drops to 5 FPS while `ChestnutLoading`/`ChestnutActive` is set,
-because the eGPU shares the USB bus. Offroad, the 3D scene is hidden and the
-HUD render rate is limited to 1 FPS; onroad, the configured render rate is
-restored. These are render interval changes, so the H264 encoder is not
-restarted. The top status row (set speed, follow gap, LFA)
+Manager autostart passes `--fps 5` by default (`CLUSTER_FPS` remains available
+for explicit test overrides). The default renderer, H264 encoder input, TURZX
+display command, live setting modes, Chestnut-limited state, and offroad state
+all use 5 FPS. Explicit CLI `--fps`, `--usb-h264-fps`, and
+`--usb-display-fps` arguments remain available for diagnostics. Offroad still
+hides the 3D scene but no longer reduces the HUD below 5 FPS. The top status
+row (set speed, follow gap, LFA)
 also shows the mici Chestnut icon right of LFA at the same spacing; the row is
 shifted left half a slot so it stays centered between the turn signals. Icon (`icons_mici/chestnut*.png`): pulsing white while loading, green
 when active, orange when the eGPU model failed, and greyed out when no
@@ -231,7 +227,7 @@ unset or unknown keys from `/data/cluster_params/<key>` (override with
 ```bash
 mkdir -p /data/cluster_params
 echo -n 1 > /data/cluster_params/ClusterHudTheme      # 0 auto, 1 dark, 2 light
-echo -n 4 > /data/cluster_params/ClusterHudLiveFps    # 40 FPS
+echo -n 4 > /data/cluster_params/ClusterHudLiveFps    # all modes currently resolve to 5 FPS
 ```
 
 Unset keys keep the built-in defaults.
@@ -356,14 +352,12 @@ The LFA wheel and angle use a restrained scale settle that never exceeds 105%;
 the small distance and mode items do not scale or fade. This does not increase
 the actual display frame rate or add additional rendered frames.
 Turn-signal positions do not change.
-When `--fps` is omitted, `ClusterHudLiveFps` controls the render limit and is
-polled about once per second while running: `0` uncapped diagnostic mode, `1`
-10 Hz default, `2` 20 Hz, `3` 30 Hz, `4` 40 Hz, `5` 50 Hz, and `6` 60 Hz.
-Direct route/replay CLI runs also apply nonzero values; mode `0` keeps non-live
-H264 runs on the `--usb-h264-fps` safety cap. Explicit `--fps` remains a fixed
-override. For H264 USB output, changing the effective FPS exits the current HUD
-process so autostart can relaunch with a matching encoder FPS when a launcher
-is present.
+When `--fps` is omitted, `ClusterHudLiveFps` is polled about once per second,
+but every supported setting value (`0` through `6`) now resolves to 5 FPS.
+Direct route/replay CLI runs also use the 5 FPS default. Explicit `--fps`
+remains a fixed diagnostic override. For H264 USB output, changing the
+effective FPS exits the current HUD process so autostart can relaunch with a
+matching encoder FPS when a launcher is present.
 Runs also show a compact lower-right cluster-process CPU overlay by current
 core, formatted like `[0(10),1(25)]`, with 2 px bottom/right margins. The
 sampler reads the current cluster process and direct child processes only,

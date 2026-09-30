@@ -20,6 +20,7 @@ from cluster_config import (
     CLUSTER_ENCODER_PARAM,
     CLUSTER_ENCODER_SOFTWARE,
     CLUSTER_CORE_MODE_PARAM,
+    CLUSTER_FIXED_FPS,
     CLUSTER_HUD_DEBUG_PARAM,
     CLUSTER_HUD_PARAM,
     CLUSTER_LIVE_FPS_PARAM,
@@ -70,7 +71,7 @@ from cluster_system_monitor import ClusterProcessCoreUsageSampler
 from cluster_usb_display import TuringUsbDisplay, product_id_for_hud_mode
 from cluster_usb_pipeline import AsyncJpegUsbPipeline
 
-DEFAULT_FPS = 0.0
+DEFAULT_FPS = CLUSTER_FIXED_FPS
 DEFAULT_USB_BRIGHTNESS = 30
 MAX_USB_BRIGHTNESS = 30
 MIN_USB_BRIGHTNESS = 3
@@ -85,7 +86,7 @@ DEFAULT_H264_DIMENSION_ALIGN = 1
 THEME_PARAM_POLL_SECONDS = 1.0
 FPS_PARAM_POLL_SECONDS = 1.0
 CHESTNUT_POLL_SECONDS = 1.0
-CHESTNUT_FPS = 5.0
+CHESTNUT_FPS = CLUSTER_FIXED_FPS
 BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
 # Not literal 0: on this TURZX hardware, sending a brightness of exactly 0
 # while the process keeps running (as opposed to the brightness-off command
@@ -95,7 +96,7 @@ BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
 # vehicle is turned off. A very low but nonzero value still reads as
 # effectively black without touching that path.
 OFFROAD_USB_BRIGHTNESS = 2
-OFFROAD_RENDER_FPS = 1.0
+OFFROAD_RENDER_FPS = CLUSTER_FIXED_FPS
 # The offroad dim-to-black check is only trusted once the process has been
 # running this long (avoids the boot-time window where vehicle_started()
 # has not yet settled and could read False before the first onroad
@@ -209,11 +210,11 @@ class ClusterLiveFpsParamReader:
 
     def read(self) -> float:
         if self._params is None:
-            return 0.0
+            return CLUSTER_FIXED_FPS
         try:
             return normalize_cluster_live_fps(read_int_param(self._params, CLUSTER_LIVE_FPS_PARAM))
         except Exception:
-            return 0.0
+            return CLUSTER_FIXED_FPS
 
 
 class ChestnutActiveParamReader:
@@ -1382,7 +1383,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Target refresh rate. Use 0 for uncapped/as-fast-as-possible. "
-            f"When omitted, CLI runs read {CLUSTER_LIVE_FPS_PARAM}; mode 0 keeps the default cap behavior."
+            f"When omitted, CLI runs read {CLUSTER_LIVE_FPS_PARAM}; all setting modes currently resolve to 5 FPS."
         ),
     )
     parser.add_argument(
@@ -1468,8 +1469,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--usb-h264-fps",
         type=int,
-        default=30,
-        help="H264 encoder input FPS. Also caps non-live H264 USB runs when --fps is omitted. Default: 30.",
+        default=int(CLUSTER_FIXED_FPS),
+        help="H264 encoder input FPS. Also caps non-live H264 USB runs when --fps is omitted. Default: 5.",
     )
     parser.add_argument(
         "--usb-h264-gop",
