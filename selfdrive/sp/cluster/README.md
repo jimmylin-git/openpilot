@@ -292,12 +292,13 @@ availability does not enable the 3D scene or move LFA: those still require
 the existing set-speed display state. The five top-row icons use evenly
 spaced slots between the fixed turn signals; without a set speed, the four
 remaining icons spread evenly while LFA is centered.
-`TOP_ROW_SCALE` (1.5) enlarges the whole top row — turn signals, status
-icons, gap bars, and their labels — while the MEM/CPU/TEMP metrics and gear
-readout keep their size. To fit the larger items, the turn signals sit at
-x=600/1320, the status slots are 108 design pixels apart, and the row is
-nudged 7 pixels left so Chestnut and ACC have about 30 pixels of clearance to
-their neighboring turn signal.
+`TOP_ROW_SCALE` (1.5) enlarges the five status icons, gap bars, and their
+labels while the turn signals, MEM/CPU/TEMP metrics, and gear readout keep
+their original size. The turn signals stay fixed at x=595/1325. With ACC
+displayed, the five status icon centers are 108 design pixels apart and LFA
+sits on the x=960 centerline. Without ACC, the four remaining top-row items
+spread evenly between ACC and Chestnut while the enlarged LFA stays centered
+below them.
 The lane-change icon is not drawn; the LFA icon uses `assets/wheel.png`, rotates by
 `-carState.steeringAngleDeg`, and is tinted with the same shared top-row
 colors as the other status icons. When cruise control has no set speed (`off`), the LFA wheel and angle

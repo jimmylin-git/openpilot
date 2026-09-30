@@ -96,15 +96,14 @@ DRIVE_MODE_ICON_PATHS = {
     True: CLUSTER_ASSETS_DIR / "experimental.png",
 }
 EXPERIMENTAL_LABEL_SEGMENTS = (("e", AMBER), ("x", GREEN), ("p.", RED))
-# Scales every top-row item (turn signals, status icons, and their labels);
-# MEM/CPU/TEMP metrics and the gear readout are intentionally not affected.
+# Scales the five status icons, their labels, and gap bars; turn signals,
+# MEM/CPU/TEMP metrics, and the gear readout are intentionally not affected.
 TOP_ROW_SCALE = 1.5
-# Signals sit just outside the status row and inside the side panels' curved
-# edges; re-fit together with TOP_STATUS_ICON_SPACING when TOP_ROW_SCALE changes.
-TURN_SIGNAL_LEFT_CENTER_X = 600
-TURN_SIGNAL_RIGHT_CENTER_X = 1320
+# Fixed signal positions sit just outside the status row.
+TURN_SIGNAL_LEFT_CENTER_X = 595
+TURN_SIGNAL_RIGHT_CENTER_X = 1325
 TURN_SIGNAL_CENTER_Y = 94
-TURN_SIGNAL_ICON_SIZE = 128.0 * TOP_ROW_SCALE
+TURN_SIGNAL_ICON_SIZE = 128.0
 TURN_SIGNAL_HEAD_HALF_HEIGHT = 38
 TURN_SIGNAL_MID_CENTER_X = (TURN_SIGNAL_LEFT_CENTER_X + TURN_SIGNAL_RIGHT_CENTER_X) * 0.5
 DRIVE_STATUS_BASE_BOX_SIZE = 46.0
@@ -141,9 +140,6 @@ FOLLOW_GAP_LANE_CONTENT_BOTTOM_FRAC = 111.0 / 128.0
 FOLLOW_GAP_BAR_SPAN_TOP_FRAC = 0.5
 FOLLOW_GAP_BAR_SPAN_BOTTOM_FRAC = 0.99
 TOP_STATUS_ICON_SPACING = 108
-# Chestnut is wider than the ACC icon, so nudge the row left to balance the
-# visible clearance to each turn signal.
-TOP_STATUS_ROW_OFFSET_X = -7.0
 ACC_LAYOUT_TRANSITION_SECONDS = 1.5
 ACC_LAYOUT_SETTLE_SCALE = 1.05
 ACC_LAYOUT_SETTLE_START = 0.40
@@ -153,7 +149,7 @@ ACC_LAYOUT_SETTLE_PEAK = 0.55
 ACC_OFF_LFA_SCALE = 4.0 / TOP_ROW_SCALE
 ACC_OFF_LFA_OFFSET_Y = 50.0
 # Five equal slots when ACC has a set speed; four equal slots when LFA is centered.
-ACC_STATUS_CENTER_X = DESIGN_WIDTH * 0.5 - 2 * TOP_STATUS_ICON_SPACING + TOP_STATUS_ROW_OFFSET_X
+ACC_STATUS_CENTER_X = DESIGN_WIDTH * 0.5 - 2 * TOP_STATUS_ICON_SPACING
 FOLLOW_GAP_LANE_CENTER_X = ACC_STATUS_CENTER_X + TOP_STATUS_ICON_SPACING
 LFA_STATUS_CENTER_X = FOLLOW_GAP_LANE_CENTER_X + TOP_STATUS_ICON_SPACING
 DRIVE_MODE_ICON_CENTER_X = LFA_STATUS_CENTER_X + TOP_STATUS_ICON_SPACING
@@ -3468,11 +3464,11 @@ class ClusterUiRenderer:
         direction = -1 if side == "left" else 1
         fill = GREEN if lit else (*theme.muted, 42)
         outline = (8, 118, 65) if lit else (*theme.muted, 150)
-        tail_back = -36 * TOP_ROW_SCALE
-        tail_front = 12 * TOP_ROW_SCALE
-        tail_half_height = 16 * TOP_ROW_SCALE
-        head_tip_x = 60 * TOP_ROW_SCALE
-        head_half_height = TURN_SIGNAL_HEAD_HALF_HEIGHT * TOP_ROW_SCALE
+        tail_back = -36
+        tail_front = 12
+        tail_half_height = 16
+        head_tip_x = 60
+        head_half_height = TURN_SIGNAL_HEAD_HALF_HEIGHT
 
         def point(local_x: float, local_y: float) -> rl.Vector2:
             return rl.Vector2(cx + direction * local_x, cy + local_y)
