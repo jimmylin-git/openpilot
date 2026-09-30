@@ -3023,7 +3023,8 @@ class ClusterUiRenderer:
     def _draw_acc_status_icon(self, state: ClusterUiState) -> None:
         theme = self._current_theme()
         status = self._acc_status(state)
-        tint = GREEN if status == "engaged" else AMBER if status in ("standby", "paused") else theme.muted
+        b_standby = self._b_gear_standby(state)
+        tint = AMBER if b_standby else GREEN if status == "engaged" else AMBER if status in ("standby", "paused") else theme.muted
         icon_size = LFA_STATUS_ICON_SIZE
         self._draw_bottom_aligned_texture_icon(
             self._acc_status_texture, ACC_STATUS_CENTER_X,
@@ -3036,12 +3037,13 @@ class ClusterUiRenderer:
                 ACC_STATUS_CENTER_X,
                 TOP_STATUS_DETAIL_CENTER_Y,
                 TOP_STATUS_LABEL_FONT_SIZE,
-                self._cruise_set_color(state, theme),
+                AMBER if b_standby else self._cruise_set_color(state, theme),
                 anchor="center",
             )
 
     def _draw_drive_mode_icon(self, state: ClusterUiState, layout_progress: float) -> None:
         status = self._acc_status(state)
+        b_standby = self._b_gear_standby(state)
         mode = bool(state.experimental_mode) and status != "off"
         if mode not in self._drive_mode_textures:
             self._drive_mode_textures[mode] = self._load_icon_texture(
@@ -3056,7 +3058,7 @@ class ClusterUiRenderer:
         self._draw_bottom_aligned_texture_icon(
             texture, center_x,
             TURN_SIGNAL_CENTER_Y + height * 0.5, width, height,
-            self._current_theme().muted if status == "off" else WHITE if mode else GREEN,
+            AMBER if b_standby else self._current_theme().muted if status == "off" else WHITE if mode else GREEN,
         )
         if state.experimental_mode is not None:
             self._draw_text(
@@ -3064,7 +3066,7 @@ class ClusterUiRenderer:
                 center_x,
                 TOP_STATUS_DETAIL_CENTER_Y,
                 TOP_STATUS_LABEL_FONT_SIZE,
-                self._current_theme().muted if status == "off" else GREEN,
+                AMBER if b_standby else self._current_theme().muted if status == "off" else GREEN,
                 anchor="center",
             )
 
@@ -3111,8 +3113,9 @@ class ClusterUiRenderer:
     ) -> None:
         theme = self._current_theme()
         active = bool(state.cruise_display_state == "engaged")
-        tint = WHITE if active else theme.muted
-        alpha = 255 if active else 190
+        b_standby = self._b_gear_standby(state)
+        tint = AMBER if b_standby else WHITE if active else theme.muted
+        alpha = 255 if b_standby or active else 190
         bar_active_color = (*tint, alpha)
         bar_inactive_color = (*theme.muted, 130)
 
@@ -3198,8 +3201,9 @@ class ClusterUiRenderer:
         theme = self._current_theme()
         active = bool(state.lfa_active)
         texture = self._lfa_active_texture if active and self._lfa_active_texture is not None else self._lfa_texture
-        tint = WHITE if active else theme.muted
-        alpha = 255 if active else 190
+        b_standby = self._b_gear_standby(state)
+        tint = AMBER if b_standby else WHITE if active else theme.muted
+        alpha = 255 if b_standby or active else 190
         if state.wheel_critical and self._lfa_critical_texture is not None:
             texture = self._lfa_critical_texture
             tint = WHITE
@@ -3330,6 +3334,14 @@ class ClusterUiRenderer:
         if state.cruise_display_state == "paused":
             return "paused"
         return "standby" if state.cruise_available else "off"
+
+    @staticmethod
+    def _b_gear_standby(state: ClusterUiState) -> bool:
+        # Prius B gear keeps ACC available but the car is not under longitudinal
+        # control, so the top status row is forced to the amber standby tint.
+        if (state.gear_text or "").strip().upper() != "B":
+            return False
+        return ClusterUiRenderer._acc_status(state) != "off"
 
     @staticmethod
     def _cruise_set_visible(state: ClusterUiState) -> bool:
