@@ -124,7 +124,8 @@ def dtype_from_uop(op:Ops, src:tuple[UOp,...], arg:Any) -> DType:
       # always void
       return dtypes.void
     case Ops.CALL:
-      # a CALL of an opaque body (CallInfo arg) is void, a CALL of an address states its return dtype in the arg
+      # new CALLs store their return dtype in CallInfo; keep direct DType args for legacy UOps
+      if isinstance(arg, CallInfo): return arg.dtype
       return arg if isinstance(arg, DType) else dtypes.void
     case Ops.CUSTOM | Ops.CUSTOMI:
       assert isinstance(arg, tuple) and len(arg) == 2 and isinstance(arg[1], DType), f"CUSTOM/CUSTOMI arg must be (str, DType), got {arg}"
@@ -1301,8 +1302,9 @@ class CallInfo:
   precompile: bool = False
   precompile_backward: bool = False
   aux: Any = None
+  dtype: DType = dtypes.void
   # grad_fxn can't be pickled
-  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.aux))
+  def __reduce__(self): return (CallInfo, (None, self.name, self.precompile, self.precompile_backward, self.aux, self.dtype))
   def __repr__(self):
     gf = id(self.grad_fxn) if self.grad_fxn else None
     return f"CallInfo({gf}, {repr(self.name)}, {self.precompile}, {self.precompile_backward})"
