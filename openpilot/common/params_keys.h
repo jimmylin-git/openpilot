@@ -70,7 +70,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LanguageSetting", {PERSISTENT | BACKUP, STRING, "en"}},
     {"LastAthenaPingTime", {CLEAR_ON_MANAGER_START, INT}},
     {"LastGPSPosition", {PERSISTENT, STRING}},
-    {"LastInteractionMonotonic", {CLEAR_ON_MANAGER_START, FLOAT}},
     {"LastManagerExitReason", {CLEAR_ON_MANAGER_START, STRING}},
     {"LastOffroadStatusPacket", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, JSON}},
     {"LastAgnosPowerMonitorShutdown", {CLEAR_ON_MANAGER_START, STRING}},

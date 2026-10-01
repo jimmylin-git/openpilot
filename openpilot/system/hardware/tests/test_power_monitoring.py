@@ -103,8 +103,11 @@ class TestPowerMonitoring(OpenpilotTestCase):
   # Test to check policy of stopping charging after MAX_TIME_OFFROAD_S
   def test_max_time_offroad(self, mocker):
     MOCKED_MAX_OFFROAD_TIME = 3600
+    POWER_DRAW = 0 # To stop shutting down for other reasons
     pm_patch(mocker, "MAX_TIME_OFFROAD_S", MOCKED_MAX_OFFROAD_TIME, constant=True)
+    pm_patch(mocker, "HARDWARE.get_current_power_draw", POWER_DRAW)
     pm = PowerMonitoring()
+    pm.car_battery_capacity_uWh = CAR_BATTERY_CAPACITY_uWh
     start_time = ssb
     ignition = False
     set_mock_time(start_time + MOCKED_MAX_OFFROAD_TIME - 1)
@@ -112,78 +115,86 @@ class TestPowerMonitoring(OpenpilotTestCase):
     set_mock_time(start_time + MOCKED_MAX_OFFROAD_TIME)
     assert pm.should_shutdown(ignition, True, start_time, False)
 
-  # Voltage and battery estimates are not trusted on this port, only the offroad timer
-  def test_low_voltage_does_not_shutdown(self, mocker):
-    pm_patch(mocker, "HARDWARE.get_current_power_draw", 0)
-    self.params.put("MaxTimeOffroad", 0, block=True)
+  def test_car_voltage(self, mocker):
+    POWER_DRAW = 0 # To stop shutting down for other reasons
+    TEST_TIME = 350
+    VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S = 50
+    pm_patch(mocker, "VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S", VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S, constant=True)
+    pm_patch(mocker, "HARDWARE.get_current_power_draw", POWER_DRAW)
+    pm = PowerMonitoring()
+    pm.car_battery_capacity_uWh = CAR_BATTERY_CAPACITY_uWh
+    ignition = False
+    start_time = ssb
+    for i in range(TEST_TIME):
+      pm.calculate(VOLTAGE_BELOW_PAUSE_CHARGING, ignition)
+      if i % 10 == 0:
+        assert pm.should_shutdown(ignition, True, start_time, True) == \
+                          (pm.car_voltage_mV < VBATT_PAUSE_CHARGING * 1e3 and \
+                          (ssb - start_time) > VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S and \
+                            (ssb - start_time) > DELAY_SHUTDOWN_TIME_S)
+    assert pm.should_shutdown(ignition, True, start_time, True)
+
+  # Test to check policy of not stopping charging when DisablePowerDown is set
+  def test_disable_power_down(self, mocker):
+    POWER_DRAW = 0 # To stop shutting down for other reasons
+    TEST_TIME = 100
+    self.params.put_bool("DisablePowerDown", True, block=True)
+    pm_patch(mocker, "HARDWARE.get_current_power_draw", POWER_DRAW)
+    pm = PowerMonitoring()
+    pm.car_battery_capacity_uWh = CAR_BATTERY_CAPACITY_uWh
+    ignition = False
+    for i in range(TEST_TIME):
+      pm.calculate(VOLTAGE_BELOW_PAUSE_CHARGING, ignition)
+      if i % 10 == 0:
+        assert not pm.should_shutdown(ignition, True, ssb, False)
+    assert not pm.should_shutdown(ignition, True, ssb, False)
+
+  # Test to check policy of not stopping charging when ignition
+  def test_ignition(self, mocker):
+    POWER_DRAW = 0 # To stop shutting down for other reasons
+    TEST_TIME = 100
+    pm_patch(mocker, "HARDWARE.get_current_power_draw", POWER_DRAW)
+    pm = PowerMonitoring()
+    pm.car_battery_capacity_uWh = CAR_BATTERY_CAPACITY_uWh
+    ignition = True
+    for i in range(TEST_TIME):
+      pm.calculate(VOLTAGE_BELOW_PAUSE_CHARGING, ignition)
+      if i % 10 == 0:
+        assert not pm.should_shutdown(ignition, True, ssb, False)
+    assert not pm.should_shutdown(ignition, True, ssb, False)
+
+  # Test to check policy of not stopping charging when harness is not connected
+  def test_harness_connection(self, mocker):
+    POWER_DRAW = 0 # To stop shutting down for other reasons
+    TEST_TIME = 100
+    pm_patch(mocker, "HARDWARE.get_current_power_draw", POWER_DRAW)
+    pm = PowerMonitoring()
+    pm.car_battery_capacity_uWh = CAR_BATTERY_CAPACITY_uWh
+
+    ignition = False
+    for i in range(TEST_TIME):
+      pm.calculate(VOLTAGE_BELOW_PAUSE_CHARGING, ignition)
+      if i % 10 == 0:
+        assert not pm.should_shutdown(ignition, False, ssb, False)
+    assert not pm.should_shutdown(ignition, False, ssb, False)
+
+  def test_delay_shutdown_time(self):
     pm = PowerMonitoring()
     pm.car_battery_capacity_uWh = 0
     ignition = False
-    start_time = ssb
-    for _ in range(DELAY_SHUTDOWN_TIME_S * 2):
-      pm.calculate(VOLTAGE_BELOW_PAUSE_CHARGING, ignition)
-    assert not pm.should_shutdown(ignition, True, start_time, True)
-
-  # Test to check policy of not stopping charging when DisablePowerDown is set
-  def test_disable_power_down(self):
-    self.params.put_bool("DisablePowerDown", True, block=True)
-    self.params.put("MaxTimeOffroad", 5, block=True)
-    pm = PowerMonitoring()
-    start_time = ssb
-    set_mock_time(start_time + 3600)
-    assert not pm.should_shutdown(False, True, start_time, True)
-
-  # Test to check policy of not stopping charging when ignition
-  def test_ignition(self):
-    self.params.put("MaxTimeOffroad", 5, block=True)
-    pm = PowerMonitoring()
-    start_time = ssb
-    set_mock_time(start_time + 3600)
-    assert not pm.should_shutdown(True, True, start_time, True)
-
-  def test_onroad_never_shuts_down(self):
-    self.params.put("MaxTimeOffroad", 5, block=True)
-    pm = PowerMonitoring()
-    set_mock_time(ssb + 3600)
-    assert not pm.should_shutdown(False, True, None, True)
-
-  # Harness status and started_seen do not block the offroad timer
-  def test_timer_without_harness_or_started(self):
-    self.params.put("MaxTimeOffroad", 5, block=True)
-    pm = PowerMonitoring()
-    start_time = ssb
-    set_mock_time(start_time + DELAY_SHUTDOWN_TIME_S)
-    assert pm.should_shutdown(False, False, start_time, False)
-
-  def test_delay_shutdown_time(self):
-    self.params.put("MaxTimeOffroad", 1, block=True)
-    pm = PowerMonitoring()
+    in_car = True
     offroad_timestamp = ssb
+    started_seen = True
+    pm.calculate(VOLTAGE_BELOW_PAUSE_CHARGING, ignition)
+
     set_mock_time(offroad_timestamp + DELAY_SHUTDOWN_TIME_S - 1)
-    assert not pm.should_shutdown(False, True, offroad_timestamp, True), \
+    assert not pm.should_shutdown(ignition, in_car, offroad_timestamp, started_seen), \
                      f"Should not shutdown before {DELAY_SHUTDOWN_TIME_S} seconds offroad time"
     set_mock_time(offroad_timestamp + DELAY_SHUTDOWN_TIME_S)
-    assert pm.should_shutdown(False, True, offroad_timestamp, True), \
+    assert pm.should_shutdown(ignition, in_car,
+                                       offroad_timestamp,
+                                       started_seen), \
                     f"Should shutdown after {DELAY_SHUTDOWN_TIME_S} seconds offroad time"
-
-  def test_interaction_restarts_timer(self):
-    self.params.put("MaxTimeOffroad", 10, block=True)
-    pm = PowerMonitoring()
-    offroad_timestamp = ssb
-    interaction = offroad_timestamp + 500
-    self.params.put("LastInteractionMonotonic", interaction, block=True)
-    set_mock_time(offroad_timestamp + 10 * 60 + 1)
-    assert not pm.should_shutdown(False, True, offroad_timestamp, True)
-    set_mock_time(interaction + 10 * 60 - 1)
-    assert pm.should_shutdown(False, True, offroad_timestamp, True)
-
-  def test_interaction_before_offroad_ignored(self):
-    self.params.put("MaxTimeOffroad", 10, block=True)
-    pm = PowerMonitoring()
-    offroad_timestamp = ssb + 1000
-    self.params.put("LastInteractionMonotonic", offroad_timestamp - 100, block=True)
-    set_mock_time(offroad_timestamp + 10 * 60 - 1)
-    assert pm.should_shutdown(False, True, offroad_timestamp, True)
 
   @parameterized.expand(
     [

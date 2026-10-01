@@ -112,22 +112,5 @@ class PowerMonitoring:
     return offroad_time > MAX_TIME_OFFROAD_S
 
   # See if we need to shutdown
-  # Only the MaxTimeOffroad timer is used; voltage/battery-estimate based shutdowns stay disabled on this port.
-  # The timer restarts on any UI interaction (LastInteractionMonotonic, CLOCK_MONOTONIC shared across processes).
   def should_shutdown(self, ignition: bool, in_car: bool, offroad_timestamp: float | None, started_seen: bool):
-    if offroad_timestamp is None or ignition:
-      return False
-    if self.params.get_bool("ForcePowerDown"):
-      return True
-    if self.params.get_bool("DisablePowerDown"):
-      return False
-
-    now = time.monotonic()
-    timer_start = offroad_timestamp
-    last_interaction = self.params.get("LastInteractionMonotonic")
-    if last_interaction is not None and offroad_timestamp < last_interaction <= now:
-      timer_start = last_interaction
-
-    offroad_time = now - offroad_timestamp
-    idle_time = now - timer_start
-    return offroad_time > DELAY_SHUTDOWN_TIME_S and self.max_time_offroad_exceeded(idle_time)
+    return False
