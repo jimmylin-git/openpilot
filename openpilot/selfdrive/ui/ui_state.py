@@ -285,6 +285,7 @@ class Device(DeviceSP):
     DeviceSP.__init__(self)
     self._ignition = False
     self._interaction_time: float = -1
+    self._last_interaction_write: float = -1e9
     self._override_interactive_timeout: int | None = None
     self._interactive_timeout_callbacks: list[Callable] = []
     self._prev_timed_out = False
@@ -319,6 +320,13 @@ class Device(DeviceSP):
 
   def _reset_interactive_timeout(self) -> None:
     self._interaction_time = time.monotonic() + self.interactive_timeout
+
+  def _record_interaction(self) -> None:
+    # restarts hardwared's MaxTimeOffroad shutdown timer
+    now = time.monotonic()
+    if now - self._last_interaction_write >= 10:
+      self._last_interaction_write = now
+      ui_state.params.put("LastInteractionMonotonic", now)
 
   def add_interactive_timeout_callback(self, callback: Callable):
     self._interactive_timeout_callbacks.append(callback)
@@ -391,6 +399,8 @@ class Device(DeviceSP):
         DeviceSP.wake_from_dimmed_onroad_brightness(ui_state, gui_app.mouse_events)
 
       self._reset_interactive_timeout()
+      if not ignition_just_turned_off:
+        self._record_interaction()
 
     interaction_timeout = time.monotonic() > self._interaction_time
     if interaction_timeout and not self._prev_timed_out:
