@@ -116,6 +116,7 @@ def set_offroad_alert_if_changed(offroad_alert: str, show_alert: bool, extra_tex
 
 def touch_thread(end_event):
   count = 0
+  last_touch_record_t = 0.0
 
   pm = messaging.PubMaster(["touch"])
 
@@ -143,6 +144,16 @@ def touch_thread(end_event):
             msg.touch = event_frame
             pm.send('touch', msg)
             event_frame = []
+            now_t = time.monotonic()
+            if now_t - last_touch_record_t > 5.0:
+              last_touch_record_t = now_t
+              for p in ("/dev/shm/last_ui_touch", "/tmp/last_ui_touch"):
+                try:
+                  with open(p, "w") as f:
+                    f.write(f"{now_t}\n")
+                  break
+                except Exception:
+                  pass
           continue
 
       count += 1

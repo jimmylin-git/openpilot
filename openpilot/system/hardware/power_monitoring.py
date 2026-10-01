@@ -18,6 +18,21 @@ MIN_ON_TIME_S = 3600
 DELAY_SHUTDOWN_TIME_S = 300 # Wait at least DELAY_SHUTDOWN_TIME_S seconds after offroad_time to shutdown.
 VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S = 60
 
+TOUCH_INTERACTION_FILES = ("/dev/shm/last_ui_touch", "/tmp/last_ui_touch")
+
+
+def get_last_touch_interaction() -> float | None:
+  for path in TOUCH_INTERACTION_FILES:
+    try:
+      with open(path, "r") as f:
+        val = f.read().strip()
+        if val:
+          return float(val)
+    except Exception:
+      continue
+  return None
+
+
 class PowerMonitoring:
   def __init__(self):
     self.params = Params()
@@ -112,5 +127,23 @@ class PowerMonitoring:
     return offroad_time > MAX_TIME_OFFROAD_S
 
   # See if we need to shutdown
+  # Uses the MaxTimeOffroad timer (default 30 min in settings); voltage/battery-estimate shutdowns remain disabled.
+  # The idle timer resets whenever the vehicle goes onroad or user touch interaction is recorded in RAM.
   def should_shutdown(self, ignition: bool, in_car: bool, offroad_timestamp: float | None, started_seen: bool):
-    return False
+    if offroad_timestamp is None or ignition:
+      return False
+    if self.params.get_bool("ForcePowerDown"):
+      return True
+    if self.params.get_bool("DisablePowerDown"):
+      return False
+
+    now = time.monotonic()
+    timer_start = offroad_timestamp
+
+    last_touch = get_last_touch_interaction()
+    if last_touch is not None and offroad_timestamp < last_touch <= now:
+      timer_start = last_touch
+
+    offroad_time = now - offroad_timestamp
+    idle_time = now - timer_start
+    return offroad_time > DELAY_SHUTDOWN_TIME_S and self.max_time_offroad_exceeded(idle_time)

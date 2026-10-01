@@ -637,6 +637,17 @@ class GuiApplication(GuiApplicationExt):
         self._mouse_events = self._mouse.get_events()
         if len(self._mouse_events) > 0:
           self._last_mouse_event = self._mouse_events[-1]
+          if any(e.left_pressed or e.left_down for e in self._mouse_events):
+            t = time.monotonic()
+            if t - getattr(self, "_last_touch_record_t", 0) > 5.0:
+              self._last_touch_record_t = t
+              for p in ("/dev/shm/last_ui_touch", "/tmp/last_ui_touch"):
+                try:
+                  with open(p, "w") as f:
+                    f.write(f"{t}\n")
+                  break
+                except Exception:
+                  pass
 
         # Skip rendering when screen is off
         if not self._should_render:
