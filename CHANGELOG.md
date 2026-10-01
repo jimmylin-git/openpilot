@@ -1,6 +1,7 @@
 sunnypilot Version MR.ONE-2026 (2026-08-28)
 ========================
 * MR.ONE Custom Features
+  * hardware: suppress boot-time temperature spikes for the first 20 seconds while retaining normal thermal protection afterward
   * models: restore Chestnut V25 catalog and default to the Tee Time model for compatibility with the bundled tinygrad loader
   * agnos: use the patched 19.7-c3xl-dev system image
   * updater: show download progress and check for updates while online without downloading or applying them onroad
