@@ -17,6 +17,7 @@ from openpilot.selfdrive.modeld.helpers import chestnut_present
 
 # SET ME TO THE EXACT JSON VERSION WE SET IN SUNNYPILOT_MODELS REPO
 REQUIRED_JSON_VERSION = 19
+REQUIRED_JSON_VERSIONS = {19, 20}
 
 CUSTOM_MODEL_PATH = Paths.model_root()
 ModelManager = custom.ModelManagerSP
@@ -51,9 +52,9 @@ def is_bundle_version_compatible(bundle: dict) -> bool:
   """
   The bundle parsed from the json specifies a `minimum_selector_version`, which defines the minimum selector version
   required to load the model. This function ensures that:
-    the bundle MUST match the `REQUIRED_JSON_VERSION` set here in helpers.
+    the bundle MUST match supported selector versions in helpers.
   """
-  return bundle.get("minimumSelectorVersion", 0) == REQUIRED_JSON_VERSION
+  return bundle.get("minimumSelectorVersion", 0) in REQUIRED_JSON_VERSIONS
 
 
 def _bundle_artifacts(bundle: custom.ModelManagerSP.ModelBundle) -> list[tuple[str, str]]:
