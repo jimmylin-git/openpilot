@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -23,6 +24,7 @@ from openpilot.cereal import custom
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.common.file_chunker import get_chunk_name, get_manifest_path
 from openpilot.selfdrive.test.helpers import http_server_context
+from openpilot.selfdrive.modeld import helpers as modeld_helpers
 from openpilot.sunnypilot.models import manager as manager_module
 from openpilot.sunnypilot.models.fetcher import ModelFetcher, get_cached_bundles
 from openpilot.sunnypilot.models import helpers
@@ -144,6 +146,40 @@ class ManagerDownloadTestBase(OpenpilotTestCase):
     leftovers = [p for p in [base_path, get_manifest_path(base_path)] + self.chunk_paths(base_path)
                  if os.path.isfile(p)]
     assert leftovers == [], f"partial files left behind: {leftovers}"
+
+
+class TestModelFileExists(OpenpilotTestCase):
+  def test_chunked_model_requires_all_chunks(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      base_path = os.path.join(tmpdir, "model.pkl")
+      with open(get_manifest_path(base_path), "w") as f:
+        f.write("2")
+
+      self.assertFalse(modeld_helpers.model_file_exists(base_path))
+      for i in range(2):
+        with open(get_chunk_name(base_path, i, 2), "wb") as f:
+          f.write(b"chunk")
+      self.assertTrue(modeld_helpers.model_file_exists(base_path))
+
+  def test_model_file_exists(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      path = os.path.join(tmpdir, "model.pkl")
+      with open(path, "wb") as f:
+        f.write(b"model")
+      self.assertTrue(modeld_helpers.model_file_exists(path))
+
+  def test_chestnut_compiled_checks_selected_downloaded_bundle(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      pkl_name = "chestnut.pkl"
+      with open(os.path.join(tmpdir, pkl_name), "wb") as f:
+        f.write(b"model")
+      bundle = SimpleNamespace(models=[SimpleNamespace(artifact=SimpleNamespace(fileName=pkl_name))])
+
+      with mock.patch.dict(os.environ, {"COMBINED_MODEL_PKL": ""}), \
+           mock.patch.object(modeld_helpers, "modeld_pkl_path", return_value=os.path.join(tmpdir, "bundled.pkl")), \
+           mock.patch("openpilot.common.hardware.hw.Paths.model_root", return_value=tmpdir), \
+           mock.patch("openpilot.sunnypilot.models.helpers.get_selected_bundle", return_value=bundle):
+        self.assertTrue(modeld_helpers.chestnut_compiled())
 
 
 class TestManagerDownload(ManagerDownloadTestBase):

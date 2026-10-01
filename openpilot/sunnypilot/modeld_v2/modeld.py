@@ -17,7 +17,7 @@ from tinygrad.tensor import Tensor
 
 import openpilot.cereal.messaging as messaging
 from openpilot.common.hardware import COMMA_HARDWARE
-from openpilot.selfdrive.modeld.helpers import chestnut_present, load_oob
+from openpilot.selfdrive.modeld.helpers import chestnut_present, model_file_exists, load_oob
 from openpilot.cereal import log
 from opendbc.car.structs import car
 from openpilot.cereal.services import SERVICE_LIST
@@ -59,31 +59,15 @@ PROCESS_NAME = "openpilot.selfdrive.modeld.modeld_tinygrad"
 BIG_MODEL_TIMEOUT = 60
 
 
-def _pkl_exists(path):
-  # a bare chunkmanifest is written eagerly for every model in the catalog, so it
-  # must NOT be treated as downloaded - require the pkl or every chunk file
-  from openpilot.common.file_chunker import get_chunk_name, get_manifest_path
-  if os.path.exists(path):
-    return True
-  manifest_path = get_manifest_path(path)
-  if not os.path.exists(manifest_path):
-    return False
-  try:
-    num_chunks = int(open(manifest_path).read().strip())
-  except Exception:
-    return False
-  return all(os.path.exists(get_chunk_name(path, i, num_chunks)) for i in range(num_chunks))
-
-
 def _find_driving_pkl(bundle, chestnut: bool = False):
-  if (override := os.environ.get('COMBINED_MODEL_PKL')) and _pkl_exists(override):
+  if (override := os.environ.get('COMBINED_MODEL_PKL')) and model_file_exists(override):
     return override
   if bundle is None:
     # no active bundle: use the bundled default pkl (CD210) so a fresh install
     # works immediately without downloading a model
     from openpilot.selfdrive.modeld.helpers import modeld_pkl_path
     bundled = str(modeld_pkl_path(chestnut))
-    if _pkl_exists(bundled):
+    if model_file_exists(bundled):
       return bundled
     return None
   if not bundle.models:
@@ -93,7 +77,7 @@ def _find_driving_pkl(bundle, chestnut: bool = False):
 
   pkl_name = bundle.models[0].artifact.fileName
   pkl_path = os.path.join(model_root, pkl_name)
-  if _pkl_exists(pkl_path):
+  if model_file_exists(pkl_path):
     return pkl_path
   return None
 
