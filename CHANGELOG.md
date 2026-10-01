@@ -1,4 +1,4 @@
-sunnypilot Version MR.ONE-2026 (2026-08-28)
+sunnypilot Version MR.ONE-2026 (2026-10-02)
 ========================
 * MR.ONE Custom Features
   * modeld: wait up to 60 seconds for a late Chestnut USB/GPU startup and retry transient AMD device initialization before falling back to the small model
