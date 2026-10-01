@@ -117,6 +117,8 @@ class DeviceLayoutSP(DeviceLayout):
       LineSeparator(),
       button_item_sp(lambda: tr("Change Language"), lambda: tr("CHANGE"), callback=self._show_language_dialog),
       LineSeparator(),
+      self._max_time_offroad,
+      LineSeparator(),
       self._onroad_uploads_and_reset_settings,
       Spacer(10),
       LineSeparator(height=10),
