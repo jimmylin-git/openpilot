@@ -15,6 +15,89 @@ tmp_path = tests_helpers.tmp_path
 
 
 class TestFallback(OpenpilotTestCase):
+  def test_chestnut_startup_waits_for_late_usb_detection(self, monkeypatch):
+    class Clock:
+      now = 0.
+
+      @classmethod
+      def monotonic(cls):
+        return cls.now
+
+      @classmethod
+      def sleep(cls, duration):
+        cls.now += duration
+
+    monkeypatch.setattr(modeld_module, "time", Clock)
+    monkeypatch.delenv("HCQDEV_WAIT_TIMEOUT_MS", raising=False)
+    present = iter((False, True))
+    monkeypatch.setattr(modeld_module, "chestnut_present", lambda: next(present, True))
+    model = mock.MagicMock()
+    monkeypatch.setattr(modeld_module, "ModelState", lambda **kwargs: model)
+
+    loaded, detected = modeld_module._load_chestnut_model(CAM_W, CAM_H, timeout=2.)
+
+    assert loaded is model
+    assert detected
+    model.warmup.assert_called_once()
+
+  def test_chestnut_startup_retries_amd_initialization(self, monkeypatch):
+    class Clock:
+      now = 0.
+
+      @classmethod
+      def monotonic(cls):
+        return cls.now
+
+      @classmethod
+      def sleep(cls, duration):
+        cls.now += duration
+
+    monkeypatch.setattr(modeld_module, "time", Clock)
+    monkeypatch.delenv("HCQDEV_WAIT_TIMEOUT_MS", raising=False)
+    monkeypatch.setattr(modeld_module, "chestnut_present", lambda: True)
+    model = mock.MagicMock()
+    model_states = iter((RuntimeError("No interface for AMD:0 is available"), model))
+
+    def create_model(**kwargs):
+      result = next(model_states)
+      if isinstance(result, Exception):
+        raise result
+      return result
+
+    model_state = mock.Mock(side_effect=create_model)
+    monkeypatch.setattr(modeld_module, "ModelState", model_state)
+
+    loaded, detected = modeld_module._load_chestnut_model(CAM_W, CAM_H, timeout=3.)
+
+    assert loaded is model
+    assert detected
+    assert model_state.call_count == 2
+    model.warmup.assert_called_once()
+
+  def test_chestnut_startup_does_not_retry_model_format_errors(self, monkeypatch):
+    class Clock:
+      now = 0.
+
+      @classmethod
+      def monotonic(cls):
+        return cls.now
+
+      @classmethod
+      def sleep(cls, duration):
+        cls.now += duration
+
+    monkeypatch.setattr(modeld_module, "time", Clock)
+    monkeypatch.delenv("HCQDEV_WAIT_TIMEOUT_MS", raising=False)
+    monkeypatch.setattr(modeld_module, "chestnut_present", lambda: True)
+    model_state = mock.Mock(side_effect=KeyError("run_policy"))
+    monkeypatch.setattr(modeld_module, "ModelState", model_state)
+
+    loaded, detected = modeld_module._load_chestnut_model(CAM_W, CAM_H, timeout=60.)
+
+    assert loaded is None
+    assert detected
+    model_state.assert_called_once()
+
   def test_find_dual_model_in_bundle(self, tmp_path, monkeypatch):
     lebowski_file = 'driving_lebowski.pkl'
     tsfdo_file = 'driving_tsfdo.pkl'

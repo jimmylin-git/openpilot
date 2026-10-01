@@ -17,7 +17,7 @@ from tinygrad.tensor import Tensor
 
 import openpilot.cereal.messaging as messaging
 from openpilot.common.hardware import COMMA_HARDWARE
-from openpilot.selfdrive.modeld.helpers import chestnut_present, model_file_exists, load_oob
+from openpilot.selfdrive.modeld.helpers import chestnut_compiled, chestnut_present, model_file_exists, load_oob
 from openpilot.cereal import log
 from opendbc.car.structs import car
 from openpilot.cereal.services import SERVICE_LIST
@@ -57,6 +57,8 @@ from openpilot.sunnypilot.selfdrive.controls.lib.relc import RoadEdgeLaneChangeC
 
 PROCESS_NAME = "openpilot.selfdrive.modeld.modeld_tinygrad"
 BIG_MODEL_TIMEOUT = 60
+CHESTNUT_DISCOVERY_POLL_INTERVAL = 0.5
+CHESTNUT_INIT_RETRY_INTERVAL = 1.0
 
 
 def _find_driving_pkl(bundle, chestnut: bool = False):
@@ -318,6 +320,46 @@ class ModelState(ModelStateBase):
     return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature), desiredAcceleration=float(desired_accel), shouldStop=bool(stop))
 
 
+def _is_retryable_chestnut_startup_error(error: Exception) -> bool:
+  message = str(error).lower()
+  return "no interface for amd:" in message or "/dev/kfd" in message or "no kfd device" in message
+
+
+def _load_chestnut_model(cam_w: int, cam_h: int, timeout: float) -> tuple[ModelState | None, bool]:
+  deadline = time.monotonic() + timeout
+  detected = False
+  last_error: Exception | None = None
+
+  while (remaining := deadline - time.monotonic()) > 0:
+    if not detected and not chestnut_present():
+      time.sleep(min(CHESTNUT_DISCOVERY_POLL_INTERVAL, remaining))
+      continue
+
+    detected = True
+    os.environ['HCQDEV_WAIT_TIMEOUT_MS'] = '3000'
+    try:
+      model = ModelState(cam_w=cam_w, cam_h=cam_h, chestnut=True)
+      model.warmup()
+      return model, detected
+    except Exception as error:
+      if not _is_retryable_chestnut_startup_error(error):
+        cloudlog.exception("chestnut load failed")
+        return None, detected
+
+      if last_error is None:
+        cloudlog.exception("Chestnut GPU is not ready yet; retrying model initialization")
+      else:
+        cloudlog.warning(f"Chestnut GPU initialization is still unavailable: {error}")
+      last_error = error
+      time.sleep(min(CHESTNUT_INIT_RETRY_INTERVAL, max(0., deadline - time.monotonic())))
+
+  if last_error is not None:
+    cloudlog.error(f"Chestnut GPU did not become ready within {timeout:.0f}s; last error: {last_error}")
+  elif not detected:
+    cloudlog.warning(f"Chestnut USB device was not detected within {timeout:.0f}s; using the small model")
+  return None, detected
+
+
 def main(demo=False):
   cloudlog.warning("modeld init")
 
@@ -326,12 +368,13 @@ def main(demo=False):
   setproctitle(PROCESS_NAME)
   config_realtime_process(7, 54)
 
+  params = Params()
   CHESTNUT = chestnut_present()
+  chestnut_model_available = chestnut_compiled()
   if CHESTNUT:
     os.environ['HCQDEV_WAIT_TIMEOUT_MS'] = '3000'
 
-  params = Params()
-  params.put_bool("ChestnutLoading", CHESTNUT)
+  params.put_bool("ChestnutLoading", CHESTNUT or chestnut_model_available)
   params.remove("ChestnutActive")
 
   # visionipc clients
@@ -361,25 +404,22 @@ def main(demo=False):
   st = time.monotonic()
 
   model = None
-  if CHESTNUT:
-    big_model = None
+  if CHESTNUT or chestnut_model_available:
+    big_model_result: tuple[ModelState | None, bool] = (None, CHESTNUT)
     def load_big():
-      nonlocal big_model
-      try:
-        m = ModelState(cam_w=vipc_client_main.width, cam_h=vipc_client_main.height, chestnut=True)
-        m.warmup()
-        big_model = m
-      except Exception:
-        cloudlog.exception("chestnut load failed")
+      nonlocal big_model_result
+      big_model_result = _load_chestnut_model(vipc_client_main.width, vipc_client_main.height, BIG_MODEL_TIMEOUT)
+
     loader = threading.Thread(target=load_big, daemon=True)
     loader.start()
     loader.join(BIG_MODEL_TIMEOUT)
-    model = big_model
-    if model is None:
-      params.put_bool("ChestnutModelError", True)
-    params.put_bool("ChestnutActive", model is not None)
-    if model is not None:
-      params.remove("ChestnutModelError")
+    model, CHESTNUT = big_model_result
+    if CHESTNUT:
+      if model is None:
+        params.put_bool("ChestnutModelError", True)
+      params.put_bool("ChestnutActive", model is not None)
+      if model is not None:
+        params.remove("ChestnutModelError")
 
   small_model = ModelState(cam_w=vipc_client_main.width, cam_h=vipc_client_main.height, chestnut=False) if model is None or CHESTNUT else None
   if model is None:

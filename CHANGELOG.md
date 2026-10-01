@@ -1,6 +1,7 @@
 sunnypilot Version MR.ONE-2026 (2026-08-28)
 ========================
 * MR.ONE Custom Features
+  * modeld: wait up to 60 seconds for a late Chestnut USB/GPU startup and retry transient AMD device initialization before falling back to the small model
   * hardware: suppress boot-time temperature spikes for the first 20 seconds while retaining normal thermal protection afterward
   * models: restore Chestnut V25 catalog and default to the Tee Time model for compatibility with the bundled tinygrad loader
   * agnos: use the patched 19.7-c3xl-dev system image
