@@ -621,6 +621,17 @@ class TestModelFetcherSources(OpenpilotTestCase):
       "chestnut": ModelFetcher.MODEL_URL_CHESTNUT,
     }
 
+  def test_chestnut_catalog_change_resets_old_selection(self):
+    params = mock.MagicMock()
+    params.get.return_value = {
+      "qcom": ModelFetcher.MODEL_URL,
+      "chestnut": "https://example.com/driving_models_chestnut_v28.json",
+    }
+
+    ModelFetcher(params)
+
+    params.remove.assert_any_call("ModelManager_ActiveBundleChestnut")
+
 
 
 class TestSourceCacheIntegrity(OpenpilotTestCase):
