@@ -1,6 +1,10 @@
 sunnypilot Version MR.ONE-2026 (2026-08-28)
 ========================
 * MR.ONE Custom Features
+  * models: restore Chestnut V25 catalog and default to the Tee Time model for compatibility with the bundled tinygrad loader
+  * agnos: use the patched 19.7-c3xl-dev system image
+  * updater: show download progress and check for updates while online without downloading or applying them onroad
+  * c3_client: support both legacy and current cereal layouts
   * panda: GM ignition-over-CAN detection (SystemPowerMode 0x1F1 on bus 0 and bus 2) for automatic device power-on on GM vehicles
   * panda: rebuilt firmware for the custom SPI panda (STM32H725), version DEV-22191a15
   * volkswagen: Avoid EPS Lockout toggle (ported from dragonpilot) - scales steering torque at low speeds and sharp turns to prevent EPS lockout
