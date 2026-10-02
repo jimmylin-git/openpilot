@@ -234,9 +234,10 @@ Unset keys keep the built-in defaults.
 When `--usb-brightness` is omitted, USB launches follow `ClusterHudBrightness`:
 `0` auto follows the wide-road camera exposure after samples are available,
 using the same ambient-light estimate as the main UI and smoothing changes over
-time. The resolved brightness is limited to `3..30` and then scaled to 70%
-(so auto tops out at 21); `1` through `100` are
-fixed brightness percentages, also limited to `3..30`.
+time. The resolved brightness is limited to `3..15` and then scaled to 70%
+(so auto tops out at 10 after integer rounding); `1` through `100` are
+fixed brightness percentages, also limited to `3..15`.
+Missing ambient samples use the default brightness of `15`.
 After the boot grace period, live USB output dims to `2` while offroad.
 Brightness settings and ambient light are checked once per second onroad.
 Offroad, the dim level is applied once after the boot grace period and
