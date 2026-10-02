@@ -161,7 +161,9 @@ LFA_STATUS_ICON_SIZE = 28.0 * TOP_ROW_ITEM_SCALE
 TOP_ICON_SIZE = 34.0 * TOP_ROW_ITEM_SCALE
 TOP_STATUS_DETAIL_FONT_SIZE = 14.0 * TOP_ROW_ITEM_SCALE
 TOP_STATUS_LABEL_FONT_SIZE = TOP_STATUS_DETAIL_FONT_SIZE * 0.9
-ACC_SET_SPEED_FONT_SIZE = TOP_STATUS_LABEL_FONT_SIZE * 1.15
+MODEL_LABEL_MAX_WIDTH = TOP_STATUS_ICON_SPACING - 12.0
+MODEL_LABEL_SCROLL_SPEED = 24.0
+MODEL_LABEL_SCROLL_PAUSE_S = 1.5
 TOP_STATUS_DETAIL_CENTER_Y = (
     TURN_SIGNAL_CENTER_Y
     + max(FOLLOW_GAP_LANE_ICON_SIZE, LFA_STATUS_ICON_SIZE) * 0.5
@@ -562,6 +564,8 @@ class ClusterUiRenderer:
         self._left_turn_signal_texture = None
         self._right_turn_signal_texture = None
         self._chestnut_textures: dict[str, object] = {}
+        self._model_label_text = ""
+        self._model_label_started_at = 0.0
         self._drive_mode_textures: dict[bool, object] = {}
         self._background_texture = None
         self._route_video_texture = None
@@ -2612,6 +2616,45 @@ class ClusterUiRenderer:
                 anchor="center",
             )
         self._draw_chestnut_icon(stats.chestnut_state)
+        self._draw_model_label(stats.model_name)
+
+    def _draw_model_label(self, text: str) -> None:
+        now = time.monotonic()
+        if text != self._model_label_text:
+            self._model_label_text = text
+            self._model_label_started_at = now
+        size = TOP_STATUS_LABEL_FONT_SIZE
+        text_width, text_height = self._measure_text(text, size)
+        center_x = CHESTNUT_ICON_CENTER_X
+        center_y = TOP_STATUS_DETAIL_CENTER_Y
+        color = self._current_theme().text
+        if text_width <= MODEL_LABEL_MAX_WIDTH:
+            self._draw_text(text, center_x, center_y, size, color, anchor="center")
+            return
+
+        overflow = text_width - MODEL_LABEL_MAX_WIDTH
+        travel_s = overflow / MODEL_LABEL_SCROLL_SPEED
+        phase = (now - self._model_label_started_at) % (2.0 * (travel_s + MODEL_LABEL_SCROLL_PAUSE_S))
+        if phase < MODEL_LABEL_SCROLL_PAUSE_S:
+            offset = 0.0
+        elif phase < MODEL_LABEL_SCROLL_PAUSE_S + travel_s:
+            offset = (phase - MODEL_LABEL_SCROLL_PAUSE_S) * MODEL_LABEL_SCROLL_SPEED
+        elif phase < 2.0 * MODEL_LABEL_SCROLL_PAUSE_S + travel_s:
+            offset = overflow
+        else:
+            offset = overflow - (phase - 2.0 * MODEL_LABEL_SCROLL_PAUSE_S - travel_s) * MODEL_LABEL_SCROLL_SPEED
+
+        left = center_x - MODEL_LABEL_MAX_WIDTH * 0.5
+        top = center_y - text_height * 0.5
+        sx, sy = self.width / DESIGN_WIDTH, self.height / DESIGN_HEIGHT
+        clip_left, clip_top = math.floor(left * sx), math.floor(top * sy)
+        clip_right = math.ceil((left + MODEL_LABEL_MAX_WIDTH) * sx)
+        clip_bottom = math.ceil((top + text_height + size * TEXT_VERTICAL_CENTER_OFFSET_RATIO) * sy)
+        rl.begin_scissor_mode(clip_left, clip_top, clip_right - clip_left, clip_bottom - clip_top)
+        try:
+            self._draw_text(text, left - offset, center_y, size, color)
+        finally:
+            rl.end_scissor_mode()
 
     def _draw_chestnut_icon(self, chestnut_state: str | None) -> None:
         # No Chestnut connected: show the plain icon greyed out like other inactive icons.
@@ -3000,7 +3043,7 @@ class ClusterUiRenderer:
                 speed_text,
                 ACC_STATUS_CENTER_X,
                 TOP_STATUS_DETAIL_CENTER_Y,
-                TOP_STATUS_LABEL_FONT_SIZE if speed_text == "--" else ACC_SET_SPEED_FONT_SIZE,
+                TOP_STATUS_LABEL_FONT_SIZE,
                 AMBER if b_standby else self._cruise_set_color(state, theme),
                 anchor="center",
             )
@@ -3199,14 +3242,14 @@ class ClusterUiRenderer:
             1.0 + (ACC_OFF_LFA_SCALE - 1.0) * (1.0 - layout_progress)
         ) * self._acc_layout_settle_scale
         icon_size = LFA_STATUS_ICON_SIZE * icon_scale
-        detail_font_size = TOP_STATUS_DETAIL_FONT_SIZE * 0.9 * icon_scale
+        detail_font_size = TOP_STATUS_LABEL_FONT_SIZE * (1.0 + (ACC_OFF_LFA_SCALE - 1.0) * (1.0 - layout_progress))
         icon_center_x = LFA_STATUS_CENTER_X + (DESIGN_WIDTH * 0.5 - LFA_STATUS_CENTER_X) * (1.0 - layout_progress)
         acc_off_center_y = DESIGN_HEIGHT * 0.5 - detail_font_size * 0.625 + ACC_OFF_LFA_OFFSET_Y
         icon_center_y = TURN_SIGNAL_CENTER_Y + (acc_off_center_y - TURN_SIGNAL_CENTER_Y) * (1.0 - layout_progress)
         # Anchor the angle text to the icon's current bottom edge so it never
         # slides over the wheel while the icon moves and resizes.
-        top_row_text_gap = TOP_STATUS_DETAIL_CENTER_Y - (TURN_SIGNAL_CENTER_Y + LFA_STATUS_ICON_SIZE * 0.5)
-        text_gap = top_row_text_gap + (detail_font_size * 0.75 - top_row_text_gap) * (1.0 - layout_progress)
+        top_row_text_gap = TOP_STATUS_DETAIL_CENTER_Y - (TURN_SIGNAL_CENTER_Y + icon_size * 0.5)
+        text_gap = max(top_row_text_gap, detail_font_size * 0.75)
         detail_center_y = icon_center_y + icon_size * 0.5 + text_gap
         if self._draw_bottom_aligned_texture_icon(
             texture,

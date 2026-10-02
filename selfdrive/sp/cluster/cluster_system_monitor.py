@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import os
 from pathlib import Path
 import threading
@@ -22,6 +23,7 @@ class SystemStats:
     cpu_core_percents: tuple[float | None, ...] = ()
     cpu_total_percent: float | None = None
     chestnut_state: str | None = None
+    model_name: str = "small model"
 
 
 CHESTNUT_LOADING = "loading"
@@ -74,6 +76,7 @@ class SystemStatsSampler:
             cpu_total_percent = self._linux_cpu_total_percent(cpu_times)
             self._previous_linux_cpu_times = cpu_times
 
+        chestnut_state = self._read_chestnut_state()
         return SystemStats(
             memory_total_bytes=memory_total,
             memory_used_bytes=memory_used,
@@ -81,8 +84,25 @@ class SystemStatsSampler:
             temperature_c=temperature_c,
             cpu_core_percents=cpu_percents,
             cpu_total_percent=cpu_total_percent,
-            chestnut_state=self._read_chestnut_state(),
+            chestnut_state=chestnut_state,
+            model_name=self._read_model_name(chestnut_state),
         )
+
+    def _read_model_name(self, chestnut_state: str | None) -> str:
+        if chestnut_state != CHESTNUT_ACTIVE:
+            return "small model"
+        try:
+            from openpilot.selfdrive.modeld.helpers import chestnut_present
+            from openpilot.sunnypilot.models.helpers import get_selected_bundle
+            from openpilot.sunnypilot.models.model_name import DEFAULT_BIG_MODEL
+
+            if not chestnut_present():
+                return "small model"
+            bundle = get_selected_bundle(self._params, "chestnut")
+            return bundle.displayName if bundle is not None else DEFAULT_BIG_MODEL
+        except Exception:
+            logging.getLogger(__name__).exception("Unable to read the active Chestnut model name")
+            return "model unknown"
 
     def _read_chestnut_state(self) -> str | None:
         # modeld sets ChestnutLoading while the eGPU model loads, then ChestnutActive
