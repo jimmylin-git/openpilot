@@ -649,3 +649,20 @@ Chestnut is loading or active, H264 USB chunks are capped at 32 KiB with a
 and tinygrad Chestnut USB transfers use the same process-shared lock at
 `/tmp/carrot_usbgpu_bus.lock`; Chestnut transfers retain their asynchronous
 double-buffered upload path.
+
+When the asynchronous JPEG sender or native H264 sender is busy, the HUD
+skips the new USB frame before readback/encoding, without waiting for capacity.
+Native H264 admits the next frame only after the previous encoded frame's
+packets have finished sending (including a packet currently in a USB call).
+Packets are queued whole, so a large frame is not rejected merely because it
+needs more than eight USB chunks. No H264 bytes or reference frames are dropped
+after encoding; the existing chunk yielding and USB lock remain in effect.
+The ffmpeg fallback writes raw frames on a worker with no pending-frame FIFO;
+new frames are skipped while that worker is writing. ffmpeg/OS pipe buffering
+still exists, so that fallback does not guarantee native's one-frame-in-flight
+bound. Synchronous JPEG/PNG paths naturally block rather than queue frames.
+Missing native encoder output for three seconds raises an explicit error for
+autorun to restart the HUD; normal backpressure is not treated as an error.
+The regular status log's cumulative `usb_dropped` counter reports skipped
+busy-frame attempts. This reduces stale HUD backlog, not GPU/USB fault timeouts,
+and cannot cancel an already-running USB transfer.

@@ -744,6 +744,7 @@ def run_demo(
     next_radar_param_read = start_time
     next_hud_mode_param_read = start_time
     report_frames = 0
+    usb_dropped_frames = 0
     display_actual_fps: float | None = None
     is_offroad = False
     brightness_refresh_pending = False
@@ -1159,12 +1160,15 @@ def run_demo(
                 profile_stage = time.perf_counter()
                 renderer.render_frame(state)
                 profile.add_elapsed("main.window_render_total", profile_stage)
-            if usb_display is not None:
+            usb_frame_ready = (
+                (usb_pipeline is None or usb_pipeline.wait_for_capacity(timeout=0.0))
+                and (h264_pipeline is None or h264_pipeline.ready_for_frame())
+            )
+            if usb_display is not None and not usb_frame_ready:
+                usb_dropped_frames += 1
+            if usb_display is not None and usb_frame_ready:
                 if usb_codec == "jpeg":
                     if usb_pipeline is not None:
-                        profile_stage = time.perf_counter()
-                        usb_pipeline.wait_for_capacity()
-                        profile.add_elapsed("main.usb_async.wait_capacity", profile_stage)
                         profile.add_samples(usb_pipeline.profile_samples())
 
                         profile_stage = time.perf_counter()
@@ -1342,7 +1346,7 @@ def run_demo(
                     f"lane={lane_status}:{state.lane_change_progress:.2f} "
                     f"ego_offset={state.ego_lane_offset:+.2f} | "
                     f"output={output_mode}/{usb_codec if usb_display else 'screen'}"
-                    f"{'-fast' if usb_display and usb_fast_write else ''} "
+                    f"{'-fast' if usb_display and usb_fast_write else ''} usb_dropped={usb_dropped_frames} "
                     f"{'async ' if usb_pipeline is not None else ''}"
                     f"theme={renderer.theme_mode} "
                     f"cam={state.camera_view_mode} "

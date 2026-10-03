@@ -62,9 +62,10 @@ H264_DEBUG_PACKET_LIMIT = 40
 H264_DEBUG_PACKET_INTERVAL = 30
 H264_DEBUG_CHUNK_LIMIT = 60
 H264_DEBUG_CHUNK_INTERVAL = 25
-NATIVE_PACKET_QUEUE_MAX_CHUNKS = 8
+NATIVE_PACKET_QUEUE_MAX_PACKETS = 8
 NATIVE_PACKET_QUEUE_PUT_TIMEOUT_S = 0.05
 NATIVE_FRAME_PACKET_WAIT_S = 0.05
+NATIVE_FRAME_OUTPUT_TIMEOUT_S = 3.0
 V4L2_BUF_FLAG_KEYFRAME = 0x00000008
 V4L2_BUF_FLAG_PFRAME = 0x00000010
 V4L2_BUF_FLAG_BFRAME = 0x00000020
@@ -784,10 +785,15 @@ class H264UsbPipeline:
         self._stdout_thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
         self._sender_thread: threading.Thread | None = None
+        self._input_thread: threading.Thread | None = None
+        self._pending_rgba: bytes | None = None
+        self._input_busy = False
         self._native_lib: ctypes.CDLL | None = None
         self._native_handle: int | None = None
         self._native_callback: Any = None
         self._native_frame_index = 0
+        self._native_waiting_for_packet = False
+        self._native_packet_deadline = 0.0
         self._native_input_stride = 0
         self._native_input_y_scanlines = 0
         self._native_input_uv_scanlines = 0
@@ -882,7 +888,7 @@ class H264UsbPipeline:
             self._close_native()
             raise
 
-        self._packet_queue = queue.Queue(maxsize=NATIVE_PACKET_QUEUE_MAX_CHUNKS)
+        self._packet_queue = queue.Queue(maxsize=NATIVE_PACKET_QUEUE_MAX_PACKETS)
         self._sender_thread = threading.Thread(
             target=self._send_queued_packets,
             name="cluster-usb-h264-native-send",
@@ -975,6 +981,30 @@ class H264UsbPipeline:
         )
         self._stdout_thread.start()
         self._stderr_thread.start()
+        self._input_thread = threading.Thread(target=self._write_rgba_frames, name="cluster-usb-h264-input", daemon=True)
+        self._input_thread.start()
+
+    def ready_for_frame(self) -> bool:
+        self.check_error()
+        if self._closing:
+            return False
+        if self._native_handle is not None:
+            lib = self._native_lib
+            if lib is None:
+                raise RuntimeError("native H264 library is not available")
+            if self._native_waiting_for_packet:
+                if lib.cluster_h264_encoder_bridge_drain(self._native_handle, 0, self._native_callback, None) != 0:
+                    raise RuntimeError(self._native_error_text("native H264 drain failed"))
+                self.check_error()
+                if self._native_waiting_for_packet and time.perf_counter() >= self._native_packet_deadline:
+                    raise RuntimeError("native H264 frame output timed out")
+            packet_queue = self._packet_queue
+            if packet_queue is None:
+                return False
+            with packet_queue.mutex:
+                return not self._native_waiting_for_packet and packet_queue.unfinished_tasks == 0
+        with self._condition:
+            return not self._input_busy
 
     def submit_rgba(self, rgba: Any, width: int, height: int) -> None:
         self.check_error()
@@ -1001,17 +1031,35 @@ class H264UsbPipeline:
         if proc is None or proc.stdin is None:
             raise RuntimeError("H264 USB pipeline is not started")
 
-        profile_stage = time.perf_counter()
+        with self._condition:
+            if self._input_busy:
+                return
+            # The renderer may reuse its buffer on the next frame.
+            self._pending_rgba = bytes(encoder_rgba)
+            self._input_busy = True
+            self._condition.notify_all()
+
+    def _write_rgba_frames(self) -> None:
         try:
-            self._write_all(proc.stdin.fileno(), encoder_rgba, self.encoder_width * self.encoder_height * 4)
-        except BrokenPipeError as exc:
+            while True:
+                with self._condition:
+                    while self._pending_rgba is None and not self._closing:
+                        self._condition.wait()
+                    if self._closing:
+                        return
+                    rgba = self._pending_rgba
+                    self._pending_rgba = None
+                proc = self._proc
+                if proc is None or proc.stdin is None:
+                    raise RuntimeError("H264 USB pipeline is not started")
+                profile_stage = time.perf_counter()
+                self._write_all(proc.stdin.fileno(), rgba, self.encoder_width * self.encoder_height * 4)
+                self._add_sample("usb_h264.write_rgba", profile_stage)
+                with self._condition:
+                    self._input_busy = False
+                    self._condition.notify_all()
+        except BaseException as exc:
             self._set_error(exc)
-            raise RuntimeError(self._error_text(f"H264 {self.backend_name} encoder pipe closed")) from exc
-        except Exception as exc:
-            self._set_error(exc)
-            raise
-        self._add_sample("usb_h264.write_rgba", profile_stage)
-        self.check_error()
 
     def submit_nv12(self, nv12: Any, width: int, height: int) -> None:
         self.check_error()
@@ -1022,6 +1070,8 @@ class H264UsbPipeline:
             )
         if self._closing:
             raise RuntimeError("H264 USB pipeline is closing")
+        if not self.ready_for_frame():
+            return
         self._submit_nv12_native(nv12)
 
     def _submit_nv12_native(self, nv12: Any) -> None:
@@ -1074,6 +1124,8 @@ class H264UsbPipeline:
             encode_size = active_count
             sample_name = "usb_h264.native_encode_nv12_active"
         packets_before = self._debug_encoder_packets
+        self._native_waiting_for_packet = True
+        self._native_packet_deadline = time.perf_counter() + NATIVE_FRAME_OUTPUT_TIMEOUT_S
         result = encode_fn(
             handle,
             ctypes.c_void_p(data_ptr),
@@ -1210,10 +1262,14 @@ class H264UsbPipeline:
             raise RuntimeError("native H264 DMA-BUF input API is not available")
         if input_buffer.owner_id != id(self) or not input_buffer.active or input_buffer.dmabuf_fd < 0:
             raise RuntimeError("native H264 DMA-BUF input lease is not active")
+        if not self.ready_for_frame():
+            return
 
         profile_stage = time.perf_counter()
         timestamp_us = self._native_frame_index * 1000000 // self.fps
         packets_before = self._debug_encoder_packets
+        self._native_waiting_for_packet = True
+        self._native_packet_deadline = time.perf_counter() + NATIVE_FRAME_OUTPUT_TIMEOUT_S
         result = lib.cluster_h264_encoder_bridge_submit_nv12_input_dmabuf(
             handle,
             input_buffer.index,
@@ -1288,6 +1344,17 @@ class H264UsbPipeline:
 
         proc = self._proc
         if proc is not None:
+            if self._input_thread is not None:
+                self._input_thread.join(timeout=0.1)
+                if self._input_thread.is_alive():
+                    # Unblock a pipe write before closing its fd in another thread.
+                    proc.terminate()
+                    self._input_thread.join(timeout=3.0)
+                    if self._input_thread.is_alive():
+                        proc.kill()
+                        self._input_thread.join(timeout=2.0)
+                    if self._input_thread.is_alive():
+                        raise RuntimeError("H264 ffmpeg input worker did not stop")
             if proc.stdin is not None:
                 try:
                     proc.stdin.close()
@@ -1307,6 +1374,8 @@ class H264UsbPipeline:
             self._stdout_thread.join(timeout=3.0)
         if self._stderr_thread is not None:
             self._stderr_thread.join(timeout=1.0)
+        if self._input_thread is not None:
+            self._input_thread.join(timeout=3.0)
 
         packet_queue = self._packet_queue
         if packet_queue is not None:
@@ -1518,7 +1587,7 @@ class H264UsbPipeline:
                 f"unit_kbps={unit_kbps:.0f} "
                 f"chunks_avg={chunks_avg:.1f} max={self._diag_max_chunks} "
                 f"nals_avg={nals_avg:.1f} max={self._diag_max_nals} "
-                f"max_nal={self._diag_max_nal_bytes} qmax={self._diag_queue_max} "
+                f"max_nal={self._diag_max_nal_bytes} qmax_packets={self._diag_queue_max} "
                 f"send_chunks={self._diag_send_chunks} send_kbps={send_kbps:.0f} "
                 f"send_ms_avg={send_avg_ms:.2f} max={self._diag_send_ms_max:.2f}"
             )
@@ -1977,9 +2046,11 @@ class H264UsbPipeline:
             self._debug_log_packetize("native", packet_index, packet, chunks, chunk_size)
             self._record_h264_unit("native", packet, chunks, keyframe=bool(keyframe))
             profile_stage = time.perf_counter() if profile_callback else 0.0
-            for chunk in chunks:
-                packet_queue.put((chunk, False), timeout=NATIVE_PACKET_QUEUE_PUT_TIMEOUT_S)
-                self._record_h264_queue_depth(packet_queue.qsize())
+            # Queue complete encoder packets, never abandon part of an H264 frame.
+            packet_queue.put((chunks, False), timeout=NATIVE_PACKET_QUEUE_PUT_TIMEOUT_S)
+            self._record_h264_queue_depth(packet_queue.qsize())
+            if not codec_config:
+                self._native_waiting_for_packet = False
             if profile_callback:
                 self._add_sample("usb_h264.native.callback_queue", profile_stage)
                 self._add_sample("usb_h264.native.callback_total", profile_total)
@@ -2114,10 +2185,14 @@ class H264UsbPipeline:
             chunk_size = max(1, self.chunk_size)
             while True:
                 item = packet_queue.get()
-                if item is None:
-                    return
-                chunk, is_last = item
-                self._send_h264_chunk(chunk, chunk_size, source="native", is_last=is_last)
+                try:
+                    if item is None:
+                        return
+                    chunks, is_last = item
+                    for chunk in chunks:
+                        self._send_h264_chunk(chunk, chunk_size, source="native", is_last=is_last)
+                finally:
+                    packet_queue.task_done()
         except BaseException as exc:
             with self._condition:
                 if not self._closing:

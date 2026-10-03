@@ -12,6 +12,7 @@ class AsyncJpegUsbPipeline:
         self.usb_display = usb_display
         self._condition = threading.Condition()
         self._pending_rgba: tuple[bytes, int, int] | None = None
+        self._busy = False
         self._closing = False
         self._error: BaseException | None = None
         self._samples: list[tuple[str, float]] = []
@@ -23,13 +24,16 @@ class AsyncJpegUsbPipeline:
     def submit_rgba(self, rgba: bytes, width: int, height: int) -> None:
         self.check_error()
         with self._condition:
+            if self._busy or self._closing:
+                return
+            self._busy = True
             self._pending_rgba = (rgba, width, height)
             self._condition.notify()
 
     def wait_for_capacity(self, timeout: float | None = None) -> bool:
         deadline = None if timeout is None else time.perf_counter() + max(0.0, timeout)
         with self._condition:
-            while self._pending_rgba is not None and not self._closing and self._error is None:
+            while self._busy and not self._closing and self._error is None:
                 if deadline is None:
                     self._condition.wait()
                     continue
@@ -39,7 +43,7 @@ class AsyncJpegUsbPipeline:
                 self._condition.wait(timeout=remaining)
             if self._error is not None:
                 raise RuntimeError("asynchronous USB JPEG pipeline failed") from self._error
-            return self._pending_rgba is None
+            return not self._busy and not self._closing
 
     def profile_samples(self) -> tuple[tuple[str, float], ...]:
         with self._condition:
@@ -98,6 +102,9 @@ class AsyncJpegUsbPipeline:
                 self._add_sample("usb_async.send_jpeg", profile_stage)
                 self._add_samples(self.usb_display.profile_samples())
                 self.usb_display.clear_profile_samples()
+                with self._condition:
+                    self._busy = False
+                    self._condition.notify_all()
             except BaseException as exc:
                 with self._condition:
                     self._error = exc
