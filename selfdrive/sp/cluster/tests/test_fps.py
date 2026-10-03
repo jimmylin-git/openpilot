@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import ast
+import os
+from pathlib import Path
+import sys
+import unittest
+from unittest.mock import patch
+
+
+CLUSTER_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(CLUSTER_DIR))
+
+from cluster_config import CLUSTER_FIXED_FPS, normalize_cluster_live_fps
+
+
+def main_namespace():
+    tree = ast.parse((CLUSTER_DIR / "main.py").read_text(encoding="utf-8"))
+    names = {
+        "DEFAULT_FPS",
+        "CHESTNUT_FPS",
+        "OFFROAD_RENDER_FPS",
+        "H264_AUTO_BITRATE_BITS_PER_FPS",
+        "H264_AUTO_BITRATE_MIN_BPS",
+        "H264_AUTO_BITRATE_MAX_BPS",
+        "resolved_usb_display_fps",
+        "resolved_h264_encoder_fps",
+        "resolved_usb_h264_bitrate",
+    }
+    nodes = [ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)]
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and node.targets[0].id in names:
+            nodes.append(node)
+        elif isinstance(node, ast.FunctionDef) and node.name in names:
+            nodes.append(node)
+    namespace = {"CLUSTER_FIXED_FPS": CLUSTER_FIXED_FPS}
+    exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])), "main.py", "exec"), namespace)
+    return namespace
+
+
+class FpsTests(unittest.TestCase):
+    def test_default_live_chestnut_and_offroad_are_ten(self):
+        ns = main_namespace()
+        self.assertEqual(CLUSTER_FIXED_FPS, 10.0)
+        for name in ("DEFAULT_FPS", "CHESTNUT_FPS", "OFFROAD_RENDER_FPS"):
+            self.assertEqual(ns[name], 10.0)
+        for mode in (*range(7), "invalid", None):
+            self.assertEqual(normalize_cluster_live_fps(mode), 10.0)
+
+    def test_encoder_display_and_auto_bitrate_follow_ten(self):
+        ns = main_namespace()
+        self.assertEqual(ns["resolved_h264_encoder_fps"](10.0, 15), 10)
+        self.assertEqual(ns["resolved_usb_display_fps"](None, "h264", target_fps=10.0, h264_fps=15), 10)
+        self.assertEqual(ns["resolved_usb_h264_bitrate"]("auto", 10.0, 15), "2340k")
+        self.assertEqual(ns["resolved_usb_display_fps"](5, "h264", target_fps=10.0, h264_fps=15), 5)
+        self.assertEqual(ns["resolved_usb_h264_bitrate"]("2M", 10.0, 15), "2M")
+
+    def test_autorun_default_and_environment_override(self):
+        path = CLUSTER_DIR.parent / "cluster_autorun.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        nodes = [
+            node
+            for node in tree.body
+            if (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "DEFAULT_FPS")
+            or (isinstance(node, ast.FunctionDef) and node.name == "cluster_fps")
+        ]
+        namespace = {"os": os}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])), str(path), "exec"), namespace)
+        for override, expected in (("", "10"), ("  ", "10"), ("5", "5")):
+            with patch.dict(os.environ, {"CLUSTER_FPS": override}):
+                self.assertEqual(namespace["cluster_fps"](), expected)
+
+
+if __name__ == "__main__":
+    unittest.main()

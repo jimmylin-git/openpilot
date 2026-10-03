@@ -177,12 +177,12 @@ Keep `--usb-h264-input-format nv12` for native hardware testing. Direct RGB
 USERPTR diagnostics were removed after measured device tests showed corrupted
 output across direct and hidden 32-bit RGB variants.
 
-Manager autostart passes `--fps 5` by default (`CLUSTER_FPS` remains available
+Manager autostart passes `--fps 10` by default (`CLUSTER_FPS` remains available
 for explicit test overrides). The default renderer, H264 encoder input, TURZX
 display command, live setting modes, Chestnut-limited state, and offroad state
-all use 5 FPS. Explicit CLI `--fps`, `--usb-h264-fps`, and
+all use 10 FPS. Explicit CLI `--fps`, `--usb-h264-fps`, and
 `--usb-display-fps` arguments remain available for diagnostics. Offroad still
-hides the 3D scene but no longer reduces the HUD below 5 FPS. The top status
+hides the 3D scene but no longer reduces the HUD below 10 FPS. The top status
 row (set speed, follow gap, LFA)
 also shows the mici Chestnut icon right of LFA at the same spacing; the row is
 shifted left half a slot so it stays centered between the turn signals. Icon (`icons_mici/chestnut*.png`): pulsing white while loading, green
@@ -208,8 +208,8 @@ Explicit `CLUSTER_REALTIME`, `CLUSTER_REALTIME_CORES`, or
 `CLUSTER_REALTIME_PRIORITY` environment values still win.
 The manager launches `cluster_autorun` as the single live entry point. The
 launcher resets `ClusterHudBrightness` to `0` at startup, then passes
-`--input live` plus the fixed live-display settings (`15 FPS`, JPEG quality
-`50`, automatic brightness, and automatic theme). The
+`--input live` with 10 FPS, H264 automatic encoder selection, automatic
+brightness, and automatic theme. The
 `ClusterHudLiveFps`, `ClusterHudEncoder`, `ClusterHudTheme`, and
 `ClusterHudBrightness` names are currently read-only integration points unless
 another component writes those Params; they are not settings UI by themselves.
@@ -227,7 +227,7 @@ unset or unknown keys from `/data/cluster_params/<key>` (override with
 ```bash
 mkdir -p /data/cluster_params
 echo -n 1 > /data/cluster_params/ClusterHudTheme      # 0 auto, 1 dark, 2 light
-echo -n 4 > /data/cluster_params/ClusterHudLiveFps    # all modes currently resolve to 5 FPS
+echo -n 4 > /data/cluster_params/ClusterHudLiveFps    # all modes currently resolve to 10 FPS
 ```
 
 Unset keys keep the built-in defaults.
@@ -381,8 +381,8 @@ the small distance and mode items do not scale or fade. This does not increase
 the actual display frame rate or add additional rendered frames.
 Turn-signal positions do not change.
 When `--fps` is omitted, `ClusterHudLiveFps` is polled about once per second,
-but every supported setting value (`0` through `6`) now resolves to 5 FPS.
-Direct route/replay CLI runs also use the 5 FPS default. Explicit `--fps`
+but every supported setting value (`0` through `6`) now resolves to 10 FPS.
+Direct route/replay CLI runs also use the 10 FPS default. Explicit `--fps`
 remains a fixed diagnostic override. For H264 USB output, changing the
 effective FPS exits the current HUD process so autostart can relaunch with a
 matching encoder FPS when a launcher is present.
@@ -638,7 +638,7 @@ USB frame upload runs in no-ACK mode by default because some TURZX panels accept
 image data but never return a frame-upload response. Use `--usb-wait-frame-ack`
 only when testing a panel/driver combination known to reply after each frame.
 
-Manager autorun uses H264 at 5 FPS, trying the native encoder first and
+Manager autorun uses H264 at 10 FPS, trying the native encoder first and
 falling back to ffmpeg when the native bridge or V4L2 encoder is unavailable.
 The normal comma installation build and prebuilt release build both compile
 `openpilot/system/loggerd/libcluster_h264_encoder_bridge.so` automatically.

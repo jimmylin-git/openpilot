@@ -1,6 +1,7 @@
 sunnypilot Version MR.ONE-2026 (2026-10-04; upstream updates selectively synced through 2026-09-28)
 ========================
 * MR.ONE Custom Features
+  * cluster: raise the default renderer, USB display, and H264 encoder to 10 FPS for testing, retaining busy-frame dropping and Chestnut USB pacing
   * cluster: skip new USB display frames when the sender is busy instead of queuing stale HUD updates; preserve complete H264 packets and report usb_dropped
   * cluster: add a visual READY TO GO reminder while stopped in drive with ACC off, independent of driver distraction; model-based advisory only, no chime or automatic control
   * cluster: limit normal USB brightness to 3-13%; label the selected running backend with B: or S: and the model catalog short name
