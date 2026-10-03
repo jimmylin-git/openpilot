@@ -39,21 +39,21 @@ def main_namespace():
 
 
 class FpsTests(unittest.TestCase):
-    def test_default_live_chestnut_and_offroad_are_ten(self):
+    def test_default_live_chestnut_and_offroad_are_thirty(self):
         ns = main_namespace()
-        self.assertEqual(CLUSTER_FIXED_FPS, 10.0)
+        self.assertEqual(CLUSTER_FIXED_FPS, 30.0)
         for name in ("DEFAULT_FPS", "CHESTNUT_FPS", "OFFROAD_RENDER_FPS"):
-            self.assertEqual(ns[name], 10.0)
+            self.assertEqual(ns[name], 30.0)
         for mode in (*range(7), "invalid", None):
-            self.assertEqual(normalize_cluster_live_fps(mode), 10.0)
+            self.assertEqual(normalize_cluster_live_fps(mode), 30.0)
 
-    def test_encoder_display_and_auto_bitrate_follow_ten(self):
+    def test_encoder_display_and_auto_bitrate_follow_thirty(self):
         ns = main_namespace()
-        self.assertEqual(ns["resolved_h264_encoder_fps"](10.0, 15), 10)
-        self.assertEqual(ns["resolved_usb_display_fps"](None, "h264", target_fps=10.0, h264_fps=15), 10)
-        self.assertEqual(ns["resolved_usb_h264_bitrate"]("auto", 10.0, 15), "2340k")
-        self.assertEqual(ns["resolved_usb_display_fps"](5, "h264", target_fps=10.0, h264_fps=15), 5)
-        self.assertEqual(ns["resolved_usb_h264_bitrate"]("2M", 10.0, 15), "2M")
+        self.assertEqual(ns["resolved_h264_encoder_fps"](30.0, 15), 30)
+        self.assertEqual(ns["resolved_usb_display_fps"](None, "h264", target_fps=30.0, h264_fps=15), 30)
+        self.assertEqual(ns["resolved_usb_h264_bitrate"]("auto", 30.0, 15), "7M")
+        self.assertEqual(ns["resolved_usb_display_fps"](5, "h264", target_fps=30.0, h264_fps=15), 5)
+        self.assertEqual(ns["resolved_usb_h264_bitrate"]("2M", 30.0, 15), "2M")
 
     def test_autorun_default_and_environment_override(self):
         path = CLUSTER_DIR.parent / "cluster_autorun.py"
@@ -66,7 +66,7 @@ class FpsTests(unittest.TestCase):
         ]
         namespace = {"os": os}
         exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])), str(path), "exec"), namespace)
-        for override, expected in (("", "10"), ("  ", "10"), ("5", "5")):
+        for override, expected in (("", "30"), ("  ", "30"), ("5", "5")):
             with patch.dict(os.environ, {"CLUSTER_FPS": override}):
                 self.assertEqual(namespace["cluster_fps"](), expected)
 
