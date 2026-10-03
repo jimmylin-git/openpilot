@@ -292,6 +292,20 @@ reset the scroll position.
 Model names are sampled off the render thread alongside the system stats.
 The focused layout/model-name checks run without a GPU context:
 `python selfdrive/sp/cluster/tests/test_status_labels.py`.
+
+The live HUD also shows a green `READY TO GO` (departure advisory) banner for
+three seconds when stopped below 0.1 m/s in D/B with ignition/onroad active,
+ACC and selfdrive disabled, and the accelerator released. Driver distraction
+is not required. Both lead/no-lead cases use the same predicted-path test:
+all 33 model position samples must be finite and the final position must
+exceed 30 m continuously for more than 0.3 seconds of distinct model samples.
+Car, selfdrive, and model data must be alive, valid, and no older than 0.5 s.
+The reminder fires once per eligible stop, resets after moving or leaving the
+eligible state, and clears on stale data or a blocked prediction. It is
+suppressed by the steering take-control warning. Replay/standby do not trigger
+it. This is not traffic-light recognition or permission to proceed: check the
+road yourself. No sound, new Params key, or driving-control change is added.
+
 The front-distance label likewise shows `--` while ACC is off, even when
 a distance is available; at other times it shows the measured distance or
 `na.` when no distance is available.

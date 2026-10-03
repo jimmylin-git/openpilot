@@ -18,6 +18,7 @@ from cluster_config import (
     read_int_param,
     vehicle_diagnostic_log_enabled,
 )
+from cluster_departure import DEPARTURE_MAX_SAMPLE_GAP_SECONDS, DepartureReminder
 from cluster_models import (
     ClusterUiState,
     DebugPlotSnapshot,
@@ -202,6 +203,7 @@ class OpenpilotLiveSource:
         self._debug_plot_enabled = False
         self._standby_state = standby_state()
         self._smoothed_ambient_brightness: float | None = None
+        self._departure_reminder = DepartureReminder()
         self.profile_enabled = False
         self._profile_samples: list[tuple[str, float]] = []
         try:
@@ -290,6 +292,7 @@ class OpenpilotLiveSource:
 
             profile_stage = self._profile_start()
             state = self._smooth_scene_state(state)
+            state = replace(state, departure_reminder=self._update_departure_reminder(state))
             self._profile_add("source.live.smooth_scene", profile_stage)
             self.last_state = self._with_debug_state(state)
             self.frames += 1
@@ -300,11 +303,46 @@ class OpenpilotLiveSource:
         if self.params is not None:
             experimental_mode = self.params.get_bool("ExperimentalMode")
         state = replace(self._standby_state, experimental_mode=experimental_mode)
+        self._departure_reminder.update(time.monotonic(), allowed=False, valid=False, model_time=0.0, position_x=())
         self._profile_add("source.live.standby_state", profile_stage)
 
         self._reset_stability_filters(time.monotonic())
         self.last_state = self._with_debug_state(state)
         return self.last_state
+
+    def _update_departure_reminder(self, state: ClusterUiState) -> bool:
+        now = time.monotonic()
+        if self.vehicle_started() is not True:
+            return self._departure_reminder.update(now, allowed=False, valid=False, model_time=0.0, position_x=())
+        services = ("carState", "selfdriveState", "modelV2")
+        valid = all(
+            self._service_alive(service)
+            and self.sm.valid.get(service, False)
+            and 0.0 < self.sm.logMonoTime.get(service, 0) / 1e9 <= now
+            and now - self.sm.logMonoTime[service] / 1e9 <= DEPARTURE_MAX_SAMPLE_GAP_SECONDS
+            for service in services
+        )
+        if not valid:
+            return self._departure_reminder.update(now, allowed=True, valid=False, model_time=0.0, position_x=())
+
+        car = self.sm["carState"]
+        speed = safe_optional_float(car, "vEgo")
+        allowed = (
+            state.gear_text in ("D", "B")
+            and speed is not None
+            and abs(speed) < 0.1
+            and not self.sm["selfdriveState"].enabled
+            and not car.cruiseState.enabled
+            and not car.gasPressed
+        )
+        position_x = tuple(float(x) for x in self.sm["modelV2"].position.x)
+        return self._departure_reminder.update(
+            now,
+            allowed=allowed,
+            valid=True,
+            model_time=self.sm.logMonoTime["modelV2"] / 1e9,
+            position_x=position_x,
+        )
 
     def live_data_available(self) -> bool:
         last_update_t = self._last_car_state_update_t

@@ -293,6 +293,7 @@ class ClusterUiState:
     git_status: GitBranchStatus | None = None
     actual_fps: float | None = None
     cluster_core_usage_text: str | None = None
+    departure_reminder: bool = False
 
 
 @dataclass(frozen=True, slots=True)
