@@ -23,7 +23,7 @@ class SystemStats:
     cpu_core_percents: tuple[float | None, ...] = ()
     cpu_total_percent: float | None = None
     chestnut_state: str | None = None
-    model_name: str = "small model"
+    model_name: str = "S: ?"
 
 
 CHESTNUT_LOADING = "loading"
@@ -89,19 +89,25 @@ class SystemStatsSampler:
         )
 
     def _read_model_name(self, chestnut_state: str | None) -> str:
-        if chestnut_state != CHESTNUT_ACTIVE:
-            return "small model"
         try:
             from openpilot.selfdrive.modeld.helpers import chestnut_present
             from openpilot.sunnypilot.models.helpers import get_selected_bundle
-            from openpilot.sunnypilot.models.model_name import DEFAULT_BIG_MODEL
+            from openpilot.sunnypilot.models.model_name import DEFAULT_BIG_MODEL, DEFAULT_MODEL
 
-            if not chestnut_present():
-                return "small model"
-            bundle = get_selected_bundle(self._params, "chestnut")
-            return bundle.displayName if bundle is not None else DEFAULT_BIG_MODEL
+            if self._params is None:
+                return "model unknown"
+            big = chestnut_state == CHESTNUT_ACTIVE and chestnut_present()
+            source = "chestnut" if big else "qcom"
+            bundle = get_selected_bundle(self._params, source)
+            if bundle is not None:
+                short_name = bundle.internalName
+            else:
+                default_name = DEFAULT_BIG_MODEL if big else DEFAULT_MODEL
+                words = default_name.split()
+                short_name = "".join(word[0].upper() for word in words) if len(words) > 1 else default_name
+            return f"{'B' if big else 'S'}: {short_name}"
         except Exception:
-            logging.getLogger(__name__).exception("Unable to read the active Chestnut model name")
+            logging.getLogger(__name__).exception("Unable to read the active cluster model name")
             return "model unknown"
 
     def _read_chestnut_state(self) -> str | None:

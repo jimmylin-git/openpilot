@@ -72,8 +72,8 @@ from cluster_usb_display import TuringUsbDisplay, product_id_for_hud_mode
 from cluster_usb_pipeline import AsyncJpegUsbPipeline
 
 DEFAULT_FPS = CLUSTER_FIXED_FPS
-DEFAULT_USB_BRIGHTNESS = 15
-MAX_USB_BRIGHTNESS = 15
+DEFAULT_USB_BRIGHTNESS = 13
+MAX_USB_BRIGHTNESS = 13
 MIN_USB_BRIGHTNESS = 3
 # Auto (ambient) brightness is dimmed to 70% after clamping.
 AUTO_USB_BRIGHTNESS_SCALE = 0.7

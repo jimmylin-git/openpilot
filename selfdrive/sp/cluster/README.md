@@ -234,10 +234,10 @@ Unset keys keep the built-in defaults.
 When `--usb-brightness` is omitted, USB launches follow `ClusterHudBrightness`:
 `0` auto follows the wide-road camera exposure after samples are available,
 using the same ambient-light estimate as the main UI and smoothing changes over
-time. The resolved brightness is limited to `3..15` and then scaled to 70%
-(so auto tops out at 10 after integer rounding); `1` through `100` are
-fixed brightness percentages, also limited to `3..15`.
-Missing ambient samples use the default brightness of `15`.
+time. The resolved brightness is limited to `3..13` and then scaled to 70%
+(so auto tops out at 9 after integer rounding); `1` through `100` are
+fixed brightness percentages, also limited to `3..13`.
+Missing ambient samples use the default brightness of `13`.
 After the boot grace period, live USB output dims to `2` while offroad.
 Brightness settings and ambient light are checked once per second onroad.
 Offroad, the dim level is applied once after the boot grace period and
@@ -281,9 +281,12 @@ the front-distance label when unavailable, no text in standby until a set
 speed arrives, and the set speed at that same size when paused or engaged.
 All top-row detail labels, including the LFA angle, share one font size and
 vertical center. The enlarged ACC-off LFA keeps its scaled angle below the wheel.
-Below the eGPU icon, the active Chestnut model's display name is shown only
-while `ChestnutActive` is true and the device is present. Loading, failed, and
-disconnected states show `small model`. Names wider than their slot scroll
+Below the eGPU icon, the model catalog's short name (`internalName`) is shown
+with a `B: ` prefix while `ChestnutActive` is true and the device is present
+(for example `B: TT`). Otherwise the small-model slot is used with `S: `
+(for example `S: CD210`), including loading, failed, and disconnected states.
+Unselected slots use the default model name, abbreviated to initials for
+multi-word names. Names wider than their slot scroll
 back and forth with pauses at each end, clipped to the slot; model changes
 reset the scroll position.
 Model names are sampled off the render thread alongside the system stats.

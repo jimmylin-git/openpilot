@@ -1,6 +1,7 @@
-sunnypilot Version MR.ONE-2026 (2026-10-03; upstream updates selectively synced through 2026-09-28)
+sunnypilot Version MR.ONE-2026 (2026-10-04; upstream updates selectively synced through 2026-09-28)
 ========================
 * MR.ONE Custom Features
+  * cluster: limit normal USB brightness to 3-13%; label the selected running backend with B: or S: and the model catalog short name
   * cluster: limit normal USB screen brightness to 3-15%, retaining the 2% offroad dim level
   * cluster: align top-row status label sizes and heights; show the active big model below eGPU with scrolling long names, or small model when inactive
   * modeld: wait up to 60 seconds for a late Chestnut USB/GPU startup and retry transient AMD device initialization before falling back to the small model

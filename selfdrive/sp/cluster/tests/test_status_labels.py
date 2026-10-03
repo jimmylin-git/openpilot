@@ -21,13 +21,16 @@ def renderer_methods():
     # Exercise the production HUD methods without requiring a GPU/raylib context.
     tree = ast.parse((CLUSTER_DIR / "cluster_renderer.py").read_text(encoding="utf-8"))
     names = {"_draw_model_label", "_draw_acc_status_icon", "_draw_lfa_status_icon"}
-    methods = [node for cls in tree.body if isinstance(cls, ast.ClassDef)
-               for node in cls.body if isinstance(node, ast.FunctionDef) and node.name in names]
-    assignments = {node.targets[0].id: node for node in tree.body
-                   if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)}
+    methods = [node for cls in tree.body if isinstance(cls, ast.ClassDef) for node in cls.body if isinstance(node, ast.FunctionDef) and node.name in names]
+    assignments = {node.targets[0].id: node for node in tree.body if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)}
     namespace = {
-        "math": math, "time": time, "rl": Mock(), "DESIGN_WIDTH": DESIGN_WIDTH, "DESIGN_HEIGHT": DESIGN_HEIGHT,
-        "AMBER": AMBER, "WHITE": WHITE,
+        "math": math,
+        "time": time,
+        "rl": Mock(),
+        "DESIGN_WIDTH": DESIGN_WIDTH,
+        "DESIGN_HEIGHT": DESIGN_HEIGHT,
+        "AMBER": AMBER,
+        "WHITE": WHITE,
     }
 
     def load_constant(name):
@@ -44,8 +47,7 @@ def renderer_methods():
             if isinstance(node, ast.Name) and node.id.isupper():
                 load_constant(node.id)
     cls = ast.ClassDef(name="Hud", bases=[], keywords=[], body=methods, decorator_list=[])
-    module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), cls],
-                        type_ignores=[])
+    module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), cls], type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), str(CLUSTER_DIR / "cluster_renderer.py"), "exec"), namespace)
     return namespace
 
@@ -57,34 +59,51 @@ class ModelNameTests(unittest.TestCase):
         hardware = ModuleType("openpilot.selfdrive.modeld.helpers")
         hardware.chestnut_present = Mock(return_value=True)
         helpers = ModuleType("openpilot.sunnypilot.models.helpers")
-        helpers.get_selected_bundle = Mock(return_value=SimpleNamespace(displayName="TEE Time"))
+        helpers.get_selected_bundle = Mock(
+            side_effect=lambda params, source: SimpleNamespace(
+                displayName="TEE Time" if source == "chestnut" else "Small Test Model",
+                internalName="TT" if source == "chestnut" else "STM",
+            )
+        )
         defaults = ModuleType("openpilot.sunnypilot.models.model_name")
-        defaults.DEFAULT_BIG_MODEL = "Default Big"
+        defaults.DEFAULT_BIG_MODEL = "Tee Time"
+        defaults.DEFAULT_MODEL = "CD210"
         self.hardware, self.helpers = hardware, helpers
-        self.modules = patch.dict(sys.modules, {
-            hardware.__name__: hardware, helpers.__name__: helpers, defaults.__name__: defaults,
-        })
+        self.modules = patch.dict(
+            sys.modules,
+            {
+                hardware.__name__: hardware,
+                helpers.__name__: helpers,
+                defaults.__name__: defaults,
+            },
+        )
         self.modules.start()
         self.addCleanup(self.modules.stop)
 
     def test_inactive_states_use_small_model(self):
         for state in (None, CHESTNUT_LOADING, CHESTNUT_FAILED):
             with self.subTest(state=state):
-                self.assertEqual(self.sampler._read_model_name(state), "small model")
-        self.helpers.get_selected_bundle.assert_not_called()
+                self.assertEqual(self.sampler._read_model_name(state), "S: STM")
+        self.assertTrue(all(call.args[1] == "qcom" for call in self.helpers.get_selected_bundle.call_args_list))
 
     def test_active_uses_chestnut_slot(self):
-        self.assertEqual(self.sampler._read_model_name(CHESTNUT_ACTIVE), "TEE Time")
+        self.assertEqual(self.sampler._read_model_name(CHESTNUT_ACTIVE), "B: TT")
         self.helpers.get_selected_bundle.assert_called_once_with(self.sampler._params, "chestnut")
 
     def test_active_default(self):
+        self.helpers.get_selected_bundle.side_effect = None
         self.helpers.get_selected_bundle.return_value = None
-        self.assertEqual(self.sampler._read_model_name(CHESTNUT_ACTIVE), "Default Big")
+        self.assertEqual(self.sampler._read_model_name(CHESTNUT_ACTIVE), "B: TT")
+
+    def test_small_default(self):
+        self.helpers.get_selected_bundle.side_effect = None
+        self.helpers.get_selected_bundle.return_value = None
+        self.assertEqual(self.sampler._read_model_name(CHESTNUT_FAILED), "S: CD210")
 
     def test_disconnected_with_stale_active_param(self):
         self.hardware.chestnut_present.return_value = False
-        self.assertEqual(self.sampler._read_model_name(CHESTNUT_ACTIVE), "small model")
-        self.helpers.get_selected_bundle.assert_not_called()
+        self.assertEqual(self.sampler._read_model_name(CHESTNUT_ACTIVE), "S: STM")
+        self.helpers.get_selected_bundle.assert_called_once_with(self.sampler._params, "qcom")
 
     def test_read_error_is_explicit(self):
         self.helpers.get_selected_bundle.side_effect = RuntimeError("params read failed")
@@ -99,7 +118,7 @@ class ModelNameTests(unittest.TestCase):
         with patch("cluster_system_monitor.PROC_STAT_PATH", Mock(exists=Mock(return_value=True))):
             stats = self.sampler._sample_linux()
         self.assertEqual(stats.chestnut_state, CHESTNUT_ACTIVE)
-        self.assertEqual(stats.model_name, "TEE Time")
+        self.assertEqual(stats.model_name, "B: TT")
 
 
 class StatusLabelTests(unittest.TestCase):
@@ -135,9 +154,13 @@ class StatusLabelTests(unittest.TestCase):
         self.hud._measure_text.return_value = (width + 96.0, 30.0)
         start = self.draw_name("Long model name", 10.0).args[1]
         travel = 96.0 / speed
-        for elapsed, offset in ((pause / 2, 0), (pause + travel / 2, 48),
-                                (pause + travel + pause / 2, 96),
-                                (2 * pause + 1.5 * travel, 48), (2 * (pause + travel), 0)):
+        for elapsed, offset in (
+            (pause / 2, 0),
+            (pause + travel / 2, 48),
+            (pause + travel + pause / 2, 96),
+            (2 * pause + 1.5 * travel, 48),
+            (2 * (pause + travel), 0),
+        ):
             with self.subTest(elapsed=elapsed):
                 self.assertAlmostEqual(self.draw_name("Long model name", 10.0 + elapsed).args[1], start - offset)
         self.assertEqual(self.rl.begin_scissor_mode.call_count, self.rl.end_scissor_mode.call_count)
@@ -165,8 +188,7 @@ class StatusLabelTests(unittest.TestCase):
         left = (self.ns["CHESTNUT_ICON_CENTER_X"] - self.ns["MODEL_LABEL_MAX_WIDTH"] / 2) / 2
         right = (self.ns["CHESTNUT_ICON_CENTER_X"] + self.ns["MODEL_LABEL_MAX_WIDTH"] / 2) / 2
         top = (self.ns["TOP_STATUS_DETAIL_CENTER_Y"] - 15) / 2
-        bottom = (self.ns["TOP_STATUS_DETAIL_CENTER_Y"] + 15
-                  + self.ns["TOP_STATUS_LABEL_FONT_SIZE"] * self.ns["TEXT_VERTICAL_CENTER_OFFSET_RATIO"]) / 2
+        bottom = (self.ns["TOP_STATUS_DETAIL_CENTER_Y"] + 15 + self.ns["TOP_STATUS_LABEL_FONT_SIZE"] * self.ns["TEXT_VERTICAL_CENTER_OFFSET_RATIO"]) / 2
         self.assertEqual(x, math.floor(left))
         self.assertEqual(y, math.floor(top))
         self.assertEqual(width, math.ceil(right) - math.floor(left))
