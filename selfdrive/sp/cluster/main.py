@@ -96,7 +96,7 @@ BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
 # vehicle is turned off. A very low but nonzero value still reads as
 # effectively black without touching that path.
 OFFROAD_USB_BRIGHTNESS = 2
-OFFROAD_RENDER_FPS = CLUSTER_FIXED_FPS
+OFFROAD_RENDER_FPS = 1.0
 # The offroad dim-to-black check is only trusted once the process has been
 # running this long (avoids the boot-time window where vehicle_started()
 # has not yet settled and could read False before the first onroad

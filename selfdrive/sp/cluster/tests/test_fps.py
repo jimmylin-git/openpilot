@@ -39,11 +39,12 @@ def main_namespace():
 
 
 class FpsTests(unittest.TestCase):
-    def test_default_live_chestnut_and_offroad_are_thirty(self):
+    def test_onroad_thirty_offroad_one(self):
         ns = main_namespace()
         self.assertEqual(CLUSTER_FIXED_FPS, 30.0)
-        for name in ("DEFAULT_FPS", "CHESTNUT_FPS", "OFFROAD_RENDER_FPS"):
+        for name in ("DEFAULT_FPS", "CHESTNUT_FPS"):
             self.assertEqual(ns[name], 30.0)
+        self.assertEqual(ns["OFFROAD_RENDER_FPS"], 1.0)
         for mode in (*range(7), "invalid", None):
             self.assertEqual(normalize_cluster_live_fps(mode), 30.0)
 
@@ -54,6 +55,31 @@ class FpsTests(unittest.TestCase):
         self.assertEqual(ns["resolved_usb_h264_bitrate"]("auto", 30.0, 15), "7M")
         self.assertEqual(ns["resolved_usb_display_fps"](5, "h264", target_fps=30.0, h264_fps=15), 5)
         self.assertEqual(ns["resolved_usb_h264_bitrate"]("2M", 30.0, 15), "2M")
+
+    def test_offroad_transition_and_chestnut_pacing(self):
+        tree = ast.parse((CLUSTER_DIR / "main.py").read_text(encoding="utf-8"))
+        transitions = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "render_fps" for target in node.targets)
+            and isinstance(node.value, ast.IfExp)
+        ]
+        self.assertEqual(len(transitions), 2)
+        interval = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "effective_frame_interval" for target in node.targets)
+        )
+        for transition in transitions:
+            for offroad in (True, False):
+                for chestnut in (True, False):
+                    ns = main_namespace()
+                    ns.update(is_offroad=offroad, chestnut_active=chestnut, target_fps=30.0)
+                    exec(compile(ast.Module(body=[transition], type_ignores=[]), "main.py", "exec"), ns)
+                    ns["frame_interval"] = 1.0 / ns["render_fps"]
+                    exec(compile(ast.Module(body=[interval], type_ignores=[]), "main.py", "exec"), ns)
+                    self.assertEqual(ns["effective_frame_interval"], 1.0 if offroad else 1.0 / 30.0)
 
     def test_autorun_default_and_environment_override(self):
         path = CLUSTER_DIR.parent / "cluster_autorun.py"

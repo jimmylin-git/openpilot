@@ -179,10 +179,14 @@ output across direct and hidden 32-bit RGB variants.
 
 Manager autostart passes `--fps 30` by default (`CLUSTER_FPS` remains available
 for explicit test overrides). The default renderer, H264 encoder input, TURZX
-display command, live setting modes, Chestnut-limited state, and offroad state
-all use 30 FPS. Explicit CLI `--fps`, `--usb-h264-fps`, and
+display command, live setting modes, and Chestnut-limited state
+all default to 30 FPS onroad. Explicit CLI `--fps`, `--usb-h264-fps`, and
 `--usb-display-fps` arguments remain available for diagnostics. Offroad still
-hides the 3D scene but no longer reduces the HUD below 30 FPS. The top status
+hides the 3D scene and limits HUD rendering and frame submission to 1 FPS,
+including debug modes and while Chestnut is active. Onroad restores the
+configured rate. The H264 stream stays initialized at its onroad encoder/display
+rate to avoid restarting it at each transition; offroad only submits one frame
+per second. The top status
 row (set speed, follow gap, LFA)
 also shows the mici Chestnut icon right of LFA at the same spacing; the row is
 shifted left half a slot so it stays centered between the turn signals. Icon (`icons_mici/chestnut*.png`): pulsing white while loading, green
