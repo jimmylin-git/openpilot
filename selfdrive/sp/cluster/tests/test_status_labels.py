@@ -121,6 +121,91 @@ class ModelNameTests(unittest.TestCase):
         self.assertEqual(stats.model_name, "B: TT")
 
 
+class ChestnutHealthTests(unittest.TestCase):
+    def setUp(self):
+        self.sampler = SystemStatsSampler()
+        self.onroad = True
+        self.loading = False
+        self.params = Mock()
+        self.params.get_bool.side_effect = lambda key: self.onroad if key == "IsOnroad" else self.loading
+        self.params.get.return_value = True
+        self.sampler._params = self.params
+        self.device = SimpleNamespace(chestnutPresent=True)
+        self.model = SimpleNamespace(big=True)
+        self.sm = SimpleNamespace(
+            alive={"deviceState": True, "modelV2": True},
+            valid={"deviceState": True, "modelV2": True},
+            updated={"deviceState": True, "modelV2": True},
+            recv_frame={"deviceState": 10, "modelV2": 10},
+            update=Mock(),
+        )
+
+        class Messages:
+            def __init__(messages, owner):
+                messages.__dict__.update(owner.sm.__dict__)
+                messages.owner = owner
+
+            def __getitem__(messages, key):
+                return messages.owner.device if key == "deviceState" else messages.owner.model
+
+        self.sm = Messages(self)
+        self.sampler._chestnut_sm = self.sm
+
+    def test_healthy_big_model_is_active(self):
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
+
+    def test_stale_active_cannot_hide_runtime_failures(self):
+        for failure in ("disconnected", "device_stale", "model_stale", "model_invalid", "small_model"):
+            with self.subTest(failure=failure):
+                self.setUp()
+                self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
+                if failure == "disconnected":
+                    self.device.chestnutPresent = False
+                elif failure == "device_stale":
+                    self.sm.alive["deviceState"] = False
+                elif failure == "model_stale":
+                    self.sm.alive["modelV2"] = False
+                elif failure == "model_invalid":
+                    self.sm.valid["modelV2"] = False
+                else:
+                    self.model.big = False
+                self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
+
+    def test_failure_is_latched_until_offroad(self):
+        self.model.big = False
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
+        self.model.big = True
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
+        self.onroad = False
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
+        self.onroad = True
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
+
+    def test_startup_waits_for_device_and_model(self):
+        self.sm.recv_frame["deviceState"] = 0
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_LOADING)
+        self.sm.recv_frame["deviceState"] = 10
+        self.sm.updated["modelV2"] = False
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_LOADING)
+        self.sm.updated["modelV2"] = True
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
+
+    def test_param_failure_overrides_loading(self):
+        self.loading = True
+        self.params.get.return_value = False
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
+
+    def test_offroad_disconnected_is_inactive(self):
+        self.onroad = False
+        self.device.chestnutPresent = False
+        self.assertIsNone(self.sampler._read_chestnut_state())
+
+    def test_read_failure_is_logged_and_not_active(self):
+        self.sm.update.side_effect = RuntimeError("messaging failed")
+        with self.assertLogs("cluster_system_monitor", level="ERROR"):
+            self.assertIsNone(self.sampler._read_chestnut_state())
+
+
 class StatusLabelTests(unittest.TestCase):
     def setUp(self):
         self.ns = renderer_methods()

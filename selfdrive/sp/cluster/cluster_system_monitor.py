@@ -41,6 +41,11 @@ class SystemStatsSampler:
         self._wake = threading.Event()
         self._params = None
         self._params_unavailable = False
+        self._chestnut_sm = None
+        self._chestnut_onroad = False
+        self._chestnut_seen = False
+        self._chestnut_failed = False
+        self._chestnut_model_seen = False
 
     def sample(self, now: float | None = None) -> SystemStats:
         # Thermal zone reads can block for tens of ms on device, so sample off the render thread.
@@ -54,7 +59,8 @@ class SystemStatsSampler:
             try:
                 stats = self._sample_linux()
             except Exception:
-                stats = None
+                logging.getLogger(__name__).exception("Unable to sample cluster system status")
+                stats = SystemStats(model_name="model unknown")
             if stats is not None:
                 self._stats = stats
             elif not PROC_STAT_PATH.exists() and not PROC_MEMINFO_PATH.exists():
@@ -111,8 +117,6 @@ class SystemStatsSampler:
             return "model unknown"
 
     def _read_chestnut_state(self) -> str | None:
-        # modeld sets ChestnutLoading while the eGPU model loads, then ChestnutActive
-        # True/False; ChestnutActive stays unset when no Chestnut is connected.
         if self._params is None:
             if self._params_unavailable:
                 return None
@@ -121,13 +125,48 @@ class SystemStatsSampler:
 
                 self._params = Params()
             except Exception:
+                logging.getLogger(__name__).exception("Unable to initialize cluster status Params")
                 self._params_unavailable = True
                 return None
         try:
-            if self._params.get_bool("ChestnutLoading"):
-                return CHESTNUT_LOADING
+            if self._chestnut_sm is None:
+                import cereal.messaging as messaging
+
+                self._chestnut_sm = messaging.SubMaster(["deviceState", "modelV2"])
+            sm = self._chestnut_sm
+            sm.update(0)
+            onroad = self._params.get_bool("IsOnroad")
+            if onroad != self._chestnut_onroad:
+                self._chestnut_model_seen = False
+                self._chestnut_onroad = onroad
+            detected = sm.alive["deviceState"] and sm.valid["deviceState"] and sm["deviceState"].chestnutPresent
+            loading = self._params.get_bool("ChestnutLoading")
             active = self._params.get("ChestnutActive")
+            if sm.recv_frame["deviceState"] <= 0:
+                return CHESTNUT_LOADING if loading or active is not None else None
+            if not onroad:
+                self._chestnut_seen = bool(detected)
+                self._chestnut_failed = False
+            else:
+                self._chestnut_seen = self._chestnut_seen or bool(detected) or active is not None or loading
+                self._chestnut_model_seen = self._chestnut_model_seen or bool(sm.updated["modelV2"])
+                if self._chestnut_seen and (
+                    not detected
+                    or active is False
+                    or (
+                        self._chestnut_model_seen
+                        and (not sm.alive["modelV2"] or not sm.valid["modelV2"] or not sm["modelV2"].big)
+                    )
+                ):
+                    self._chestnut_failed = True
+                if self._chestnut_failed:
+                    return CHESTNUT_FAILED
+            if not detected:
+                return None
+            if loading or (onroad and not self._chestnut_model_seen):
+                return CHESTNUT_LOADING
         except Exception:
+            logging.getLogger(__name__).exception("Unable to read cluster Chestnut health")
             return None
         if active is None:
             return None

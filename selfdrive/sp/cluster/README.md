@@ -296,6 +296,12 @@ multi-word names. Names wider than their slot scroll
 back and forth with pauses at each end, clipped to the slot; model changes
 reset the scroll position.
 Model names are sampled off the render thread alongside the system stats.
+The eGPU icon also checks live `deviceState` and `modelV2` health, not just
+`ChestnutActive`: a missing/stale device, a stopped/invalid model stream, or
+small-model fallback marks a previously detected eGPU as failed onroad.
+Failure stays latched until offroad. Startup waits for device/model messages
+before showing active. The icon and B:/S: model selection use the same health
+result, refreshed with system stats (normally every 3 seconds).
 The focused layout/model-name checks run without a GPU context:
 `python selfdrive/sp/cluster/tests/test_status_labels.py`.
 
