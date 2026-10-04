@@ -12,6 +12,7 @@ CLUSTER_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CLUSTER_DIR))
 
 from cluster_config import CLUSTER_FIXED_FPS, normalize_cluster_live_fps
+from cluster_fps import AdaptiveFpsController
 
 
 def main_namespace():
@@ -39,6 +40,39 @@ def main_namespace():
 
 
 class FpsTests(unittest.TestCase):
+    def test_adaptive_fps_reduces_on_drops_and_recovers_after_stable_period(self):
+        controller = AdaptiveFpsController(30.0)
+
+        self.assertTrue(controller.update(dropped=True, now=0.0))
+        self.assertEqual(controller.current_fps, 25.0)
+        self.assertFalse(controller.update(dropped=True, now=1.0))
+        self.assertTrue(controller.update(dropped=True, now=2.0))
+        self.assertEqual(controller.current_fps, 20.0)
+        self.assertFalse(controller.update(dropped=False, now=11.9))
+        self.assertTrue(controller.update(dropped=False, now=12.0))
+        self.assertEqual(controller.current_fps, 21.0)
+        self.assertFalse(controller.update(dropped=False, now=16.9))
+        self.assertTrue(controller.update(dropped=False, now=17.0))
+        self.assertEqual(controller.current_fps, 22.0)
+
+    def test_adaptive_fps_obeys_minimum_and_configured_maximum(self):
+        controller = AdaptiveFpsController(12.0)
+        for now in range(10):
+            controller.update(dropped=True, now=float(now * 2))
+        self.assertEqual(controller.current_fps, 5.0)
+
+        controller.set_maximum(4.0)
+        self.assertEqual(controller.current_fps, 4.0)
+        controller.set_maximum(30.0)
+        self.assertEqual(controller.current_fps, 4.0)
+        self.assertTrue(controller.update(dropped=False, now=40.0))
+        self.assertEqual(controller.current_fps, 5.0)
+
+    def test_adaptive_fps_keeps_uncapped_mode_unchanged(self):
+        controller = AdaptiveFpsController(0.0)
+        self.assertFalse(controller.update(dropped=True, now=0.0))
+        self.assertEqual(controller.current_fps, 0.0)
+
     def test_onroad_thirty_offroad_one(self):
         ns = main_namespace()
         self.assertEqual(CLUSTER_FIXED_FPS, 30.0)
@@ -75,7 +109,12 @@ class FpsTests(unittest.TestCase):
             for offroad in (True, False):
                 for chestnut in (True, False):
                     ns = main_namespace()
-                    ns.update(is_offroad=offroad, chestnut_active=chestnut, target_fps=30.0)
+                    ns.update(
+                        is_offroad=offroad,
+                        chestnut_active=chestnut,
+                        target_fps=30.0,
+                        adaptive_fps=AdaptiveFpsController(30.0),
+                    )
                     exec(compile(ast.Module(body=[transition], type_ignores=[]), "main.py", "exec"), ns)
                     ns["frame_interval"] = 1.0 / ns["render_fps"]
                     exec(compile(ast.Module(body=[interval], type_ignores=[]), "main.py", "exec"), ns)

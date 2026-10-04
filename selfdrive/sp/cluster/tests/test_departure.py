@@ -209,6 +209,8 @@ class DepartureRenderingTests(unittest.TestCase):
             {
                 "DESIGN_WIDTH": 1920,
                 "DESIGN_HEIGHT": 720,
+                "TOP_STATUS_DETAIL_CENTER_Y": 162.0,
+                "TOP_STATUS_DETAIL_FONT_SIZE": 34.0,
                 "GREEN": (0, 255, 0),
                 "WHITE": (255, 255, 255),
             },
@@ -219,6 +221,8 @@ class DepartureRenderingTests(unittest.TestCase):
             hud._draw_text.assert_not_called()
         draw(hud, SimpleNamespace(departure_reminder=True, wheel_critical=False))
         self.assertEqual(hud._draw_text.call_args.args[0], "READY TO GO")
+        self.assertEqual(hud._rounded_rect.call_args.args[:4], (750.0, 195.0, 420.0, 64.0))
+        self.assertEqual(hud._draw_text.call_args.args[1:3], (960.0, 227.0))
 
 
 if __name__ == "__main__":

@@ -47,6 +47,7 @@ from cluster_config import (
     normalize_cluster_screen_mode,
     normalize_cluster_theme_mode,
 )
+from cluster_fps import AdaptiveFpsController
 from cluster_gamepad import DualSenseSimulator
 from cluster_git_status import GitBranchStatusProvider
 from cluster_gles_dmabuf import DirectNv12DmabufError
@@ -748,7 +749,8 @@ def run_demo(
     display_actual_fps: float | None = None
     is_offroad = False
     brightness_refresh_pending = False
-    render_fps = target_fps
+    adaptive_fps = AdaptiveFpsController(target_fps)
+    render_fps = adaptive_fps.current_fps
     frame_interval = 1.0 / render_fps if render_fps > 0 else 0.0
     # The Chestnut eGPU shares the USB bus with the TURZX screen; halve the HUD
     # rate while it is loading/active. Only the render interval changes, so the
@@ -1002,7 +1004,8 @@ def run_demo(
                         )
                         break
                     target_fps = next_target_fps
-                    render_fps = OFFROAD_RENDER_FPS if is_offroad else target_fps
+                    adaptive_fps.set_maximum(target_fps)
+                    render_fps = OFFROAD_RENDER_FPS if is_offroad else adaptive_fps.current_fps
                     frame_interval = 1.0 / render_fps if render_fps > 0 else 0.0
                     renderer.set_target_fps(max(0, int(round(render_fps))))
                     renderer.blink_fps = effective_blink_fps()
@@ -1049,7 +1052,7 @@ def run_demo(
                 if next_is_offroad != is_offroad:
                     is_offroad = next_is_offroad
                     brightness_refresh_pending = True
-                    render_fps = OFFROAD_RENDER_FPS if is_offroad else target_fps
+                    render_fps = OFFROAD_RENDER_FPS if is_offroad else adaptive_fps.current_fps
                     frame_interval = 1.0 / render_fps if render_fps > 0 else 0.0
                     renderer.set_target_fps(max(0, int(round(render_fps))))
                     renderer.blink_fps = effective_blink_fps()
@@ -1166,6 +1169,20 @@ def run_demo(
             )
             if usb_display is not None and not usb_frame_ready:
                 usb_dropped_frames += 1
+            if usb_display is not None and not is_offroad and adaptive_fps.update(
+                dropped=not usb_frame_ready,
+                now=time.perf_counter(),
+            ):
+                render_fps = adaptive_fps.current_fps
+                frame_interval = 1.0 / render_fps if render_fps > 0 else 0.0
+                renderer.set_target_fps(max(0, int(round(render_fps))))
+                renderer.blink_fps = effective_blink_fps()
+                print(
+                    f"USB {'frame drop' if not usb_frame_ready else 'stable recovery'}: "
+                    f"adjusting cluster render rate to {render_fps:.0f} FPS "
+                    f"(configured maximum {target_fps:.0f} FPS)",
+                    flush=True,
+                )
             if usb_display is not None and usb_frame_ready:
                 if usb_codec == "jpeg":
                     if usb_pipeline is not None:
@@ -1347,6 +1364,7 @@ def run_demo(
                     f"ego_offset={state.ego_lane_offset:+.2f} | "
                     f"output={output_mode}/{usb_codec if usb_display else 'screen'}"
                     f"{'-fast' if usb_display and usb_fast_write else ''} usb_dropped={usb_dropped_frames} "
+                    f"render_target={render_fps:.0f}Hz "
                     f"{'async ' if usb_pipeline is not None else ''}"
                     f"theme={renderer.theme_mode} "
                     f"cam={state.camera_view_mode} "

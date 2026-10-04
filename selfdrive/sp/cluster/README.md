@@ -178,15 +178,17 @@ USERPTR diagnostics were removed after measured device tests showed corrupted
 output across direct and hidden 32-bit RGB variants.
 
 Manager autostart passes `--fps 30` by default (`CLUSTER_FPS` remains available
-for explicit test overrides). The default renderer, H264 encoder input, TURZX
-display command, live setting modes, and Chestnut-limited state
-all default to 30 FPS onroad. Explicit CLI `--fps`, `--usb-h264-fps`, and
-`--usb-display-fps` arguments remain available for diagnostics. Offroad still
-hides the 3D scene and limits HUD rendering and frame submission to 1 FPS,
-including debug modes and while Chestnut is active. Onroad restores the
-configured rate. The H264 stream stays initialized at its onroad encoder/display
-rate to avoid restarting it at each transition; offroad only submits one frame
-per second. The top status
+for explicit test overrides). The configured renderer, H264 encoder input,
+TURZX display command, and live setting modes default to 30 FPS onroad.
+Explicit CLI `--fps`, `--usb-h264-fps`, and `--usb-display-fps` arguments remain
+available for diagnostics. If the USB pipeline is still busy when a new frame
+is due, onroad rendering drops by 5 FPS per overload event (no more than once
+every 2 seconds), down to 5 FPS. After 10 seconds without a busy-frame drop, it
+recovers by 1 FPS every 5 seconds, up to the configured target. The H264
+encoder and display remain at their configured rates; only rendering and frame
+submission adapt, so no stream restart is needed. Offroad still hides the 3D
+scene and limits HUD rendering and frame submission to 1 FPS, including debug
+modes and while Chestnut is active. The top status
 row (set speed, follow gap, LFA)
 also shows the mici Chestnut icon right of LFA at the same spacing; the row is
 shifted left half a slot so it stays centered between the turn signals. Icon (`icons_mici/chestnut*.png`): pulsing white while loading, green
@@ -297,8 +299,15 @@ Model names are sampled off the render thread alongside the system stats.
 The focused layout/model-name checks run without a GPU context:
 `python selfdrive/sp/cluster/tests/test_status_labels.py`.
 
-The live HUD also shows a green `READY TO GO` (departure advisory) banner for
-three seconds when stopped below 0.1 m/s in D/B with ignition/onroad active,
+Turn-signal timing follows a 0.70-second cycle (0.37 seconds on, 0.33 seconds
+off), measured from the reference instrument-panel video. Blink phase uses
+elapsed time rather than frame counts, so adaptive FPS and skipped USB frames
+do not stretch the cycle. Displayed transitions are still limited by the
+actual screen update rate; this does not synchronize phase with the car's lamp.
+
+The live HUD also shows a green `READY TO GO` (departure advisory) banner
+centered below the top-row icons and their detail labels for three seconds
+when stopped below 0.1 m/s in D/B with ignition/onroad active,
 ACC and selfdrive disabled, and the accelerator released. Driver distraction
 is not required. Both lead/no-lead cases use the same predicted-path test:
 all 33 model position samples must be finite and the final position must

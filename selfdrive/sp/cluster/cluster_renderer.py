@@ -14,7 +14,6 @@ from pathlib import Path
 import pyray as rl
 
 from cluster_config import (
-    TURN_SIGNAL_BLINK_ON_SECONDS,
     AMBER,
     BLUE,
     BLUE_SOFT,
@@ -573,7 +572,6 @@ class ClusterUiRenderer:
         self._route_video_frame_id: str | None = None
         self._left_turn_signal_started_at: float | None = None
         self._right_turn_signal_started_at: float | None = None
-        self._turn_signal_frames = {"left": 0, "right": 0}
         self._acc_layout_progress: float | None = None
         self._acc_layout_target: float | None = None
         self._acc_layout_from = 1.0
@@ -2336,8 +2334,9 @@ class ClusterUiRenderer:
     def _draw_departure_reminder(self, state: ClusterUiState) -> None:
         if not state.departure_reminder or state.wheel_critical:
             return
-        self._rounded_rect(DESIGN_WIDTH * 0.5 - 210.0, DESIGN_HEIGHT - 92.0, 420.0, 64.0, 12.0, (12, 55, 32), GREEN, 2.0)
-        self._draw_text("READY TO GO", DESIGN_WIDTH * 0.5, DESIGN_HEIGHT - 60.0, 30.0, WHITE, anchor="center")
+        top_y = TOP_STATUS_DETAIL_CENTER_Y + TOP_STATUS_DETAIL_FONT_SIZE * 0.5 + 16.0
+        self._rounded_rect(DESIGN_WIDTH * 0.5 - 210.0, top_y, 420.0, 64.0, 12.0, (12, 55, 32), GREEN, 2.0)
+        self._draw_text("READY TO GO", DESIGN_WIDTH * 0.5, top_y + 32.0, 30.0, WHITE, anchor="center")
 
     def _draw_debug_plot(
         self,
@@ -3467,7 +3466,6 @@ class ClusterUiRenderer:
                 self._left_turn_signal_started_at = None
             else:
                 self._right_turn_signal_started_at = None
-            self._turn_signal_frames[side] = 0
             return False
 
         if now is None:
@@ -3480,16 +3478,7 @@ class ClusterUiRenderer:
             if self._right_turn_signal_started_at is None:
                 self._right_turn_signal_started_at = now
             started_at = self._right_turn_signal_started_at
-        if self.blink_fps <= 0:
-            return blink_visible(now, started_at, float("inf"))
-        # At low HUD rates a wall-clock blink phase lands on a varying number of frames
-        # (e.g. 0.35s at 8 FPS = 2.8 frames), so on/off steps look uneven or get skipped.
-        # Count rendered frames instead so every on and off phase is a whole number of frames.
-        frames_per_phase = max(1, round(TURN_SIGNAL_BLINK_ON_SECONDS * self.blink_fps))
-        frame_index = self._turn_signal_frames[side]
-        if advance:
-            self._turn_signal_frames[side] = frame_index + 1
-        return (frame_index // frames_per_phase) % 2 == 0
+        return blink_visible(now, started_at, float("inf"))
 
     def _draw_turn_signal(self, side: str, lit: bool, show_inactive: bool = False) -> None:
         if not lit and not show_inactive:
