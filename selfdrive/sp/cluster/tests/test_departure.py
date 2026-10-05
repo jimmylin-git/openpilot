@@ -32,42 +32,53 @@ class DepartureTests(unittest.TestCase):
         self.reminder = DepartureReminder()
 
     def update(self, t, **overrides):
-        args = {"allowed": True, "valid": True, "model_time": t, "position_x": (0.0,) * 32 + (31.0,)}
+        args = {"allowed": True, "valid": True, "sample_time": t, "lead_present": True,
+                "lead_distance": 5.0, "lead_relative_speed": 0.0}
         args.update(overrides)
         return self.reminder.update(t, **args)
 
+    def arm(self, start=10.0):
+        for i in range(6):
+            self.assertFalse(self.update(start + i * 0.2))
+
     def trigger(self, start=10.0):
-        self.assertFalse(self.update(start))
-        self.assertFalse(self.update(start + 0.2))
-        self.assertTrue(self.update(start + 0.4))
+        self.arm(start)
+        self.assertFalse(self.update(start + 1.2, lead_distance=6.2, lead_relative_speed=1.0))
+        self.assertFalse(self.update(start + 1.4, lead_distance=6.4, lead_relative_speed=1.0))
+        self.assertTrue(self.update(start + 1.6, lead_distance=6.6, lead_relative_speed=1.0))
 
     def test_confirmation_and_exact_distance_threshold(self):
-        self.assertFalse(self.update(10.0, position_x=(30.0,) * 33))
-        self.assertFalse(self.update(10.2))
-        self.assertFalse(self.update(10.45))
-        self.assertTrue(self.update(10.6))
+        self.arm()
+        self.assertFalse(self.update(11.2, lead_distance=6.0, lead_relative_speed=1.0))
+        self.assertFalse(self.update(11.4, lead_distance=6.1, lead_relative_speed=1.0))
+        self.assertFalse(self.update(11.6, lead_distance=6.3, lead_relative_speed=1.0))
+        self.assertTrue(self.update(11.8, lead_distance=6.5, lead_relative_speed=1.0))
 
     def test_repeated_sample_cannot_confirm(self):
-        self.assertFalse(self.update(10.0))
-        self.assertFalse(self.update(10.4, model_time=10.0))
-        self.assertFalse(self.update(10.6, model_time=10.0))
+        self.arm()
+        self.assertFalse(self.update(11.2, lead_distance=6.2, lead_relative_speed=1.0))
+        self.assertFalse(self.update(11.6, sample_time=11.2, lead_distance=6.2, lead_relative_speed=1.0))
+        self.assertFalse(self.update(11.8, sample_time=11.2, lead_distance=6.2, lead_relative_speed=1.0))
 
     def test_sample_gap_and_backward_time_restart_confirmation(self):
-        self.assertFalse(self.update(10.0))
-        self.assertFalse(self.update(11.0))
-        self.assertFalse(self.update(10.8))
-        self.assertFalse(self.update(11.0))
-        self.assertTrue(self.update(11.2))
+        self.arm()
+        self.assertFalse(self.update(12.0, lead_distance=6.2, lead_relative_speed=1.0))
+        self.assertFalse(self.update(11.8, lead_distance=6.4, lead_relative_speed=1.0))
+        self.assertFalse(self.update(12.0, lead_distance=6.6, lead_relative_speed=1.0))
+        self.assertFalse(self.update(12.2, lead_distance=6.8, lead_relative_speed=1.0))
 
     def test_invalid_inputs_never_trigger(self):
         cases = [
             {"valid": False},
-            {"model_time": 9.0},
-            {"model_time": 11.0},
-            {"position_x": ()},
-            {"position_x": (31.0,) * 32},
-            {"position_x": (float("nan"),) + (31.0,) * 32},
-            {"position_x": (float("inf"),) * 33},
+            {"sample_time": 9.0},
+            {"sample_time": 11.0},
+            {"lead_present": False},
+            {"lead_distance": None},
+            {"lead_distance": 0.0},
+            {"lead_distance": float("nan")},
+            {"lead_distance": float("inf")},
+            {"lead_relative_speed": None},
+            {"lead_relative_speed": float("nan")},
         ]
         for args in cases:
             with self.subTest(args=args):
@@ -78,24 +89,43 @@ class DepartureTests(unittest.TestCase):
     def test_single_trigger_per_stop_and_display_expiry(self):
         self.trigger()
         for i in range(1, 16):
-            self.update(10.4 + i * 0.2)
-        self.assertFalse(self.update(13.6))
-        self.assertFalse(self.update(13.8))
-        self.assertFalse(self.update(14.0, allowed=False))
-        self.trigger(14.2)
+            self.update(11.6 + i * 0.2)
+        self.assertFalse(self.update(14.8))
+        self.assertFalse(self.update(15.0))
+        self.assertFalse(self.update(15.2, allowed=False))
+        self.trigger(16.0)
 
-    def test_blocked_prediction_restarts_confirmation(self):
-        self.assertFalse(self.update(10.0))
-        self.assertFalse(self.update(10.2, position_x=(10.0,) * 33))
-        self.assertFalse(self.update(10.4))
-        self.assertFalse(self.update(10.6))
-        self.assertTrue(self.update(10.8))
+    def test_stationary_or_approaching_lead_cannot_trigger(self):
+        self.arm()
+        for i in range(1, 8):
+            self.assertFalse(self.update(11.0 + i * 0.2, lead_distance=7.0))
+        self.assertFalse(self.update(12.6, lead_distance=7.0, lead_relative_speed=-1.0))
+
+    def test_no_close_lead_or_already_departing_lead_cannot_arm(self):
+        for overrides in ({"lead_distance": 8.0}, {"lead_relative_speed": 1.0}, {"lead_present": False}):
+            self.setUp()
+            for i in range(10):
+                self.assertFalse(self.update(10.0 + i * 0.2, **overrides))
+
+    def test_disappearing_lead_requires_rearming(self):
+        self.arm()
+        self.assertFalse(self.update(11.2, lead_present=False))
+        self.assertFalse(self.update(11.4, lead_distance=7.0, lead_relative_speed=1.0))
+        self.assertFalse(self.update(11.8, lead_distance=8.0, lead_relative_speed=1.0))
+
+    def test_interrupted_departure_restarts_confirmation(self):
+        self.arm()
+        self.assertFalse(self.update(11.2, lead_distance=6.5, lead_relative_speed=1.0))
+        self.assertFalse(self.update(11.4, lead_distance=6.5, lead_relative_speed=0.0))
+        self.assertFalse(self.update(11.6, lead_distance=6.7, lead_relative_speed=1.0))
+        self.assertFalse(self.update(11.8, lead_distance=6.9, lead_relative_speed=1.0))
+        self.assertTrue(self.update(12.0, lead_distance=7.1, lead_relative_speed=1.0))
 
     def test_invalid_data_hides_without_repeated_alert(self):
         self.trigger()
-        self.assertFalse(self.update(10.6, valid=False))
-        self.assertFalse(self.update(10.8))
-        self.assertFalse(self.update(11.2))
+        self.assertFalse(self.update(11.8, valid=False))
+        self.assertFalse(self.update(12.0))
+        self.assertFalse(self.update(12.4))
 
 
 class LiveDepartureTests(unittest.TestCase):
@@ -113,7 +143,7 @@ class LiveDepartureTests(unittest.TestCase):
         self.sm = {
             "carState": SimpleNamespace(vEgo=0.0, gasPressed=False, cruiseState=SimpleNamespace(enabled=False)),
             "selfdriveState": SimpleNamespace(enabled=False),
-            "modelV2": SimpleNamespace(position=SimpleNamespace(x=(31.0,) * 33)),
+            "radarState": SimpleNamespace(leadOne=SimpleNamespace(present=True, dRel=5.0, vRel=0.0), radarErrors=[]),
         }
 
         class SubMaster(dict):
@@ -136,10 +166,17 @@ class LiveDepartureTests(unittest.TestCase):
         self.sm.logMonoTime = dict.fromkeys(self.sm, int(t * 1e9))
         return self.method(self.source, self.state)
 
-    def test_live_trigger_without_driver_monitoring_or_radar(self):
-        self.assertFalse(self.sample(10.0))
-        self.assertFalse(self.sample(10.2))
-        self.assertTrue(self.sample(10.4))
+    def trigger(self, start=10.0):
+        lead = self.sm["radarState"].leadOne
+        lead.dRel, lead.vRel = 5.0, 0.0
+        for i in range(6):
+            self.assertFalse(self.sample(start + i * 0.2))
+        lead.dRel, lead.vRel = 6.5, 1.0
+        self.assertFalse(self.sample(start + 1.2))
+        self.assertTrue(self.sample(start + 1.6))
+
+    def test_live_trigger_without_model_or_driver_monitoring(self):
+        self.trigger()
 
     def test_disallowed_vehicle_states(self):
         for attribute, value in (("gear_text", "R"), ("gear_text", "P"), ("gear_text", "N")):
@@ -163,26 +200,25 @@ class LiveDepartureTests(unittest.TestCase):
         self.assertFalse(self.sample(10.4))
 
     def test_stale_invalid_and_missing_timestamps_clear_banner(self):
-        self.sample(10.0)
-        self.sample(10.2)
-        self.assertTrue(self.sample(10.4))
-        self.sm.valid["modelV2"] = False
+        self.trigger()
+        self.sm.valid["radarState"] = False
         self.assertFalse(self.method(self.source, self.state))
-        self.sm.valid["modelV2"] = True
+        self.sm.valid["radarState"] = True
         self.sm.logMonoTime.pop("carState")
         self.assertFalse(self.method(self.source, self.state))
 
-    def test_offroad_resets_even_with_stale_model(self):
-        self.sample(10.0)
-        self.sample(10.2)
-        self.assertTrue(self.sample(10.4))
+    def test_offroad_resets_even_with_stale_radar(self):
+        self.trigger()
         self.now = 12.0
         self.source.vehicle_started.return_value = False
         self.assertFalse(self.method(self.source, self.state))
         self.source.vehicle_started.return_value = True
-        self.assertFalse(self.sample(12.2))
-        self.assertFalse(self.sample(12.4))
-        self.assertTrue(self.sample(12.6))
+        self.trigger(12.2)
+
+    def test_radar_errors_clear_banner(self):
+        self.trigger()
+        self.sm["radarState"].radarErrors = ["fault"]
+        self.assertFalse(self.method(self.source, self.state))
 
     def test_each_required_service_must_be_fresh_alive_and_valid(self):
         for service in self.sm:

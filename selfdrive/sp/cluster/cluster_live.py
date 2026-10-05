@@ -303,7 +303,8 @@ class OpenpilotLiveSource:
         if self.params is not None:
             experimental_mode = self.params.get_bool("ExperimentalMode")
         state = replace(self._standby_state, experimental_mode=experimental_mode)
-        self._departure_reminder.update(time.monotonic(), allowed=False, valid=False, model_time=0.0, position_x=())
+        self._departure_reminder.update(time.monotonic(), allowed=False, valid=False, sample_time=0.0,
+                                        lead_present=False, lead_distance=None, lead_relative_speed=None)
         self._profile_add("source.live.standby_state", profile_stage)
 
         self._reset_stability_filters(time.monotonic())
@@ -313,8 +314,9 @@ class OpenpilotLiveSource:
     def _update_departure_reminder(self, state: ClusterUiState) -> bool:
         now = time.monotonic()
         if self.vehicle_started() is not True:
-            return self._departure_reminder.update(now, allowed=False, valid=False, model_time=0.0, position_x=())
-        services = ("carState", "selfdriveState", "modelV2")
+            return self._departure_reminder.update(now, allowed=False, valid=False, sample_time=0.0,
+                                                    lead_present=False, lead_distance=None, lead_relative_speed=None)
+        services = ("carState", "selfdriveState", "radarState")
         valid = all(
             self._service_alive(service)
             and self.sm.valid.get(service, False)
@@ -323,7 +325,8 @@ class OpenpilotLiveSource:
             for service in services
         )
         if not valid:
-            return self._departure_reminder.update(now, allowed=True, valid=False, model_time=0.0, position_x=())
+            return self._departure_reminder.update(now, allowed=True, valid=False, sample_time=0.0,
+                                                    lead_present=False, lead_distance=None, lead_relative_speed=None)
 
         car = self.sm["carState"]
         speed = safe_optional_float(car, "vEgo")
@@ -335,13 +338,15 @@ class OpenpilotLiveSource:
             and not car.cruiseState.enabled
             and not car.gasPressed
         )
-        position_x = tuple(float(x) for x in self.sm["modelV2"].position.x)
+        lead = self.sm["radarState"].leadOne
         return self._departure_reminder.update(
             now,
             allowed=allowed,
-            valid=True,
-            model_time=self.sm.logMonoTime["modelV2"] / 1e9,
-            position_x=position_x,
+            valid=not self.sm["radarState"].radarErrors,
+            sample_time=self.sm.logMonoTime["radarState"] / 1e9,
+            lead_present=lead.present,
+            lead_distance=safe_optional_float(lead, "dRel"),
+            lead_relative_speed=safe_optional_float(lead, "vRel"),
         )
 
     def live_data_available(self) -> bool:

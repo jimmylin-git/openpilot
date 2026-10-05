@@ -319,12 +319,17 @@ The live HUD also shows a green `READY TO GO` (departure advisory) banner
 centered below the top-row icons and their detail labels for three seconds
 when stopped below 0.1 m/s in D/B with ignition/onroad active,
 ACC and selfdrive disabled, and the accelerator released. Driver distraction
-is not required. Both lead/no-lead cases use the same predicted-path test:
-all 33 model position samples must be finite and the final position must
-exceed 30 m continuously for more than 0.3 seconds of distinct model samples.
-Car, selfdrive, and model data must be alive, valid, and no older than 0.5 s.
+is not required. The fused `radarState.leadOne` must first remain present
+within 8 m without moving away faster than 0.1 m/s for at least 1 second.
+After arming, its distance must increase by more than 1 m from the closest
+observed distance, with relative speed above 0.1 m/s, continuously for more
+than 0.3 seconds of distinct radar samples. This works with the fused lead,
+including vision-derived leads; a physical radar is not required.
+Car, selfdrive, and radar data must be alive, valid, and no older than 0.5 s,
+with no radar errors. Missing leads never trigger the reminder.
 The reminder fires once per eligible stop, resets after moving or leaving the
-eligible state, and clears on stale data or a blocked prediction. It is
+eligible state, and clears on stale data or a lost lead. Data gaps or lead
+loss require rearming; no-lead situations do not produce a green-light alert. It is
 suppressed by the steering take-control warning. Replay/standby do not trigger
 it. This is not traffic-light recognition or permission to proceed: check the
 road yourself. No sound, new Params key, or driving-control change is added.
