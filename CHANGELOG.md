@@ -1,6 +1,7 @@
-sunnypilot Version MR.ONE-2026 (2026-10-04; upstream updates selectively synced through 2026-09-28)
+sunnypilot Version MR.ONE-2026 (2026-10-05; upstream updates selectively synced through 2026-09-28)
 ========================
 * MR.ONE Custom Features
+  * cluster: lower default onroad rendering, H264 encoding and USB display to 5 FPS with or without Chestnut, using 1.17 Mbps automatic bitrate; retain 1 FPS offroad and busy-frame dropping
   * cluster: keep live offroad HUD rendering and frame submission at 1 FPS in all display modes, restoring 30 FPS onroad without restarting the H264 stream
   * cluster: unify default rendering, USB display, H264 encoding, Chestnut-active and offroad limits at 30 FPS; retain busy-frame dropping and cap automatic bitrate at 7 Mbps
   * cluster: raise the default renderer, USB display, and H264 encoder to 10 FPS for testing, retaining busy-frame dropping and Chestnut USB pacing

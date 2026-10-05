@@ -177,11 +177,14 @@ Keep `--usb-h264-input-format nv12` for native hardware testing. Direct RGB
 USERPTR diagnostics were removed after measured device tests showed corrupted
 output across direct and hidden 32-bit RGB variants.
 
-Manager autostart passes `--fps 30` by default (`CLUSTER_FPS` remains available
+Manager autostart passes `--fps 5` by default (`CLUSTER_FPS` remains available
 for explicit test overrides). The configured renderer, H264 encoder input,
-TURZX display command, and live setting modes default to 30 FPS onroad.
+TURZX display command, and live setting modes default to 5 FPS onroad,
+regardless of whether Chestnut is active.
 Explicit CLI `--fps`, `--usb-h264-fps`, and `--usb-display-fps` arguments remain
-available for diagnostics. If the USB pipeline is still busy when a new frame
+available for diagnostics. At the default 5 FPS, adaptive rendering stays at
+its 5 FPS floor and skips busy frames. With a higher diagnostic target, if the
+USB pipeline is still busy when a new frame
 is due, onroad rendering drops by 5 FPS per overload event (no more than once
 every 2 seconds), down to 5 FPS. After 10 seconds without a busy-frame drop, it
 recovers by 1 FPS every 5 seconds, up to the configured target. The H264
@@ -214,7 +217,7 @@ Explicit `CLUSTER_REALTIME`, `CLUSTER_REALTIME_CORES`, or
 `CLUSTER_REALTIME_PRIORITY` environment values still win.
 The manager launches `cluster_autorun` as the single live entry point. The
 launcher resets `ClusterHudBrightness` to `0` at startup, then passes
-`--input live` with 30 FPS, H264 automatic encoder selection, automatic
+`--input live` with 5 FPS, H264 automatic encoder selection, automatic
 brightness, and automatic theme. The
 `ClusterHudLiveFps`, `ClusterHudEncoder`, `ClusterHudTheme`, and
 `ClusterHudBrightness` names are currently read-only integration points unless
@@ -233,7 +236,7 @@ unset or unknown keys from `/data/cluster_params/<key>` (override with
 ```bash
 mkdir -p /data/cluster_params
 echo -n 1 > /data/cluster_params/ClusterHudTheme      # 0 auto, 1 dark, 2 light
-echo -n 4 > /data/cluster_params/ClusterHudLiveFps    # all modes currently resolve to 30 FPS
+echo -n 4 > /data/cluster_params/ClusterHudLiveFps    # all modes currently resolve to 5 FPS
 ```
 
 Unset keys keep the built-in defaults.
@@ -400,8 +403,8 @@ the small distance and mode items do not scale or fade. This does not increase
 the actual display frame rate or add additional rendered frames.
 Turn-signal positions do not change.
 When `--fps` is omitted, `ClusterHudLiveFps` is polled about once per second,
-but every supported setting value (`0` through `6`) now resolves to 30 FPS.
-Direct route/replay CLI runs also use the 30 FPS default. Explicit `--fps`
+but every supported setting value (`0` through `6`) now resolves to 5 FPS.
+Direct route/replay CLI runs also use the 5 FPS default. Explicit `--fps`
 remains a fixed diagnostic override. For H264 USB output, changing the
 effective FPS exits the current HUD process so autostart can relaunch with a
 matching encoder FPS when a launcher is present.
@@ -657,9 +660,10 @@ USB frame upload runs in no-ACK mode by default because some TURZX panels accept
 image data but never return a frame-upload response. Use `--usb-wait-frame-ack`
 only when testing a panel/driver combination known to reply after each frame.
 
-Manager autorun uses H264 at 30 FPS, trying the native encoder first and
+Manager autorun uses H264 at 5 FPS, trying the native encoder first and
 falling back to ffmpeg when the native bridge or V4L2 encoder is unavailable.
-Automatic bitrate at 30 FPS is capped at 7 Mbps. This is a target refresh rate,
+Automatic bitrate at 5 FPS is 1.17 Mbps (about 0.146 MB/s before transport
+overhead); higher diagnostic rates retain the 7 Mbps cap. This is a target refresh rate,
 not a guaranteed measured rate; busy-frame dropping still applies with Chestnut.
 The normal comma installation build and prebuilt release build both compile
 `openpilot/system/loggerd/libcluster_h264_encoder_bridge.so` automatically.

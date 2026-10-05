@@ -1405,7 +1405,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Target refresh rate. Use 0 for uncapped/as-fast-as-possible. "
-            f"When omitted, CLI runs read {CLUSTER_LIVE_FPS_PARAM}; all setting modes currently resolve to 30 FPS."
+            f"When omitted, CLI runs read {CLUSTER_LIVE_FPS_PARAM}; all setting modes currently resolve to 5 FPS."
         ),
     )
     parser.add_argument(
