@@ -86,8 +86,6 @@ H264_AUTO_BITRATE_MAX_BPS = 7_000_000
 DEFAULT_H264_DIMENSION_ALIGN = 1
 THEME_PARAM_POLL_SECONDS = 1.0
 FPS_PARAM_POLL_SECONDS = 1.0
-CHESTNUT_POLL_SECONDS = 1.0
-CHESTNUT_FPS = CLUSTER_FIXED_FPS
 BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
 # Not literal 0: on this TURZX hardware, sending a brightness of exactly 0
 # while the process keeps running (as opposed to the brightness-off command
@@ -216,25 +214,6 @@ class ClusterLiveFpsParamReader:
             return normalize_cluster_live_fps(read_int_param(self._params, CLUSTER_LIVE_FPS_PARAM))
         except Exception:
             return CLUSTER_FIXED_FPS
-
-
-class ChestnutActiveParamReader:
-    def __init__(self) -> None:
-        self._params = None
-        try:
-            from openpilot.common.params import Params
-
-            self._params = Params()
-        except Exception:
-            pass
-
-    def read(self) -> bool:
-        if self._params is None:
-            return False
-        try:
-            return self._params.get_bool("ChestnutLoading") or self._params.get_bool("ChestnutActive")
-        except Exception:
-            return False
 
 
 class ClusterHudBrightnessParamReader:
@@ -752,18 +731,7 @@ def run_demo(
     adaptive_fps = AdaptiveFpsController(target_fps)
     render_fps = adaptive_fps.current_fps
     frame_interval = 1.0 / render_fps if render_fps > 0 else 0.0
-    # The Chestnut eGPU shares the USB bus with the TURZX screen; halve the HUD
-    # rate while it is loading/active. Only the render interval changes, so the
-    # H264 encoder keeps running without a restart.
-    chestnut_reader = ChestnutActiveParamReader() if input_mode == "live" else None
-    chestnut_active = chestnut_reader.read() if chestnut_reader is not None else False
-    next_chestnut_read = start_time + CHESTNUT_POLL_SECONDS
-    if chestnut_active:
-        print(f"Chestnut active: limiting cluster HUD to {CHESTNUT_FPS:.0f} Hz", flush=True)
-
     def effective_blink_fps() -> float:
-        if chestnut_active and (render_fps <= 0 or render_fps > CHESTNUT_FPS):
-            return CHESTNUT_FPS
         return max(0.0, render_fps)
 
     renderer.blink_fps = effective_blink_fps()
@@ -1021,14 +989,6 @@ def run_demo(
                         if usb_display.set_display_fps(next_display_fps):
                             print(f"TURZX display FPS updated: {next_display_fps}", flush=True)
                 next_fps_param_read = now + FPS_PARAM_POLL_SECONDS
-            if chestnut_reader is not None and now >= next_chestnut_read:
-                next_chestnut_active = chestnut_reader.read()
-                if next_chestnut_active != chestnut_active:
-                    chestnut_active = next_chestnut_active
-                    renderer.blink_fps = effective_blink_fps()
-                    state_text = f"limiting cluster HUD to {CHESTNUT_FPS:.0f} Hz" if chestnut_active else "restoring cluster HUD rate"
-                    print(f"Chestnut {'active' if chestnut_active else 'inactive'}: {state_text}", flush=True)
-                next_chestnut_read = now + CHESTNUT_POLL_SECONDS
             if duration_seconds is not None and now - start_time >= duration_seconds:
                 break
 
@@ -1332,7 +1292,7 @@ def run_demo(
             report_frames += 1
             profile.add_elapsed("main.frame_active", frame_start_time)
 
-            effective_frame_interval = max(frame_interval, 1.0 / CHESTNUT_FPS) if chestnut_active else frame_interval
+            effective_frame_interval = frame_interval
             if effective_frame_interval > 0.0:
                 elapsed = time.perf_counter() - frame_start_time
                 remaining = effective_frame_interval - elapsed
@@ -1405,7 +1365,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Target refresh rate. Use 0 for uncapped/as-fast-as-possible. "
-            f"When omitted, CLI runs read {CLUSTER_LIVE_FPS_PARAM}; all setting modes currently resolve to 5 FPS."
+            f"When omitted, CLI runs read {CLUSTER_LIVE_FPS_PARAM}; all setting modes currently resolve to 20 FPS."
         ),
     )
     parser.add_argument(
