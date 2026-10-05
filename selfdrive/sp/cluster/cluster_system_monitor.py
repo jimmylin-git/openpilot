@@ -130,12 +130,12 @@ class SystemStatsSampler:
                 return None
         try:
             if self._chestnut_sm is None:
-                import cereal.messaging as messaging
+                from openpilot.cereal import messaging
 
                 self._chestnut_sm = messaging.SubMaster(["deviceState", "modelV2"])
             sm = self._chestnut_sm
             sm.update(0)
-            onroad = self._params.get_bool("IsOnroad")
+            onroad = sm["deviceState"].started
             if onroad != self._chestnut_onroad:
                 self._chestnut_model_seen = False
                 self._chestnut_onroad = onroad
@@ -155,7 +155,7 @@ class SystemStatsSampler:
                     or active is False
                     or (
                         self._chestnut_model_seen
-                        and (not sm.alive["modelV2"] or not sm.valid["modelV2"] or not sm["modelV2"].big)
+                        and (not sm.alive["modelV2"] or not sm["modelV2"].big)
                     )
                 ):
                     self._chestnut_failed = True

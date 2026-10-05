@@ -300,8 +300,10 @@ back and forth with pauses at each end, clipped to the slot; model changes
 reset the scroll position.
 Model names are sampled off the render thread alongside the system stats.
 The eGPU icon also checks live `deviceState` and `modelV2` health, not just
-`ChestnutActive`: a missing/stale device, a stopped/invalid model stream, or
+`ChestnutActive`: a missing/stale device, a stopped model stream, or
 small-model fallback marks a previously detected eGPU as failed onroad.
+Onroad/offroad follows `deviceState.started`, as in the main UI. Model-message
+validity alone does not indicate an eGPU failure (for example during calibration).
 Failure stays latched until offroad. Startup waits for device/model messages
 before showing active. The icon and B:/S: model selection use the same health
 result, refreshed with system stats (normally every 3 seconds).

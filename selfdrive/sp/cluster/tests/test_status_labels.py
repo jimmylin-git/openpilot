@@ -124,13 +124,16 @@ class ModelNameTests(unittest.TestCase):
 class ChestnutHealthTests(unittest.TestCase):
     def setUp(self):
         self.sampler = SystemStatsSampler()
-        self.onroad = True
         self.loading = False
         self.params = Mock()
-        self.params.get_bool.side_effect = lambda key: self.onroad if key == "IsOnroad" else self.loading
+        def read_bool(key):
+            if key != "ChestnutLoading":
+                raise ValueError(f"Unexpected param key: {key}")
+            return self.loading
+        self.params.get_bool.side_effect = read_bool
         self.params.get.return_value = True
         self.sampler._params = self.params
-        self.device = SimpleNamespace(chestnutPresent=True)
+        self.device = SimpleNamespace(chestnutPresent=True, started=True)
         self.model = SimpleNamespace(big=True)
         self.sm = SimpleNamespace(
             alive={"deviceState": True, "modelV2": True},
@@ -155,7 +158,7 @@ class ChestnutHealthTests(unittest.TestCase):
         self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
 
     def test_stale_active_cannot_hide_runtime_failures(self):
-        for failure in ("disconnected", "device_stale", "model_stale", "model_invalid", "small_model"):
+        for failure in ("disconnected", "device_stale", "model_stale", "small_model"):
             with self.subTest(failure=failure):
                 self.setUp()
                 self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
@@ -165,8 +168,6 @@ class ChestnutHealthTests(unittest.TestCase):
                     self.sm.alive["deviceState"] = False
                 elif failure == "model_stale":
                     self.sm.alive["modelV2"] = False
-                elif failure == "model_invalid":
-                    self.sm.valid["modelV2"] = False
                 else:
                     self.model.big = False
                 self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
@@ -176,9 +177,9 @@ class ChestnutHealthTests(unittest.TestCase):
         self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
         self.model.big = True
         self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
-        self.onroad = False
+        self.device.started = False
         self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
-        self.onroad = True
+        self.device.started = True
         self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
 
     def test_startup_waits_for_device_and_model(self):
@@ -196,7 +197,7 @@ class ChestnutHealthTests(unittest.TestCase):
         self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
 
     def test_offroad_disconnected_is_inactive(self):
-        self.onroad = False
+        self.device.started = False
         self.device.chestnutPresent = False
         self.assertIsNone(self.sampler._read_chestnut_state())
 
@@ -204,6 +205,20 @@ class ChestnutHealthTests(unittest.TestCase):
         self.sm.update.side_effect = RuntimeError("messaging failed")
         with self.assertLogs("cluster_system_monitor", level="ERROR"):
             self.assertIsNone(self.sampler._read_chestnut_state())
+
+    def test_model_validity_does_not_latch_gpu_failure(self):
+        self.sm.valid["modelV2"] = False
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
+        self.sm.valid["modelV2"] = True
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
+
+    def test_initializes_messaging_from_openpilot_package(self):
+        self.sampler._chestnut_sm = None
+        cereal = ModuleType("openpilot.cereal")
+        cereal.messaging = SimpleNamespace(SubMaster=Mock(return_value=self.sm))
+        with patch.dict(sys.modules, {"openpilot.cereal": cereal}):
+            self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
+        cereal.messaging.SubMaster.assert_called_once_with(["deviceState", "modelV2"])
 
 
 class StatusLabelTests(unittest.TestCase):
