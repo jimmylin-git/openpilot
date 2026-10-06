@@ -1,6 +1,8 @@
-sunnypilot Version MR.ONE-2026 (2026-10-06; upstream updates selectively synced through 2026-09-28)
+sunnypilot Version MR.ONE-2026 (2026-10-07; upstream updates selectively synced through 2026-09-28)
 ========================
 * MR.ONE Custom Features
+  * tinygrad: trial the official master runtime baseline f6fc4e3f2c, retaining the Cluster/Chestnut shared USB lock and CallInfo.dtype compatibility patch; keep the V25 model catalog, model loader and safety checks unchanged; device/model compatibility remains unverified
+  * tinygrad rollback: revert the isolated "tinygrad: trial official f6fc runtime with custom USB fixes" commit to restore the runtime used at ea569fee38; no model redownload is required by this update
   * cluster: replace the predicted-path READY TO GO trigger with a confirmed close lead moving away; require 1 second of lead arming, over 1 m departure and over 0.3 second confirmation, retaining ACC-off gating and the 3-second visual-only reminder
   * cluster: use 20 FPS default rendering, H264 encoding and USB display with or without Chestnut; remove the Chestnut-specific render cap, retain 1 FPS offroad and adaptive busy-frame reduction; automatic bitrate is 4.68 Mbps
   * cluster: fix Chestnut monitoring imports and use deviceState.started instead of the nonexistent IsOnroad param; match the main UI by not treating calibration-related model validity as GPU failure

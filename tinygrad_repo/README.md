@@ -21,6 +21,29 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 ---
 
+## Vendored runtime in this openpilot fork
+
+This checkout applies the upstream delta from
+`e837e367aac9e1a66e689f4f32ce20ca9367df13` to
+`f6fc4e3f2c3db5fae1e19cbfbc3ad9fc579a12ae`, the tinygrad revision used by
+sunnypilot master at `a5f44653d7f43ad57fef2f546f3916ec4cbf3c56`.
+It retains this fork's shared Chestnut/Cluster USB transfer lock and
+`CallInfo.dtype` pickle compatibility patch. The generated specification PDF
+is not updated; its source is.
+
+This is a runtime compatibility trial, not a confirmed fix for model NaN,
+GPU hangs or USB disconnects. The V25 model catalog and model execution guards
+are unchanged. Host tests do not validate Chestnut hardware or all downloaded
+model artifacts. Validate on the device while parked before using a different
+model onroad.
+
+To roll back, use `git revert <trial-commit>` from the openpilot repository,
+where `<trial-commit>` is the commit titled
+`tinygrad: trial official f6fc runtime with custom USB fixes`.
+Do not reset the branch: a revert preserves subsequent changes and history.
+
+---
+
 tinygrad is an end-to-end deep learning stack:
 
 - **Tensor library** with autograd
