@@ -45,7 +45,6 @@ class HomeLayout(Widget):
     self.alert_count = 0
     self._version_text = ""
     self._home_logo = gui_app.texture("../../sunnypilot/selfdrive/assets/logo.png", 220, 220)
-    self._home_banner = gui_app.texture("../../sunnypilot/selfdrive/assets/home_banner.png", 800, 292)
     self._prev_update_available = False
     self._prev_alerts_present = False
 
@@ -183,10 +182,10 @@ class HomeLayout(Widget):
     gui_label(version_rect, self._version_text, 48, rl.WHITE, alignment=TextAlignment.RIGHT)
 
   def _render_home_content(self):
-    # Display banner + logo + welcome text centered in content area (3xl style)
+    # Display logo and welcome text centered in the content area.
     font = gui_app.font(FontWeight.BOLD)
     tag_font = gui_app.font(FontWeight.NORMAL)
-    text = "Welcome to MR.ONE"
+    text = "Welcome to Openpilot"
     tagline = "Drive smarter. Arrive safer."
     # 3xl used 100/54; c3xl-dev adds 1.3x CJK scale, so divide by 1.3 to match
     # title enlarged 1.3x on user request: 77 -> 100
@@ -196,18 +195,15 @@ class HomeLayout(Widget):
     text_size = measure_text_cached(font, text, font_size)
     tag_size = measure_text_cached(tag_font, tagline, tag_font_size)
 
-    banner_w = self._home_banner.width
-    banner_h = self._home_banner.height
     logo_w = self._home_logo.width
     logo_h = self._home_logo.height
-    gap_b = 40  # banner -> logo
     gap1 = 50   # logo -> title
     gap2 = 24   # title -> tagline
 
     cx = self.content_rect.x + self.content_rect.width / 2
     cy = self.content_rect.y + self.content_rect.height / 2
 
-    total_h = logo_h + gap1 + text_size.y + gap2 + tag_size.y + gap_b + banner_h
+    total_h = logo_h + gap1 + text_size.y + gap2 + tag_size.y
     start_y = int(cy - total_h / 2)
 
     # Logo
@@ -220,10 +216,6 @@ class HomeLayout(Widget):
     # Tagline
     tag_y = int(title_y + text_size.y + gap2)
     rl.draw_text_ex(tag_font, tagline, rl.Vector2(int(cx - tag_size.x / 2), tag_y), tag_font_size, 0, rl.Color(150, 150, 150, 255))
-
-    # Banner (bottom)
-    banner_y = int(tag_y + tag_size.y + gap_b)
-    rl.draw_texture_ex(self._home_banner, rl.Vector2(int(cx - banner_w / 2), banner_y), 0, 1.0, rl.WHITE)
 
   def _render_update_view(self):
     self.update_alert.render(self.content_rect)

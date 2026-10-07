@@ -18,6 +18,7 @@ INTEGRATION_PATHS = {
     "openpilot/common/tests/test_usbgpu_bus_lock.py",
     "openpilot/system/manager/process_config.py",
     "openpilot/system/updated/updated.py",
+    "openpilot/selfdrive/ui/layouts/home.py",
     "openpilot/system/loggerd/SConscript",
     "openpilot/system/loggerd/encoder/cluster_h264_encoder.cc",
     "openpilot/system/loggerd/encoder/cluster_h264_encoder.h",
@@ -30,6 +31,30 @@ INTEGRATION_PATHS = {
 
 
 class BaselineIntegrationTests(unittest.TestCase):
+    def test_home_welcome_without_wechat_banner(self):
+        path = ROOT / "openpilot" / "selfdrive" / "ui" / "layouts" / "home.py"
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "HomeLayout")
+        render = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == "_render_home_content")
+        rl = Mock()
+        rl.Vector2.side_effect = lambda x, y: SimpleNamespace(x=x, y=y)
+        namespace = {
+            "rl": rl, "gui_app": Mock(), "FontWeight": SimpleNamespace(BOLD=1, NORMAL=2),
+            "measure_text_cached": lambda font, text, size: SimpleNamespace(x=len(text) * size / 2, y=size),
+        }
+        exec(compile(ast.Module(body=[render], type_ignores=[]), str(path), "exec"), namespace)
+        logo = SimpleNamespace(width=220, height=220)
+        home = SimpleNamespace(_home_logo=logo, content_rect=SimpleNamespace(x=0, y=0, width=1920, height=800))
+        namespace["_render_home_content"](home)
+        self.assertNotIn("_home_banner", source)
+        self.assertNotIn("Welcome to MR.ONE", source)
+        self.assertEqual(rl.draw_texture_ex.call_count, 1)
+        self.assertIs(rl.draw_texture_ex.call_args.args[0], logo)
+        self.assertEqual(rl.draw_text_ex.call_args_list[0].args[1], "Welcome to Openpilot")
+        self.assertEqual(rl.draw_text_ex.call_args_list[1].args[1], "Drive smarter. Arrive safer.")
+        self.assertEqual(rl.draw_texture_ex.call_args.args[1].y, 182)
+
     def test_updater_only_adds_missing_time_import(self):
         path = "openpilot/system/updated/updated.py"
         upstream = subprocess.run(
