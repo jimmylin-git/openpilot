@@ -35,6 +35,9 @@ backpressure handling are retained. Host tests do not certify the C3XL GPU,
 native H264 encoder, display or full upstream build; parked-device validation
 is required before driving.
 
+The top-row ACC `speed_limit.png` icon preserves the original asset aspect
+ratio, using the same height and bottom alignment as the other status icons.
+
 The pinned upstream model SConscript references
 `tinygrad_repo/examples/openpilot/compile_onnx.py` and `compile_warp.py`, but
 neither script exists in that revision. This branch deliberately does not

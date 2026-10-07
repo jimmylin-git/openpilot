@@ -308,6 +308,25 @@ class StatusLabelTests(unittest.TestCase):
             self.assertEqual(args[2], self.ns["TOP_STATUS_DETAIL_CENTER_Y"])
             self.assertEqual(args[3], self.ns["TOP_STATUS_LABEL_FONT_SIZE"])
 
+    def test_acc_icon_preserves_asset_ratio_at_shared_height(self):
+        import struct
+        header = (CLUSTER_DIR / "assets" / "speed_limit.png").read_bytes()[:24]
+        width, height = struct.unpack(">II", header[16:24])
+        self.hud._acc_status_texture = SimpleNamespace(width=width, height=height)
+        self.hud._b_gear_standby = Mock(return_value=False)
+        self.hud._top_row_tint = Mock(return_value=(0, 255, 0))
+        self.hud._cruise_set_speed_text = Mock(return_value="100")
+        self.hud._cruise_set_color = Mock(return_value=(0, 255, 0))
+        self.hud._draw_bottom_aligned_texture_icon = Mock(return_value=True)
+        self.hud._draw_acc_status_icon(SimpleNamespace())
+        args = self.hud._draw_bottom_aligned_texture_icon.call_args.args
+        self.assertNotEqual(width, height)
+        self.assertAlmostEqual(args[3] / args[4], width / height)
+        self.assertEqual(args[4], self.ns["LFA_STATUS_ICON_SIZE"])
+        self.assertEqual(args[1], self.ns["ACC_STATUS_CENTER_X"])
+        self.assertEqual(args[2], self.ns["TURN_SIGNAL_CENTER_Y"] + args[4] * 0.5)
+        self.assertEqual(self.hud._draw_text.call_args.args[2], self.ns["TOP_STATUS_DETAIL_CENTER_Y"])
+
     def test_lfa_alignment_and_transition_clearance(self):
         self.hud._lfa_texture = object()
         self.hud._top_row_tint = Mock(return_value=(0, 255, 0))
