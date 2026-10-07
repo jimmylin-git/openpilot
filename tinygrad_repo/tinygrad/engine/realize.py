@@ -198,6 +198,15 @@ def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   return [get_graph_runtime(ast, ctx.input_uops)(ctx.input_uops, ctx.var_vals, wait=ctx.wait)]
 
 def exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
+  usb_devs = [Device[d] for d in call.arg.aux.device if getattr(Device[d], "is_usb", False)]
+  if not usb_devs: return _exec_hcq(ctx, call, ast)
+  from tinygrad.runtime.support.usb import usb_execution, libusb
+  resolved = resolve_params(call, ctx.input_uops)
+  transfer_slots = {u.arg.slot for u in ast.toposort() if u.op is Ops.PARAM and (u.arg.name or "").startswith("usb_xfer")}
+  transfers = [libusb.struct_libusb_transfer.from_address(cast(Buffer, resolved[i].buffer).host.addr) for i in sorted(transfer_slots)]
+  with usb_execution(usb_devs, transfers): return _exec_hcq(ctx, call, ast)
+
+def _exec_hcq(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
   if (info:=call.arg.aux).inputs:
     addrs = [cast(Buffer, _resolve(u, ctx.input_uops).buffer).get_buf(dev) + off for u, dev, off in info.inputs]
     cast(Buffer, call.src[1 + info.table].buffer).host.view(fmt='Q')[:] = array.array('Q', addrs)
