@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -19,6 +20,7 @@ INTEGRATION_PATHS = {
     "openpilot/system/manager/process_config.py",
     "openpilot/system/updated/updated.py",
     "openpilot/selfdrive/ui/layouts/home.py",
+    "openpilot/selfdrive/ui/translations/languages.json",
     "openpilot/system/loggerd/SConscript",
     "openpilot/system/loggerd/encoder/cluster_h264_encoder.cc",
     "openpilot/system/loggerd/encoder/cluster_h264_encoder.h",
@@ -31,6 +33,24 @@ INTEGRATION_PATHS = {
 
 
 class BaselineIntegrationTests(unittest.TestCase):
+    def test_language_menu_only_offers_english(self):
+        languages = ROOT / "openpilot" / "selfdrive" / "ui" / "translations" / "languages.json"
+        self.assertEqual(json.loads(languages.read_text(encoding="utf-8")), {"English": "en"})
+        path = ROOT / "openpilot" / "system" / "ui" / "lib" / "multilang.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Multilang")
+        load = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == "_load_languages")
+        namespace = {"LANGUAGES_FILE": languages, "json": json}
+        exec(compile(ast.Module(body=[load], type_ignores=[]), str(path), "exec"), namespace)
+        for saved_language in ("en", "zh-CHS", "main_zh-CHS"):
+            with self.subTest(saved_language=saved_language):
+                params = Mock()
+                params.get.return_value = saved_language
+                multilang = SimpleNamespace(_params=params, _language="en")
+                namespace["_load_languages"](multilang)
+                self.assertEqual(multilang.languages, {"English": "en"})
+                self.assertEqual(multilang._language, "en")
+
     def test_home_welcome_without_wechat_banner(self):
         path = ROOT / "openpilot" / "selfdrive" / "ui" / "layouts" / "home.py"
         source = path.read_text(encoding="utf-8")

@@ -17,7 +17,7 @@ serialization and its tests. The USB coordination touches tinygrad
 Cluster transfers cannot overlap GPU transfers; those files are therefore not
 byte-identical to upstream. The GPU ownership flock, pickle loader, model
 adapters, compilers, catalogs, model assets, driver monitoring, car/Panda code
-and main UI (except the requested homepage override below) remain upstream originals. No previous custom model protections,
+and main UI (except the requested homepage and language-menu overrides below) remain upstream originals. No previous custom model protections,
 model defaults or vehicle/UI changes are carried onto this branch.
 
 One verified upstream bug is also corrected: `system/updated/updated.py`
@@ -28,6 +28,10 @@ updater behavior is changed.
 The requested home-screen branding override changes the title to
 `Welcome to Openpilot` and removes the WeChat banner from loading/rendering.
 The existing logo and tagline remain; the remaining content is centered.
+
+The language menu only offers English; the Simplified Chinese option is removed.
+Existing Simplified Chinese selections use the upstream English fallback on UI
+startup. Translation files are retained.
 
 Onroad rendering defaults to 20 FPS and offroad to 1 FPS. The existing Cluster
 brightness controls, model/status labels, departure reminder and USB
