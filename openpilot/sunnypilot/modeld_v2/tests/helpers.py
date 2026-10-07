@@ -169,7 +169,7 @@ def make_pkl_data(archetype):
 
 
 def write_pkl(tmp_path, archetype):
-  from openpilot.selfdrive.modeld.helpers import dump_oob
+  from openpilot.sunnypilot.modeld_v2.helpers import dump_oob
   pkl_path = tmp_path / 'driving_test_tinygrad.pkl'
   with open(pkl_path, 'wb') as f:
     dump_oob(make_pkl_data(archetype), f)

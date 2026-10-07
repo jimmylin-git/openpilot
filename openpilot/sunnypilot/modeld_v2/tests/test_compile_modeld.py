@@ -280,5 +280,3 @@ class TestStockCompileModeldEquivalence(OpenpilotTestCase):
     assert set(sunny_npy.keys()) == set(stock_npy.keys()) == {'tfm', 'big_tfm'}
     for key in sunny_npy:
       assert sunny_npy[key].shape == stock_npy[key].shape == (3, 3)
-
-

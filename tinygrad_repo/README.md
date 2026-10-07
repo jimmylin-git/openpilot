@@ -23,23 +23,46 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 ## Vendored runtime in this openpilot fork
 
-This checkout applies the upstream delta from
-`e837e367aac9e1a66e689f4f32ce20ca9367df13` to
-`f6fc4e3f2c3db5fae1e19cbfbc3ad9fc579a12ae`, the tinygrad revision used by
-sunnypilot master at `a5f44653d7f43ad57fef2f546f3916ec4cbf3c56`.
-It retains this fork's shared Chestnut/Cluster USB transfer lock and
-`CallInfo.dtype` pickle compatibility patch. The generated specification PDF
-is not updated; its source is.
+This checkout integrates the `fe5d3169ba4f41d0947ad174925f413cbea9d056`
+runtime baseline from MR.ONE's `8d0bf5ee0a` update, superseding the earlier
+official-master `f6fc4e3f2c` trial. It retains this fork's shared
+Chestnut/Cluster USB transfer lock in both Python and compiled transfers.
+`CallInfo.dtype` is now supported natively, and empty rewrite timing
+collections are handled. The generated specification PDF is not updated.
 
 This is a runtime compatibility trial, not a confirmed fix for model NaN,
-GPU hangs or USB disconnects. The V25 model catalog and model execution guards
-are unchanged. Host tests do not validate Chestnut hardware or all downloaded
-model artifacts. Validate on the device while parked before using a different
-model onroad.
+GPU hangs or USB disconnects. The accompanying model stack uses V23 small
+and V27 Chestnut catalogs, with native, legacy separate-warp and unified
+`run_model` adapters. Tee Time remains the Chestnut default. The V27 catalog
+advertises `9cd40014f651ac2472b3b5fc3b12178ab4bb1c66`, not this runtime SHA;
+do not assume every downloaded model is compatible.
 
-To roll back, use `git revert <trial-commit>` from the openpilot repository,
-where `<trial-commit>` is the commit titled
-`tinygrad: trial official f6fc runtime with custom USB fixes`.
+The loader uses standard pickle constructors rather than dropping unknown
+arguments or modifying flock lifecycle. Host tests verify adapter contracts,
+changing-input JIT replay, bundled warp deserialization and mocked telemetry;
+they do not validate AMD/QCOM execution or cross-process compiled USB locking.
+Compiled USB execution uses the reentrant Python bus lock, with final async
+transfers drained before release. Lock acquisition errors stop execution.
+If libusb cancellation never completes, cleanup retains the lock and reports
+the failure rather than allowing overlapping transfers; a device restart may
+be necessary. Upstream synchronous compiled transfer return-code handling
+is unchanged.
+Validate on the device while parked before using a different model onroad.
+Retain small-model fallback, startup retries and nonfinite-output protection.
+Changed catalog artifact hashes can require model downloads even when the
+model name/ref is unchanged.
+
+The upstream unused compiler wrapper targeting the absent
+`examples/openpilot/compile_onnx.py` is not imported. The existing
+`compile_modeld.py` compiler remains the supported local entry point.
+The unrelated upstream TinyFS test/tools are excluded: that test imports
+`CHUNK_SIZE`, which is absent from this runtime baseline's helpers.
+
+To roll back this integration, use `git revert <integration-commit>` from
+the openpilot repository, where `<integration-commit>` is the commit titled
+`models: integrate MR.ONE native stack and fe5 Chestnut runtime`.
+This restores the preceding f6fc runtime and V25 catalog selection; the
+model manager may need to fetch the matching old artifacts.
 Do not reset the branch: a revert preserves subsequent changes and history.
 
 ---

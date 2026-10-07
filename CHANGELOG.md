@@ -1,6 +1,12 @@
 sunnypilot Version MR.ONE-2026 (2026-10-07; upstream updates selectively synced through 2026-09-28)
 ========================
 * MR.ONE Custom Features
+  * tinygrad: integrate MR.ONE fe5d3169b runtime, native CallInfo.dtype and empty timing handling; retain shared USB locking for synchronous, async and compiled transfer paths and legacy Chestnut telemetry API
+  * USB: acquire the shared reentrant lock at compiled HCQ execution, abort on lock acquisition errors and drain/cancel async transfers before releasing; real-device cancellation and transfer behavior remain unverified
+  * models: selectively integrate MR.ONE 2026-10-07 compiler/adapters, bundled native warp artifacts and V23 small/V27 Chestnut catalogs; retain Tee Time as Chestnut default, legacy QCOM warp and unified run_model support
+  * modeld: retain delayed Chestnut discovery, transient startup retries, small-model fallback and nonfinite-output protection; clear recurrent history after warmup and preserve live host control buffers for legacy Chestnut models
+  * model pickle loading: validate truncated out-of-band streams and recurrent state specs; use standard unpickling instead of silently dropping constructor arguments or patching flock lifecycle
+  * integration validation: host adapter/JIT/pickle and Cluster tests do not certify C3XL GPU execution; V27 catalog pin differs from MR.ONE runtime baseline, so other Chestnut models remain unverified until parked-device testing
   * tinygrad: trial the official master runtime baseline f6fc4e3f2c, retaining the Cluster/Chestnut shared USB lock and CallInfo.dtype compatibility patch; keep the V25 model catalog, model loader and safety checks unchanged; device/model compatibility remains unverified
   * tinygrad rollback: revert the isolated "tinygrad: trial official f6fc runtime with custom USB fixes" commit to restore the runtime used at ea569fee38; no model redownload is required by this update
   * cluster: replace the predicted-path READY TO GO trigger with a confirmed close lead moving away; require 1 second of lead arming, over 1 m departure and over 0.3 second confirmation, retaining ACC-off gating and the 3-second visual-only reminder

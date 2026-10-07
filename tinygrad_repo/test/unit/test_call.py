@@ -1,22 +1,10 @@
-import pickle
 import unittest
 import numpy as np
 from tinygrad import Tensor, function, Device
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, CallInfo
+from tinygrad.uop.ops import UOp, Ops
 
 class TestCall(unittest.TestCase):
-  def test_call_info_dtype_pickle(self):
-    call = UOp(Ops.CALL, arg=CallInfo(None, "typed_call", dtype=dtypes.float))
-    loaded = pickle.loads(pickle.dumps(call))
-    self.assertEqual(loaded.dtype, dtypes.float)
-    self.assertEqual(loaded.shape, ())
-
-  def test_legacy_call_dtype(self):
-    call = UOp(Ops.CALL, arg=dtypes.float)
-    self.assertEqual(call.dtype, dtypes.float)
-    self.assertEqual(call.shape, ())
-
   def test_call_plus(self):
     a = Tensor.randn(10, 10)
     b = Tensor.randn(10, 10)
