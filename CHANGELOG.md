@@ -1,6 +1,9 @@
-sunnypilot Version MR.ONE-2026 (2026-10-07; upstream updates selectively synced through 2026-09-28)
+sunnypilot Version MR.ONE-2026 (2026-10-07; model/Chestnut updates selectively synced through 2026-10-07)
 ========================
 * MR.ONE Custom Features
+  * sync provenance: rechecked MR.ONE c3xl-dev on 2026-10-07 (UTC+8); upstream HEAD 330d3f634d34bc3055d2a3141268836fc8220208, committed 2026-10-07 19:55:49 +0800; no newer upstream commit at this check
+  * sync scope: model/runtime/catalog integration a2ec8a5451 and pickle/monitoring/stock migration 63eabac13e; selective integration, not a full branch merge; unrelated vehicle/safety/Panda and UI changes are not claimed as synchronized
+  * retained differences: Cluster USB serialization, Tee Time default, selector startup retries and legacy/native adapters, explicit error handling and legacy prebuilt driver-monitoring support; existing offroad/touch shutdown behavior remains unchanged
   * tinygrad: integrate MR.ONE fe5d3169b runtime, native CallInfo.dtype and empty timing handling; retain shared USB locking for synchronous, async and compiled transfer paths
   * USB: acquire the shared reentrant lock at compiled HCQ execution, abort on lock acquisition errors and drain/cancel async transfers before releasing; real-device cancellation and transfer behavior remain unverified
   * models: selectively integrate MR.ONE 2026-10-07 compiler/adapters, bundled native warp artifacts and V23 small/V27 Chestnut catalogs; retain Tee Time as Chestnut default, legacy QCOM warp and unified run_model support

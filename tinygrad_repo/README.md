@@ -23,6 +23,32 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 ## Vendored runtime in this openpilot fork
 
+### Synchronization reference
+
+Last upstream comparison: **2026-10-07 (UTC+8)** against
+[MR.ONE c3xl-dev](https://jihulab.com/mr-one/openpilot/-/tree/c3xl-dev),
+HEAD `330d3f634d34bc3055d2a3141268836fc8220208`
+(commit time: 2026-10-07 19:55:49 +0800). This was still the online HEAD
+when rechecked after the migration.
+
+The model/runtime/catalog integration is `a2ec8a5451`; the pickle,
+Chestnut monitoring and stock/driver-monitoring migration is `63eabac13e`.
+This is a **selective synchronization**, not a full merge of that branch.
+The cereal telemetry schema/services, bundled selector warps and stock
+model assets match that upstream revision. Core tinygrad source differs
+only in `engine/realize.py` and `runtime/support/usb.py` for our USB
+serialization/transfer cleanup.
+
+Intentional differences include the shared Cluster bus lock, Tee Time
+default (upstream: Cinque Terre Model v2), selector versions 19/20
+(upstream: 20), delayed selector startup/retries, explicit pickle/monitoring
+errors, legacy stock/prebuilt support and local compiler entry points.
+Existing Cluster/UI and offroad/touch shutdown customization is retained.
+Other upstream vehicle/safety/Panda firmware, temperature-status UI and
+general platform changes are outside this model migration's scope.
+Unrelated tinygrad examples/tools/tests can also differ; the core runtime
+comparison is not a claim that the entire vendored tree is identical.
+
 This checkout integrates the `fe5d3169ba4f41d0947ad174925f413cbea9d056`
 runtime baseline from MR.ONE's `8d0bf5ee0a` update, superseding the earlier
 official-master `f6fc4e3f2c` trial. It retains this fork's shared
