@@ -138,8 +138,8 @@ class ModelCache:
 
 class ModelFetcher:
   """Handles fetching and caching of model data from remote source"""
-  MODEL_URL = "https://raw.githubusercontent.com/sunnypilot/sunnypilot-models/refs/heads/gh-pages/docs/driving_models_v23.json"
-  MODEL_URL_CHESTNUT = "https://raw.githubusercontent.com/sunnypilot/sunnypilot-models/refs/heads/gh-pages/docs/driving_models_chestnut_v27.json"
+  MODEL_URL = "https://raw.githubusercontent.com/sunnypilot/sunnypilot-models/refs/heads/gh-pages/docs/driving_models_v22.json"
+  MODEL_URL_CHESTNUT = "https://raw.githubusercontent.com/sunnypilot/sunnypilot-models/refs/heads/gh-pages/docs/driving_models_chestnut_v25.json"
 
   MODEL_SOURCES = {
     "qcom": (MODEL_URL, ""),
@@ -161,7 +161,7 @@ class ModelFetcher:
     }
     stored_active = self.params.get("ModelManager_ActiveJson")
     if stored_active != current_active:
-      for _, suffix in self.MODEL_SOURCES.values():
+      for source, (_, suffix) in self.MODEL_SOURCES.items():
         self.params.remove(f"ModelManager_LastSyncTime{suffix}")
         self.params.remove(f"ModelManager_ModelsCache{suffix}")
       if isinstance(stored_active, dict) and stored_active.get("chestnut") and stored_active["chestnut"] != current_active["chestnut"]:

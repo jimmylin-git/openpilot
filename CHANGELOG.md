@@ -1,18 +1,6 @@
-sunnypilot Version MR.ONE-2026 (2026-10-07; model/Chestnut updates selectively synced through 2026-10-07)
+sunnypilot Version MR.ONE-2026 (2026-10-07; upstream updates selectively synced through 2026-09-28)
 ========================
 * MR.ONE Custom Features
-  * sync provenance: rechecked MR.ONE c3xl-dev on 2026-10-07 (UTC+8); upstream HEAD 330d3f634d34bc3055d2a3141268836fc8220208, committed 2026-10-07 19:55:49 +0800; no newer upstream commit at this check
-  * sync scope: model/runtime/catalog integration a2ec8a5451 and pickle/monitoring/stock migration 63eabac13e; selective integration, not a full branch merge; unrelated vehicle/safety/Panda and UI changes are not claimed as synchronized
-  * retained differences: Cluster USB serialization, Tee Time default, selector startup retries and legacy/native adapters, explicit error handling and legacy prebuilt driver-monitoring support; existing offroad/touch shutdown behavior remains unchanged
-  * tinygrad: integrate MR.ONE fe5d3169b runtime, native CallInfo.dtype and empty timing handling; retain shared USB locking for synchronous, async and compiled transfer paths
-  * USB: acquire the shared reentrant lock at compiled HCQ execution, abort on lock acquisition errors and drain/cancel async transfers before releasing; real-device cancellation and transfer behavior remain unverified
-  * models: selectively integrate MR.ONE 2026-10-07 compiler/adapters, bundled native warp artifacts and V23 small/V27 Chestnut catalogs; retain Tee Time as Chestnut default, legacy QCOM warp and unified run_model support
-  * modeld: retain delayed Chestnut discovery, transient startup retries, small-model fallback and nonfinite-output protection; clear recurrent history after warmup and preserve live host control buffers for legacy Chestnut models
-  * model pickle loading: adopt MR.ONE dynamic tinygrad constructor compatibility with logged adjustments and internal TypeError protection; cache device flocks with independently owned descriptors; retain truncated-stream and recurrent-state validation
-  * Chestnut monitoring: split modeld GPU metrics (chestnutGpuState) from hardwared supply/PCIe monitoring; merge into chestnutState for existing UI/Cluster consumers, retaining shared USB locking, explicit failures and reconnection
-  * stock/driver monitoring: embed metadata and input/output specs in native OOB artifacts; refresh driver calibration per frame; replace absent upstream compiler entry points with a local compiler and preserve unified history queues for existing stock ONNX sources; rebuild model/warp artifacts together
-  * driver monitoring: use separate native artifact names and retain explicitly logged legacy loading for existing prebuilt installs; malformed native artifacts do not silently fall back
-  * integration validation: host adapter/JIT/pickle and Cluster tests do not certify C3XL GPU execution; V27 catalog pin differs from MR.ONE runtime baseline, so other Chestnut models remain unverified until parked-device testing
   * tinygrad: trial the official master runtime baseline f6fc4e3f2c, retaining the Cluster/Chestnut shared USB lock and CallInfo.dtype compatibility patch; keep the V25 model catalog, model loader and safety checks unchanged; device/model compatibility remains unverified
   * tinygrad rollback: revert the isolated "tinygrad: trial official f6fc runtime with custom USB fixes" commit to restore the runtime used at ea569fee38; no model redownload is required by this update
   * cluster: replace the predicted-path READY TO GO trigger with a confirmed close lead moving away; require 1 second of lead arming, over 1 m departure and over 0.3 second confirmation, retaining ACC-off gating and the 3-second visual-only reminder

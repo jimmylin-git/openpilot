@@ -272,8 +272,6 @@ const canvasDims = () => {
   return [Math.round(document.querySelector("#profiler").clientWidth-sideRect.width), Math.round(sideRect.height)];
 }
 
-new ResizeObserver(([e]) => e.contentRect.width > 0 && e.target.dispatchEvent(new Event("resize"))).observe(document.getElementById("profiler"));
-
 function selectShape(key) {
   if (key == null) return {};
   const [t, idx] = key.split("-");
@@ -338,7 +336,7 @@ function setFocus(key) {
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     const tableData = [["Name", colored(e.arg.label)], ["Duration", formatTime(e.width)]];
-    if (data.tracks.get("Shader Clock") != null) {
+    if (data.instSt != null) {
       const p = d3.create("p");
       p.append("span").text(timeAtCycle(e.x));
       p.append("span").style("margin-left", "8px").style("color", "#f0f0f566").text(formatTime(e.x));
@@ -425,7 +423,7 @@ async function renderProfiler(path, opts) {
   for (const [k,v] of Object.entries(extData)) data[k] = v;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
-  const secondaryTick = data.tracks.get("Shader Clock") != null ? timeAtCycle : null;
+  const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
   const axisHeight = secondaryTick != null ? tickSize*2+(padding*2) : tickSize;
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", axisHeight+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
@@ -592,7 +590,7 @@ async function renderProfiler(path, opts) {
   if (data.pcMap != null) setFocus(focusedShape);
   // secondary axis mapping
   let instRange = null;
-  for (const [k, { shapes }] of data.tracks) if (k !== "Shader Clock" && path.includes("sqtt")) {
+  for (const [k, { shapes }] of data.tracks) if (!k.includes("Clock") && path.includes("sqtt")) {
     const first = shapes[0].x, last = shapes.at(-1).x+shapes.at(-1).width;
     instRange = instRange == null ? [first, last] : [Math.min(first, instRange[0]), Math.max(last, instRange[1])];
   }
@@ -733,10 +731,9 @@ async function renderProfiler(path, opts) {
   let lastCanvasRect = null;
   function resize() {
     const [width, height] = canvasDims();
-    const pixelWidth = Math.trunc(width*dpr), pixelHeight = Math.trunc(height*dpr);
-    if (canvas.width === pixelWidth && canvas.height === pixelHeight) return;
-    canvas.width = pixelWidth;
-    canvas.height = pixelHeight;
+    if (canvas.width === width*dpr && canvas.height === height*dpr) return;
+    canvas.width = width*dpr;
+    canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
@@ -751,9 +748,9 @@ async function renderProfiler(path, opts) {
   zoomLevel = getZoomIdentity();
   canvasZoom = d3.zoom().filter(vizZoomFilter).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
-  profiler.on("contextmenu", e => e.ctrlKey && e.preventDefault());
+  document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
-  profiler.on("resize", (e) => resize()); resize();
+  new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
   profiler.on("scroll", () => render(zoomLevel));
 
   function findRectAtPosition(x, y) {
@@ -996,7 +993,10 @@ async function main() {
   if (!ckey.startsWith("/graph")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     // timeline with cycles on the x axis
-    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, {heightScale:0.5, hideLabels:true, colorByName:true});
+    if (ret instanceof ArrayBuffer) {
+      const pkts = step.query.includes("sqtt");
+      return renderProfiler(ckey, {unit:"clk", heightScale:0.5, hideLabels:true, colorByName:pkts});
+    }
     metadata.replaceChildren(...((ret.metadata ?? []).map((m) => {
       return tabulate(m.map((e) => [e.label.trim(), typeof e.value === "string" ? e.value : formatUnit(e.value)]));
     })));

@@ -1,3 +1,4 @@
+import pickle
 import unittest
 from tinygrad import TinyJit, Tensor
 
@@ -15,6 +16,18 @@ from tinygrad import TinyJit, Tensor
 # there's a whole bunch of edge cases and weirdness here that needs to be tested and clarified.
 
 class TestJitCases(unittest.TestCase):
+  def test_pickle_replay_with_changing_inputs(self):
+    @TinyJit
+    def f(x:Tensor):
+      return (x * 2 + 1).realize()
+
+    for i in range(3):
+      self.assertEqual(f(Tensor([i])).item(), i * 2 + 1)
+
+    loaded = pickle.loads(pickle.dumps(f))
+    for i in (4, 9, -3):
+      self.assertEqual(loaded(Tensor([i])).item(), i * 2 + 1)
+
   def test_explicit(self):
     # this function has an explicit input and an explicit output
     @TinyJit

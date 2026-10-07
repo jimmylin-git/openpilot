@@ -7,6 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 
 import os
 import tempfile
+import unittest
 from pathlib import Path
 
 import numpy as np
@@ -225,7 +226,7 @@ class Test4DFeaturesBuffer(OpenpilotTestCase):
 
 class TestStockCompileModeldEquivalence(OpenpilotTestCase):
   def test_get_policy_npy_shapes_matches_stock(self):
-    from openpilot.sunnypilot.modeld_v2.stock_dependencies import get_policy_npy_shapes as stock_get_policy_npy_shapes
+    from openpilot.selfdrive.modeld.compile_modeld import get_policy_npy_shapes as stock_get_policy_npy_shapes
     from openpilot.sunnypilot.modeld_v2.compile_modeld import get_policy_npy_shapes as sunny_get_policy_npy_shapes
 
     stock_input_shapes = {
@@ -243,7 +244,7 @@ class TestStockCompileModeldEquivalence(OpenpilotTestCase):
     assert sunny_shapes['prev_feat'] == (1, 512)
 
   def test_make_input_queues_full_stock_equivalence(self):
-    from openpilot.sunnypilot.modeld_v2.stock_dependencies import make_input_queues as stock_make_input_queues
+    from openpilot.selfdrive.modeld.compile_modeld import make_input_queues as stock_make_input_queues
     from openpilot.sunnypilot.modeld_v2.compile_modeld import make_supercombo_input_queues as sunny_make_supercombo_input_queues
     input_shapes = {
       'img': (1, 12, 128, 256),
@@ -267,3 +268,17 @@ class TestStockCompileModeldEquivalence(OpenpilotTestCase):
     for key in stock_npy:
       assert sunny_npy[key].shape == stock_npy[key].shape, \
         f"Numpy array shape mismatch for {key}: sunny {sunny_npy[key].shape} != stock {stock_npy[key].shape}"
+
+  @unittest.skip("upstream removed make_warp_input_queues — warp merged into run_model")
+  def test_make_warp_queues_stock_equivalence(self):
+    from openpilot.selfdrive.modeld.compile_modeld import make_warp_input_queues as stock_make_warp_queues
+    from openpilot.sunnypilot.modeld_v2.compile_modeld import make_warp_queues as sunny_make_warp_queues
+    stock_vision_shapes = {'img': (1, 12, 128, 256)}  # for now?
+    stock_queues, stock_npy = stock_make_warp_queues(stock_vision_shapes, frame_skip=4, device='NPY')
+    sunny_queues, sunny_npy = sunny_make_warp_queues(device='NPY')
+
+    assert set(sunny_npy.keys()) == set(stock_npy.keys()) == {'tfm', 'big_tfm'}
+    for key in sunny_npy:
+      assert sunny_npy[key].shape == stock_npy[key].shape == (3, 3)
+
+

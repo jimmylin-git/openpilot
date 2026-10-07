@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 import os
-import base64
-import json
-from openpilot.selfdrive.modeld.helpers import MODELS_DIR, load_oob, model_file_exists
-from openpilot.sunnypilot.modeld_v2.helpers import load_pickle
+from openpilot.selfdrive.modeld.helpers import MODELS_DIR, get_tg_input_devices
 from tinygrad.tensor import Tensor
 import time
 import pickle
@@ -21,8 +18,10 @@ from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.common.file_chunker import open_file_chunked
 from openpilot.selfdrive.modeld.parse_model_outputs import sigmoid, safe_exp
 
+PROCESS_NAME = "openpilot.selfdrive.modeld.dmonitoringmodeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
-MODEL_PKL_PATH = MODELS_DIR / 'dmonitoring_model_native.pkl'
+MODEL_PKL_PATH = MODELS_DIR / 'dmonitoring_model_tinygrad.pkl'
+METADATA_PATH = MODELS_DIR / 'dmonitoring_model_metadata.pkl'
 
 
 class ModelState:
@@ -30,25 +29,11 @@ class ModelState:
   output: np.ndarray
 
   def __init__(self, cam_w: int, cam_h: int):
-    self.native = model_file_exists(MODEL_PKL_PATH)
-    if self.native:
-      with open_file_chunked(MODEL_PKL_PATH) as stream:
-        jits = load_oob(stream)
-      self.DEV = jits['input_specs']['input_img'][2]
-      self.input_shapes = jits['metadata']['input_shapes']
-      self.output_slices = pickle.loads(base64.b64decode(jits['metadata']['metadata']['output_slices']))
-      self.model_run = jits['run']
-      self.outputs = {name: Tensor(np.zeros(shape, dtype=dtype), device=device).realize()
-                      for name, (shape, dtype, device) in jits['output_specs'].items()}
-    else:
-      cloudlog.warning("Native driver-monitoring artifact absent; using bundled legacy artifacts. Rebuild to migrate.")
-      with open(MODELS_DIR / 'tg_input_devices.json') as stream:
-        self.DEV = json.load(stream)['openpilot.selfdrive.modeld.dmonitoringmodeld']['default']['DEV']
-      with open(MODELS_DIR / 'dmonitoring_model_metadata.pkl', 'rb') as stream:
-        metadata = load_pickle(stream)
-      self.input_shapes, self.output_slices = metadata['input_shapes'], metadata['output_slices']
-      with open_file_chunked(MODELS_DIR / 'dmonitoring_model_tinygrad.pkl') as stream:
-        self.model_run = load_pickle(stream)
+    self.DEV = get_tg_input_devices(PROCESS_NAME, chestnut=False)['DEV']
+    with open(METADATA_PATH, 'rb') as f:
+      model_metadata = pickle.load(f)
+      self.input_shapes = model_metadata['input_shapes']
+      self.output_slices = model_metadata['output_slices']
 
     self.numpy_inputs = {
       'calib': np.zeros(self.input_shapes['calib'], dtype=np.float32),
@@ -57,20 +42,16 @@ class ModelState:
     self.warp_inputs_np = {'transform': np.zeros((3,3), dtype=np.float32)}
     self.warp_inputs = {k: Tensor(v, device='NPY') for k,v in self.warp_inputs_np.items()}
     self.frame_buf_params = get_nv12_info(cam_w, cam_h)
-    self.tensor_inputs = {k: Tensor(v, device=self.DEV if self.native else 'NPY').realize() for k,v in self.numpy_inputs.items()}
-    self.calib_host = Tensor(self.numpy_inputs['calib'], device='NPY')._buffer()
+    self.tensor_inputs = {k: Tensor(v, device='NPY').realize() for k,v in self.numpy_inputs.items()}
     self._blob_cache : dict[int, Tensor] = {}
-    warp_format = 'native' if self.native else 'tinygrad'
-    with open(MODELS_DIR / f'dm_warp_{cam_w}x{cam_h}_{warp_format}.pkl', "rb") as f:
-      warp = load_pickle(f)
-      self.image_warp = warp['run'] if self.native else warp
+    self.model_run = pickle.load(open_file_chunked(str(MODEL_PKL_PATH)))
+    with open(MODELS_DIR / f'dm_warp_{cam_w}x{cam_h}_tinygrad.pkl', "rb") as f:
+      self.image_warp = pickle.load(f)
 
   def run(self, buf: VisionBuf, calib: np.ndarray, transform: np.ndarray) -> tuple[np.ndarray, float]:
     self.numpy_inputs['calib'][0,:] = calib
 
     t1 = time.perf_counter()
-    if self.native:
-      self.tensor_inputs['calib']._buffer().copy_from(self.calib_host)
 
     ptr = np.frombuffer(buf.data, dtype=np.uint8).ctypes.data
     # There is a ringbuffer of imgs, just cache tensors pointing to all of them
@@ -78,14 +59,9 @@ class ModelState:
       self._blob_cache[ptr] = Tensor.from_blob(ptr, (self.frame_buf_params[3],), dtype='uint8', device=self.DEV)
 
     self.warp_inputs_np['transform'][:] = transform[:]
-    if self.native:
-      self.tensor_inputs['input_img'] = self.image_warp(input_frame=self._blob_cache[ptr], M_inv=self.warp_inputs['transform'])
-      self.model_run(output_buffers=self.outputs, **self.tensor_inputs)
-      result = self.outputs['outputs']
-    else:
-      self.tensor_inputs['input_img'] = self.image_warp(self._blob_cache[ptr], self.warp_inputs['transform'])
-      result = self.model_run(**self.tensor_inputs)
-    output = result.numpy().astype(np.float32).reshape(-1)
+    self.tensor_inputs['input_img'] = self.image_warp(self._blob_cache[ptr], self.warp_inputs['transform'])
+
+    output = self.model_run(**self.tensor_inputs).numpy().flatten()
 
     t2 = time.perf_counter()
     return output, t2 - t1
