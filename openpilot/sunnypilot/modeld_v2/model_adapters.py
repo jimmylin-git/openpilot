@@ -8,6 +8,7 @@ import codecs
 import math
 from pathlib import Path
 import pickle
+from openpilot.sunnypilot.modeld_v2.helpers import load_pickle
 import numpy as np
 
 from openpilot.common.basedir import BASEDIR
@@ -64,19 +65,20 @@ class BaseModelAdapter:
 
   def _load_warp(self):
     if (self.cam_w, self.cam_h) in self.jits:
-      self.warp_frame_size = self.nv12_info[3]
-      return self.jits[(self.cam_w, self.cam_h)]
-
-    warp_dir = Path(BASEDIR) / "openpilot/sunnypilot/modeld_v2/models"
-    warp_name = f'{"big_" if self.chestnut else ""}driving_warp_{self.cam_w}x{self.cam_h}_tinygrad.pkl'
-    with open(warp_dir / warp_name, 'rb') as f:
-      warp_data = pickle.load(f)
-      run_warp = warp_data['run']
-      if 'input_specs' in warp_data and 'input_frame' in warp_data['input_specs']:
-        self.warp_frame_size = warp_data['input_specs']['input_frame'][0][1]
-      else:
-        self.warp_frame_size = self.nv12_info[3] if self.chestnut else self.frame_copy_size
-      return run_warp
+      warp_data = self.jits[(self.cam_w, self.cam_h)]
+      if not isinstance(warp_data, dict):
+        self.warp_frame_size = self.nv12_info[3]
+        return warp_data
+    else:
+      warp_dir = Path(BASEDIR) / "openpilot/sunnypilot/modeld_v2/models"
+      warp_name = f'{"big_" if self.chestnut else ""}driving_warp_{self.cam_w}x{self.cam_h}_tinygrad.pkl'
+      with open(warp_dir / warp_name, 'rb') as f:
+        warp_data = load_pickle(f)
+    if 'input_specs' in warp_data and 'input_frame' in warp_data['input_specs']:
+      self.warp_frame_size = warp_data['input_specs']['input_frame'][0][1]
+    else:
+      self.warp_frame_size = self.nv12_info[3] if self.chestnut else self.frame_copy_size
+    return warp_data['run']
 
 
 class LegacyModelAdapter(BaseModelAdapter):
@@ -194,7 +196,8 @@ class NativeTinygradAdapter(BaseModelAdapter):
     self.frame_copy_size = stride * (y_height + uv_height)
 
     self.input_shapes_orig = self.jits['metadata']['input_shapes']
-    self._vision_input_names = [k for k in self.input_shapes_orig if 'img' in k]
+    # Native new_img combines the two camera frames in one model input.
+    self._vision_input_names = ['img', 'big_img']
     self.vision_output_slices = pickle.loads(codecs.decode(self.jits['metadata']['metadata']['output_slices'].encode(), 'base64'))
 
     self.run_warp = self._load_warp()

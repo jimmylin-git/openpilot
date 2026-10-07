@@ -37,9 +37,16 @@ and V27 Chestnut catalogs, with native, legacy separate-warp and unified
 advertises `9cd40014f651ac2472b3b5fc3b12178ab4bb1c66`, not this runtime SHA;
 do not assume every downloaded model is compatible.
 
-The loader uses standard pickle constructors rather than dropping unknown
-arguments or modifying flock lifecycle. Host tests verify adapter contracts,
-changing-input JIT replay, bundled warp deserialization and mocked telemetry;
+The shared model loader now adopts MR.ONE's dynamic tinygrad constructor
+compatibility strategy. Constructor argument count adjustments are logged;
+TypeError raised inside a correctly bound constructor is not suppressed.
+Enums and functions retain their original definitions. System device flocks
+are cached per process/name, with a separate duplicated descriptor owned by
+each caller and inherited cache descriptors discarded after fork.
+This device-ownership lock is separate from the Cluster USB bus lock.
+Host tests verify adapter contracts, actual miniature ONNX compilation and
+changing-input replay after serialization, bundled warp deserialization and
+mocked telemetry/reconnection;
 they do not validate AMD/QCOM execution or cross-process compiled USB locking.
 Compiled USB execution uses the reentrant Python bus lock, with final async
 transfers drained before release. Lock acquisition errors stop execution.
@@ -52,13 +59,38 @@ Retain small-model fallback, startup retries and nonfinite-output protection.
 Changed catalog artifact hashes can require model downloads even when the
 model name/ref is unchanged.
 
-The upstream unused compiler wrapper targeting the absent
-`examples/openpilot/compile_onnx.py` is not imported. The existing
-`compile_modeld.py` compiler remains the supported local entry point.
+Stock driving and driver monitoring use the local
+`openpilot/selfdrive/modeld/compile_native.py` build entry point, because
+MR.ONE's recipe references absent `examples/openpilot/compile_onnx.py` and
+`compile_warp.py` scripts. Native models carry input/output specs and metadata
+in their OOB artifact. Existing stock ONNX inputs (`img`, `big_img` and history
+queues) still compile as unified `run_model` artifacts and use the matching
+adapter, rather than being treated as native `new_img` inputs.
+Driver monitoring embeds its metadata and explicitly refreshes calibration
+inputs on every frame. Stock model/warp artifacts must be rebuilt together.
+New driver-monitoring model/warp targets use `_native.pkl` names, leaving the
+tracked old artifacts intact. When the native model is absent, the loader
+explicitly logs its use of the bundled legacy model, metadata and warp pair;
+a malformed native artifact fails rather than silently falling back.
+SCons tracks the compiler, shared helpers, source chunks and compile flags.
+`SKIP_TINYGRAD_COMPILE` still skips driving builds, not driver monitoring.
+The bundled big stock model and its warps are built only when its ONNX source is present;
+missing stock sources are reported and do not change selected downloaded
+models. The selector compiler remains `sunnypilot/modeld_v2/compile_modeld.py`.
+
+Modeld publishes GPU-context metrics as `chestnutGpuState`. Hardwared monitors
+the supply and PCIe link even offroad, merging current GPU telemetry into the
+existing `chestnutState` service used by the UI and Cluster. USB handle open,
+reads and close share the Cluster bus lock. Failed reads are logged and trigger
+reconnection; stale GPU telemetry invalidates the combined message after the
+GPU publisher has been seen.
 The unrelated upstream TinyFS test/tools are excluded: that test imports
 `CHUNK_SIZE`, which is absent from this runtime baseline's helpers.
 
-To roll back this integration, use `git revert <integration-commit>` from
+To roll back the stock/monitoring migration, first revert the commit titled
+`models: migrate pickle compatibility, Chestnut monitoring and stock pipelines`
+and rebuild stock/driver-monitoring artifacts for the restored loaders.
+To also roll back the earlier runtime/catalog integration, use `git revert <integration-commit>` from
 the openpilot repository, where `<integration-commit>` is the commit titled
 `models: integrate MR.ONE native stack and fe5 Chestnut runtime`.
 This restores the preceding f6fc runtime and V25 catalog selection; the
