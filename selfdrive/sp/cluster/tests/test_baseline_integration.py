@@ -17,6 +17,7 @@ INTEGRATION_PATHS = {
     "openpilot/common/usbgpu_bus_lock.py",
     "openpilot/common/tests/test_usbgpu_bus_lock.py",
     "openpilot/system/manager/process_config.py",
+    "openpilot/system/updated/updated.py",
     "openpilot/system/loggerd/SConscript",
     "openpilot/system/loggerd/encoder/cluster_h264_encoder.cc",
     "openpilot/system/loggerd/encoder/cluster_h264_encoder.h",
@@ -29,6 +30,25 @@ INTEGRATION_PATHS = {
 
 
 class BaselineIntegrationTests(unittest.TestCase):
+    def test_updater_only_adds_missing_time_import(self):
+        path = "openpilot/system/updated/updated.py"
+        upstream = subprocess.run(
+            ["git", "--no-pager", "show", f"{BASELINE}:{path}"],
+            cwd=ROOT, check=True, capture_output=True, text=True,
+        ).stdout
+        current = (ROOT / Path(path)).read_text(encoding="utf-8")
+        self.assertEqual(current, upstream.replace("import threading\n", "import threading\nimport time\n", 1))
+        tree = ast.parse(current)
+        fetch = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "fetch_update")
+        callback = next(node for node in fetch.body if isinstance(node, ast.FunctionDef) and node.name == "on_git_progress")
+        namespace = {"last_progress": [-1, 0.0], "self": SimpleNamespace(params=Mock()),
+                     "parse_git_progress": lambda _: (50, "1 MiB/s")}
+        imports = [node for node in tree.body if isinstance(node, ast.Import)]
+        time_import = next(node for node in imports if any(alias.name == "time" for alias in node.names))
+        exec(compile(ast.Module(body=[time_import, callback], type_ignores=[]), path, "exec"), namespace)
+        namespace["on_git_progress"]("Receiving objects: 50%")
+        namespace["self"].params.put.assert_called_once_with("UpdaterState", "downloading... 50% 1 MiB/s", block=True)
+
     def test_only_cluster_paths_differ_from_pinned_upstream(self):
         result = subprocess.run(
             ["git", "--no-pager", "diff", "--name-only", BASELINE, "--"],

@@ -10,7 +10,7 @@ commit `330d3f634d34bc3055d2a3141268836fc8220208` (2026-10-07
 Cluster files are carried from `c3xl-dev-cluster` commit
 `46f8bd998ccaf01338204ca4f6b1daaa23c528f7`.
 
-The only integration changes outside this bundle are Cluster process/parameter
+The integration changes outside this bundle are Cluster process/parameter
 registration, the native H264 encoder bridge/build target, shared USB bus
 serialization and its tests. The USB coordination touches tinygrad
 `engine/realize.py`, `runtime/support/usb.py` and Chestnut monitoring so that
@@ -19,6 +19,11 @@ byte-identical to upstream. The GPU ownership flock, pickle loader, model
 adapters, compilers, catalogs, model assets, driver monitoring, car/Panda code
 and main UI remain upstream originals. No previous custom model protections,
 model defaults or vehicle/UI changes are carried onto this branch.
+
+One verified upstream bug is also corrected: `system/updated/updated.py`
+imports `time`, required by the Git download progress callback. Without it,
+updates fail with `NameError` before the new branch can be installed. No other
+updater behavior is changed.
 
 Onroad rendering defaults to 20 FPS and offroad to 1 FPS. The existing Cluster
 brightness controls, model/status labels, departure reminder and USB
