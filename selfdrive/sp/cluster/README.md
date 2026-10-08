@@ -10,6 +10,12 @@ commit `330d3f634d34bc3055d2a3141268836fc8220208` (2026-10-07
 Cluster files are carried from `c3xl-dev-cluster` commit
 `46f8bd998ccaf01338204ca4f6b1daaa23c528f7`.
 
+MR.ONE updates are merged through commit
+`5ac92e6f096cf9800685d90c7d090c9d918cd7e0` (2026-10-08
+09:35:05 +0800). This update adjusts Volkswagen MQB EVO radar handling and
+includes the upstream updater import fix; it does not change model inference
+or calibration. Integration tests compare against this updated baseline.
+
 The integration changes outside this bundle are Cluster process/parameter
 registration, the native H264 encoder bridge/build target, shared USB bus
 serialization and its tests. The USB coordination touches tinygrad
@@ -20,10 +26,9 @@ adapters, compilers, catalogs, model assets, driver monitoring, car/Panda code
 and main UI (except the requested homepage and language-menu overrides below) remain upstream originals. No previous custom model protections,
 model defaults or vehicle/UI changes are carried onto this branch.
 
-One verified upstream bug is also corrected: `system/updated/updated.py`
-imports `time`, required by the Git download progress callback. Without it,
-updates fail with `NameError` before the new branch can be installed. No other
-updater behavior is changed.
+The original updater fix added `time`, required by the Git download progress
+callback. Upstream now includes the same fix, so `system/updated/updated.py`
+matches the updated baseline exactly.
 
 The requested home-screen branding override changes the title to
 `Welcome to Openpilot` and removes the WeChat banner from loading/rendering.

@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 
 ROOT = Path(__file__).resolve().parents[4]
-BASELINE = "330d3f634d34bc3055d2a3141268836fc8220208"
+BASELINE = "5ac92e6f096cf9800685d90c7d090c9d918cd7e0"
 INTEGRATION_PATHS = {
     "openpilot/common/params_keys.h",
     "openpilot/common/usbgpu_bus_lock.py",
@@ -75,14 +75,14 @@ class BaselineIntegrationTests(unittest.TestCase):
         self.assertEqual(rl.draw_text_ex.call_args_list[1].args[1], "Drive smarter. Arrive safer.")
         self.assertEqual(rl.draw_texture_ex.call_args.args[1].y, 182)
 
-    def test_updater_only_adds_missing_time_import(self):
+    def test_updater_matches_upstream_with_working_progress_callback(self):
         path = "openpilot/system/updated/updated.py"
         upstream = subprocess.run(
             ["git", "--no-pager", "show", f"{BASELINE}:{path}"],
             cwd=ROOT, check=True, capture_output=True, text=True,
         ).stdout
         current = (ROOT / Path(path)).read_text(encoding="utf-8")
-        self.assertEqual(current, upstream.replace("import threading\n", "import threading\nimport time\n", 1))
+        self.assertEqual(current, upstream)
         tree = ast.parse(current)
         fetch = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "fetch_update")
         callback = next(node for node in fetch.body if isinstance(node, ast.FunctionDef) and node.name == "on_git_progress")
