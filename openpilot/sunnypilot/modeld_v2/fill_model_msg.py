@@ -2,6 +2,7 @@ import os
 import capnp
 import numpy as np
 from openpilot.cereal import log
+from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot.modeld_v2.constants import ModelConstants, Plan
 from openpilot.sunnypilot.models.helpers import plan_x_idxs_helper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_curvature_from_plan
@@ -202,7 +203,13 @@ def fill_model_msg(base_msg: capnp._DynamicStructBuilder, extended_msg: capnp._D
 
 def fill_pose_msg(msg: capnp._DynamicStructBuilder, net_output_data: dict[str, np.ndarray],
                   vipc_frame_id: int, vipc_dropped_frames: int, timestamp_eof: int, live_calib_seen: bool) -> None:
-  msg.valid = live_calib_seen & (vipc_dropped_frames < 1)
+  pose_keys = ('pose', 'pose_stds', 'wide_from_device_euler', 'road_transform',
+               'wide_from_device_euler_stds', 'road_transform_stds')
+  pose_valid = all(np.isfinite(net_output_data[key]).all() for key in pose_keys)
+  pose_valid = pose_valid and all((net_output_data[key] >= 0).all() for key in pose_keys if key.endswith('_stds'))
+  if not pose_valid:
+    cloudlog.error("Invalid camera odometry: non-finite pose or negative standard deviation")
+  msg.valid = live_calib_seen and (vipc_dropped_frames < 1) and pose_valid
   cameraOdometry = msg.cameraOdometry
 
   cameraOdometry.frameId = vipc_frame_id

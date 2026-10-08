@@ -121,6 +121,7 @@ class Calibrator:
     self.idx = 0
     self.block_idx = 0
     self.v_ego = 0.0
+    self._invalid_cam_odom = False
 
     if smooth_from is None:
       self.old_rpy = RPY_INIT
@@ -185,6 +186,18 @@ class Calibrator:
                             trans_std: list[float],
                             road_transform_trans: list[float],
                             road_transform_trans_std: list[float]) -> np.ndarray | None:
+    vectors = (trans, rot, trans_std)
+    optional_vectors = (wide_from_device_euler, road_transform_trans, road_transform_trans_std)
+    valid_input = (np.isfinite(self.v_ego) and
+                   all(len(v) == 3 and np.isfinite(v).all() for v in vectors) and
+                   all(len(v) in (0, 3) and np.isfinite(v).all() for v in optional_vectors) and
+                   (np.asarray(trans_std) >= 0).all() and (np.asarray(road_transform_trans_std) >= 0).all())
+    if not valid_input:
+      if not self._invalid_cam_odom:
+        cloudlog.error("Rejecting invalid camera odometry calibration input")
+      self._invalid_cam_odom = True
+      return None
+    self._invalid_cam_odom = False
     self.old_rpy_weight = max(0.0, self.old_rpy_weight - 1/SMOOTH_CYCLES)
 
     straight_and_fast = ((self.v_ego > MIN_SPEED_FILTER) and (trans[0] > MIN_SPEED_FILTER) and (abs(rot[2]) < MAX_YAW_RATE_FILTER))
@@ -275,7 +288,7 @@ def main() -> NoReturn:
     timeout = 0 if sm.frame == -1 else 100
     sm.update(timeout)
 
-    if sm.updated['cameraOdometry']:
+    if sm.updated['cameraOdometry'] and sm.valid['cameraOdometry']:
       calibrator.handle_v_ego(sm['carState'].vEgo)
       new_rpy = calibrator.handle_cam_odom(sm['cameraOdometry'].trans,
                                            sm['cameraOdometry'].rot,

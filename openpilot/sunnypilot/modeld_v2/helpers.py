@@ -33,26 +33,25 @@ def _patch_system_flock_acquire():
 _patch_system_flock_acquire()
 
 def _pad_args(func, args, kwargs):
-  try:
-    sig = inspect.signature(func)
-  except Exception:
-    return args, kwargs
+  sig = inspect.signature(func)
   params = list(sig.parameters.values())
-  if inspect.isfunction(func) and params and params[0].name in ('cls', 'self'):
-    params = params[1:]
-
+  positional = [p for p in params if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)]
   new_args = list(args)
+  new_kwargs = dict(kwargs)
   has_varargs = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
-  if len(new_args) > len(params) and not has_varargs:
-    new_args = new_args[:len(params)]
+  if not has_varargs:
+    new_args = new_args[:len(positional)]
 
-  for i in range(len(new_args), len(params)):
-    param = params[i]
-    if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-      continue
-    val = param.default if param.default is not inspect.Parameter.empty else None
-    new_args.append(val)
-  return new_args, kwargs
+  for param in positional[len(new_args):]:
+    if param.name in new_kwargs or param.default is inspect.Parameter.empty:
+      break
+    new_args.append(param.default)
+  for param in params:
+    if param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
+      if param.name not in new_kwargs and param not in positional[:len(new_args)]:
+        if param.default is not inspect.Parameter.empty:
+          new_kwargs[param.name] = param.default
+  return new_args, new_kwargs
 
 
 def _dynamic_factory(real_class):
@@ -61,10 +60,15 @@ def _dynamic_factory(real_class):
 
   def factory(*args, **kwargs):
     try:
+      sig = inspect.signature(real_class)
+    except (TypeError, ValueError):
       return real_class(*args, **kwargs)
+    try:
+      sig.bind(*args, **kwargs)
     except TypeError:
-      new_args, new_kwargs = _pad_args(real_class, args, kwargs)
-      return real_class(*new_args, **new_kwargs)
+      args, kwargs = _pad_args(real_class, args, kwargs)
+      sig.bind(*args, **kwargs)
+    return real_class(*args, **kwargs)
 
   class DynamicMeta(type(real_class)):
     def __call__(cls, *args, **kwargs):

@@ -357,10 +357,12 @@ class Setup(Widget):
     self.download_thread.start()
 
   def _download_thread(self):
+    tmpfile = None
     try:
       import tempfile
 
       fd, tmpfile = tempfile.mkstemp(prefix="installer_")
+      os.close(fd)
 
       headers = {"User-Agent": USER_AGENT,
                  "X-openpilot-serial": HARDWARE.get_serial(),
@@ -394,8 +396,8 @@ class Setup(Widget):
 
       # AGNOS might try to execute the installer before this process exits.
       # Therefore, important to close the fd before renaming the installer.
-      os.close(fd)
       os.rename(tmpfile, INSTALLER_DESTINATION_PATH)
+      tmpfile = None
 
       with open(INSTALLER_URL_PATH, "w") as f:
         f.write(self.download_url)
@@ -405,12 +407,18 @@ class Setup(Widget):
       gui_app.request_close()
 
     except urllib.error.HTTPError as e:
-      if e.code == 409:
-        error_msg = e.read().decode("utf-8")
-        self.download_failed(self.download_url, error_msg)
+      with e:
+        if e.code == 409:
+          error_msg = e.read().decode("utf-8", errors="replace")
+        else:
+          error_msg = f"Download failed (HTTP {e.code}). Check the URL and internet connection."
+      self.download_failed(self.download_url, error_msg)
     except Exception:
       error_msg = "Ensure the entered URL is valid, and the device's internet connection is good."
       self.download_failed(self.download_url, error_msg)
+    finally:
+      if tmpfile is not None:
+        os.unlink(tmpfile)
 
   def download_failed(self, url: str, reason: str):
     self.failed_url = url

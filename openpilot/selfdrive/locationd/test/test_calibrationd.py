@@ -32,6 +32,42 @@ def process_messages(c, cam_odo_calib, cycles,
 
 class TestCalibrationd(OpenpilotTestCase):
 
+  def test_invalid_odometry_preserves_calibration(self):
+    c = Calibrator(param_put=False)
+    process_messages(c, [0.0, 0.0, 0.0], BLOCK_SIZE * INPUTS_NEEDED)
+    vectors = [[MIN_SPEED_FILTER + 1, 0., 0.], [0., 0., 0.], [0., 0., 0.],
+               [1e-3] * 3, [0., 0., HEIGHT_INIT.item()], [1e-3] * 3]
+    for index in range(len(vectors)):
+      for value in (np.nan, np.inf, -np.inf):
+        with self.subTest(vector=index, value=value):
+          bad = [list(v) for v in vectors]
+          bad[index][1] = value
+          before = (c.idx, c.block_idx, c.valid_blocks, c.old_rpy_weight)
+          arrays = [v.copy() for v in (c.rpys, c.heights, c.wide_from_device_eulers)]
+          self.assertIsNone(c.handle_cam_odom(*bad))
+          self.assertEqual((c.idx, c.block_idx, c.valid_blocks, c.old_rpy_weight), before)
+          for actual, expected in zip((c.rpys, c.heights, c.wide_from_device_eulers), arrays, strict=True):
+            np.testing.assert_array_equal(actual, expected)
+    self.assertIsNotNone(c.handle_cam_odom(*vectors))
+    self.assertFalse(c._invalid_cam_odom)
+
+  def test_malformed_and_negative_uncertainty_rejected(self):
+    c = Calibrator(param_put=False)
+    c.handle_v_ego(MIN_SPEED_FILTER + 1)
+    vectors = [[MIN_SPEED_FILTER + 1, 0., 0.], [0.] * 3, [0.] * 3, [1e-3] * 3,
+               [0., 0., HEIGHT_INIT.item()], [1e-3] * 3]
+    for index in range(len(vectors)):
+      bad = [list(v) for v in vectors]
+      bad[index] = [0., 0.]
+      self.assertIsNone(c.handle_cam_odom(*bad))
+    for index in (3, 5):
+      bad = [list(v) for v in vectors]
+      bad[index][1] = -1.
+      self.assertIsNone(c.handle_cam_odom(*bad))
+    c.handle_v_ego(np.nan)
+    self.assertIsNone(c.handle_cam_odom(*vectors))
+    self.assertEqual(c.idx, 0)
+
   def test_read_saved_params(self):
     msg = messaging.new_message('extrinsicsCalibration')
     msg.extrinsicsCalibration.validBlocks = random.randint(1, 10)

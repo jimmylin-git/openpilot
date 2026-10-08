@@ -32,6 +32,13 @@ INTEGRATION_PATHS = {
     "openpilot/sunnypilot/modeld_v2/model_adapters.py",
     "openpilot/sunnypilot/modeld_v2/modeld.py",
     "openpilot/sunnypilot/modeld_v2/tests/test_runtime_safety.py",
+    "openpilot/sunnypilot/modeld_v2/helpers.py",
+    "openpilot/sunnypilot/modeld_v2/fill_model_msg.py",
+    "openpilot/selfdrive/locationd/calibrationd.py",
+    "openpilot/selfdrive/locationd/test/test_calibrationd.py",
+    "openpilot/selfdrive/ui/mici/onroad/alert_renderer.py",
+    "openpilot/system/ui/tici_setup.py",
+    "openpilot/system/ui/test/test_setup_download.py",
 }
 
 

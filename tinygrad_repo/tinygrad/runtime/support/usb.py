@@ -55,20 +55,20 @@ class USB3:
 
     self.handle = c.init_c_var(c.POINTER[libusb.struct_libusb_device_handle], lambda x: _usb_locked(checked(libusb.libusb_open), dev, x))
 
-    # Read product string descriptor
-    _buf = (ctypes.c_ubyte * 256)()
-    _desc = libusb.struct_libusb_device_descriptor()
-    _usb_locked(checked(libusb.libusb_get_device_descriptor), libusb.libusb_get_device(self.handle), ctypes.byref(_desc))
-    _ret = _usb_locked(checked(libusb.libusb_get_string_descriptor_ascii), self.handle, _desc.iProduct, _buf, 256)
-    self.product = bytes(_buf[:_ret]).decode("ascii", errors="replace")
-    assert self.product.startswith("custom") or self.product.startswith("AS2462")
-
-    # Detach kernel driver if needed
-    if _usb_locked(checked(libusb.libusb_kernel_driver_active), self.handle, 0):
-      _usb_locked(checked(libusb.libusb_detach_kernel_driver), self.handle, 0)
-      _usb_locked(checked(libusb.libusb_reset_device), self.handle)
-
     try:
+      # Read product string descriptor
+      _buf = (ctypes.c_ubyte * 256)()
+      _desc = libusb.struct_libusb_device_descriptor()
+      _usb_locked(checked(libusb.libusb_get_device_descriptor), libusb.libusb_get_device(self.handle), ctypes.byref(_desc))
+      _ret = _usb_locked(checked(libusb.libusb_get_string_descriptor_ascii), self.handle, _desc.iProduct, _buf, 256)
+      self.product = bytes(_buf[:_ret]).decode("ascii", errors="replace")
+      assert self.product.startswith("custom") or self.product.startswith("AS2462")
+
+      # Detach kernel driver if needed
+      if _usb_locked(checked(libusb.libusb_kernel_driver_active), self.handle, 0):
+        _usb_locked(checked(libusb.libusb_detach_kernel_driver), self.handle, 0)
+        _usb_locked(checked(libusb.libusb_reset_device), self.handle)
+
       self._configure_interface()
     except BaseException:
       _usb_locked(libusb.libusb_close, self.handle)

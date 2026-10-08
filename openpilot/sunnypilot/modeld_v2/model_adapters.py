@@ -83,6 +83,9 @@ class LegacyModelAdapter(BaseModelAdapter):
     metadata = self.jits['metadata']
     self.frame_copy_size = nv12_copy_size(*self.nv12_info[:3])
 
+    if self.chestnut and 'model' not in metadata:
+      raise RuntimeError("Legacy split Chestnut model has no supported packed-camera ABI; use a native or supercombo bundle")
+
     if self.chestnut:
       self.WARP_DEV = self.DEV
 

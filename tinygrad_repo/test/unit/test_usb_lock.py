@@ -13,6 +13,47 @@ from tinygrad.runtime.support import usb
 
 
 class TestUSBConfiguration(unittest.TestCase):
+  def test_all_initialization_failures_close_open_handle(self):
+    stages = ("descriptor", "product", "kernel", "detach", "reset", "configure", "unsupported_product", None)
+    for failed_stage in stages:
+      with self.subTest(stage=failed_stage):
+        handle = ctypes.POINTER(usb.libusb.struct_libusb_device_handle)()
+
+        def stage(name, result=0):
+          if failed_stage == name:
+            raise RuntimeError(f"failed {name}")
+          return result
+
+        def product(handle, index, buffer, size):
+          value = b"other" if failed_stage == "unsupported_product" else b"custom GPU"
+          buffer[:len(value)] = value
+          return stage("product", len(value))
+
+        with (
+          patch.object(usb.c, "init_c_var", return_value=handle),
+          patch.object(usb, "_usb_locked", side_effect=lambda fn, *args: fn(*args)),
+          patch.object(usb.libusb, "libusb_get_device", return_value=None),
+          patch.object(usb.libusb, "libusb_get_device_descriptor", side_effect=lambda *args: stage("descriptor")),
+          patch.object(usb.libusb, "libusb_get_string_descriptor_ascii", side_effect=product),
+          patch.object(usb.libusb, "libusb_kernel_driver_active", side_effect=lambda *args: stage("kernel", 1)),
+          patch.object(usb.libusb, "libusb_detach_kernel_driver", side_effect=lambda *args: stage("detach")),
+          patch.object(usb.libusb, "libusb_reset_device", side_effect=lambda *args: stage("reset")),
+          patch.object(usb.USB3, "_configure_interface", side_effect=lambda: stage("configure")),
+          patch.object(usb.libusb, "libusb_close") as close,
+        ):
+          if failed_stage == "unsupported_product":
+            with self.assertRaises(AssertionError):
+              usb.USB3(None)
+          elif failed_stage is not None:
+            with self.assertRaisesRegex(RuntimeError, f"failed {failed_stage}"):
+              usb.USB3(None)
+          else:
+            usb.USB3(None)
+          if failed_stage is None:
+            close.assert_not_called()
+          else:
+            close.assert_called_once_with(handle)
+
   def configure(self, current=1, claim_error=None, alt_error=None):
     events = []
 

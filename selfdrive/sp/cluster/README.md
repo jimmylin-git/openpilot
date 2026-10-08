@@ -753,6 +753,9 @@ setting selection share one transaction. A genuine interface-claim BUSY error
 still fails explicitly; failed configuration/claim setup closes the new handle.
 Control-transfer errors include the product and request direction/code to help
 distinguish initialization, GPU memory upload, and monitoring failures. A
+failure while reading descriptors, checking/detaching the kernel driver, or
+resetting the device also closes the newly opened handle before propagating.
+An initialized handle is retained only after all setup stages succeed. A
 NO_DEVICE error is not retried against a stale handle or treated as success;
 the existing big-to-small model fallback remains in effect.
 
@@ -763,6 +766,28 @@ both big and small models. Invalid outputs fail explicitly with stage/count/
 first-index diagnostics, not fabricated zero values. These fixes remove
 unnecessary USB reconfiguration and stale warmup state; they do not establish
 the cause of the recorded CTMv2 NaNs or physical USB disconnects.
+
+Parsed model outputs are also checked before host feature/curvature feedback.
+Camera odometry with non-finite values or negative uncertainty is marked invalid;
+calibration ignores invalid messages and rejects malformed/non-finite vectors
+without changing its accumulated samples. Speed, uncertainty, and calibration
+completion thresholds remain unchanged. This prevents invalid samples from
+advancing calibration; it does not make a failing GPU produce valid odometry.
+
+Tinygrad pickle compatibility is checked against the constructor signature
+before constructing objects. Internal constructor TypeErrors are not retried,
+keyword-only defaults are preserved, and missing required fields fail explicitly.
+Legacy split Chestnut bundles are rejected during loading because their current
+adapter lacks a packed-camera ABI; native and Legacy supercombo Chestnut bundles
+are unchanged, and the existing logged small-model fallback handles load failure.
+No split Chestnut support is fabricated by allocating unrelated camera buffers.
+
+Installer downloads report all HTTP errors, preserve the server's HTTP 409
+message, and clean up temporary files/descriptors on failure. MICI alert rendering
+imports the same translation helper as other UI components. These changes do not
+modify AGNOS or certify MR.ONE installer compatibility. Clean model/warp rebuilds
+still need the matching missing `compile_onnx.py` and `compile_warp.py` tools;
+`compile3.py` is not an ABI-compatible replacement and is not substituted.
 
 When the asynchronous JPEG sender or native H264 sender is busy, the HUD
 skips the new USB frame before readback/encoding, without waiting for capacity.

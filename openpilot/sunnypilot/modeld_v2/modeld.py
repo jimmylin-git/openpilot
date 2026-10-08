@@ -212,20 +212,15 @@ class ModelState(ModelStateBase):
 
     if self._combined_model_type == 'supercombo':
       model_output = checked_output(raw_outputs, 'supercombo')
+      feature_output = model_output
       sliced = {k: model_output[np.newaxis, v] for k, v in self.vision_output_slices.items()}
       outputs = self.parser.parse_outputs(sliced)
-      if 'prev_feat' in self.numpy_inputs and 'hidden_state' in self.vision_output_slices:
-        (self.numpy_inputs['prev_feat'].flat if self.adapter.is_native else self.numpy_inputs['prev_feat'])[:] = \
-          model_output[self.vision_output_slices['hidden_state']]
     else:
       vision_output = checked_output(raw_outputs[0], 'vision')
+      feature_output = vision_output
       policy_outputs = [checked_output(raw_outputs[i + 1], key) for i, key in enumerate(self._policy_keys)]
       vision_sliced = {k: vision_output[np.newaxis, v] for k, v in self.vision_output_slices.items()}
       outputs = self.parser.parse_vision_outputs(vision_sliced)
-
-      if 'prev_feat' in self.numpy_inputs and 'hidden_state' in self.vision_output_slices:
-        (self.numpy_inputs['prev_feat'].flat if self.adapter.is_native else self.numpy_inputs['prev_feat'])[:] = \
-          vision_output[self.vision_output_slices['hidden_state']]
 
       for i, policy_slices in enumerate(self._policy_slices_list):
         policy_output = policy_outputs[i]
@@ -240,6 +235,16 @@ class ModelState(ModelStateBase):
 
       if 'planplus' in outputs and 'plan' in outputs:
         outputs['plan'] = outputs['plan'] + outputs['planplus']
+
+    for key, output in outputs.items():
+      if not np.isfinite(output).all():
+        raise RuntimeError(f"parsed model output not finite: stage={key}")
+      if key.endswith('_stds') and (output < 0).any():
+        raise RuntimeError(f"parsed model output has negative uncertainty: stage={key}")
+
+    if 'prev_feat' in self.numpy_inputs and 'hidden_state' in self.vision_output_slices:
+      (self.numpy_inputs['prev_feat'].flat if self.adapter.is_native else self.numpy_inputs['prev_feat'])[:] = \
+        feature_output[self.vision_output_slices['hidden_state']]
 
     if 'desired_curvature' in outputs and 'prev_desired_curv' in self.numpy_inputs:
       buf = self.numpy_inputs['prev_desired_curv']
