@@ -29,6 +29,8 @@ INTEGRATION_PATHS = {
     "tinygrad_repo/tinygrad/engine/realize.py",
     "tinygrad_repo/tinygrad/runtime/support/usb.py",
     "tinygrad_repo/test/unit/test_usb_lock.py",
+    "tinygrad_repo/tinygrad/runtime/support/system.py",
+    "tinygrad_repo/test/unit/test_system_lock.py",
     "openpilot/sunnypilot/modeld_v2/model_adapters.py",
     "openpilot/sunnypilot/modeld_v2/modeld.py",
     "openpilot/sunnypilot/modeld_v2/tests/test_runtime_safety.py",

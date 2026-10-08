@@ -811,6 +811,18 @@ Failures later in setup retain the backup for manual recovery, and an existing
 backup blocks another installation attempt rather than overwriting recovery data.
 These source fixes do not replace the externally hosted MR.ONE installer binary.
 
+GPU ownership lock caching now lives in tinygrad's `System.flock_acquire`, not
+an import-time modeld monkey patch. One mutex serializes cache lookup, descriptor
+creation, and nonblocking flock acquisition. Only successful acquisitions enter
+the per-device cache; errors close the new descriptor and retain the original
+failure as their cause. Cached descriptors are process-lifetime ownership locks,
+not handles for callers to close, and are non-inheritable across exec.
+Fork hooks serialize against acquisition and close inherited child references
+without unlocking the parent's shared file description. The child must acquire
+its own lock and will fail explicitly while the parent still owns the GPU.
+This does not make an inherited GPU context safe to use after fork, and it does
+not alter the separate model/HUD USB bus priority lock.
+
 When the asynchronous JPEG sender or native H264 sender is busy, the HUD
 skips the new USB frame before readback/encoding, without waiting for capacity.
 Native H264 admits the next frame only after the previous encoded frame's

@@ -15,23 +15,6 @@ import shutil
 import enum
 
 
-def _patch_system_flock_acquire():
-  try:
-    from tinygrad.runtime.support.system import System
-    original_flock_acquire = System.flock_acquire
-    acquired_locks: dict[str, int] = {}
-
-    def flock_acquire(name: str) -> int:
-      if name in acquired_locks:
-        return acquired_locks[name]
-      lock_file_descriptor = original_flock_acquire(name)
-      acquired_locks[name] = lock_file_descriptor
-      return lock_file_descriptor
-    System.flock_acquire = flock_acquire
-  except (ImportError, AttributeError):
-    pass
-_patch_system_flock_acquire()
-
 def _pad_args(func, args, kwargs):
   sig = inspect.signature(func)
   params = list(sig.parameters.values())

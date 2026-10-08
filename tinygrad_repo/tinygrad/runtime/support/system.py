@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os, mmap, array, functools, ctypes, ctypes.util, select, contextlib, dataclasses, sys, struct, socket, enum, itertools
+import threading
 from tinygrad.device import BufferStorage, Buffer, Device
 from tinygrad.helpers import round_up, getenv, OSX, temp, DEBUG, pluralize
 from tinygrad.runtime.autogen import libc, pci, vfio
@@ -13,6 +14,20 @@ MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0 if OSX else 0x2000, getattr(mmap, "M
 def ipv4_to_gid(ip:str) -> bytes: return bytes(10) + b'\xff\xff' + socket.inet_aton(ip)
 
 class _System:
+  def __init__(self):
+    self._flock_mutex = threading.Lock()
+    self._flock_fds: dict[str, int] = {}
+    if hasattr(os, "register_at_fork"):
+      os.register_at_fork(before=self._flock_mutex.acquire, after_in_parent=self._flock_mutex.release,
+                          after_in_child=self._reset_flocks_after_fork)
+
+  def _reset_flocks_after_fork(self):
+    # Close the child's references without LOCK_UN, which would unlock the parent's shared description.
+    for fd in self._flock_fds.values(): os.close(fd)
+    self._flock_fds = {}
+    self._flock_mutex.release()
+    if hasattr(self, "lock_fd"): del self.lock_fd
+
   def write_sysfs(self, path:str, value:str, msg:str, expected:str|None=None):
     if FileIOInterface(path, os.O_RDONLY).read().splitlines()[0] != (expected or value):
       os.system(cmd:=f"sudo sh -c 'echo {value} > {path}'")
@@ -148,16 +163,25 @@ class _System:
   def flock_acquire(self, name:str) -> int:
     import fcntl # to support windows
 
-    os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
-
-    # Avoid O_CREAT because we don’t want to re-create/replace an existing file (triggers extra perms checks) when opening as non-owner.
-    if os.path.exists(lock_name:=temp(name)): self.lock_fd = os.open(lock_name, os.O_RDWR)
-    else: self.lock_fd = os.open(lock_name, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
-
-    try: fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError: raise RuntimeError(f"Failed to acquire lock file {name}. `sudo lsof {lock_name}` may help identify the process holding the lock.")
-
-    return self.lock_fd
+    with self._flock_mutex:
+      if name in self._flock_fds:
+        self.lock_fd = self._flock_fds[name]
+        return self.lock_fd
+      os.umask(0) # Set umask to 0 to allow creating files with 0666 permissions
+      # Avoid O_CREAT for existing files to preserve cross-user permissions behavior.
+      lock_name = temp(name)
+      fd = os.open(lock_name, os.O_RDWR if os.path.exists(lock_name) else os.O_RDWR | os.O_CREAT, 0o666)
+      try:
+        os.set_inheritable(fd, False)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      except BaseException as error:
+        os.close(fd)
+        if isinstance(error, OSError):
+          message = f"Failed to acquire lock file {name}. `sudo lsof {lock_name}` may help identify the process holding the lock."
+          raise RuntimeError(message) from error
+        raise
+      self._flock_fds[name] = self.lock_fd = fd
+      return fd
 
 System = _System()
 
