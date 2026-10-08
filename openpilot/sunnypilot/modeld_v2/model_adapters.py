@@ -142,6 +142,12 @@ class LegacyModelAdapter(BaseModelAdapter):
   def reset_warmup_buffers(self):
     for v in self.numpy_inputs.values():
       v[:] = 0
+    for key in ('img_q', 'big_img_q', 'feat_q', 'desire_q'):
+      if key in self.input_queues:
+        self.input_queues[key].assign(0).realize()
+    if self.chestnut and hasattr(self, 'frame_slots'):
+      for frame in self.frame_slots.values():
+        frame[:] = 0
     if not self.chestnut:
       self.full_frames.clear()
       self._blob_cache.clear()

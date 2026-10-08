@@ -133,6 +133,7 @@ class ModelState(ModelStateBase):
     self.DEV = ('AMD' if self.chestnut else 'QCOM') if COMMA_HARDWARE else 'CPU'
     self.QUEUE_DEV = self.DEV
     self.adapter = get_model_adapter(jits, cam_w, cam_h, self.DEV, self.QUEUE_DEV, self.WARP_DEV, self.chestnut)
+    cloudlog.warning(f"model adapter: {type(self.adapter).__name__}, type={self.adapter._combined_model_type}, device={self.DEV}, chestnut={self.chestnut}")
     self.vision_output_slices = self.adapter.vision_output_slices
     self.policy_output_slices = self.adapter.policy_output_slices
     self._policy_slices_list = self.adapter._policy_slices_list
@@ -202,17 +203,23 @@ class ModelState(ModelStateBase):
     if after_enqueue is not None:
       after_enqueue()
 
+    def checked_output(raw, stage):
+      output = raw.numpy().flatten()
+      if not np.all(np.isfinite(output)):
+        bad = np.flatnonzero(~np.isfinite(output))
+        raise RuntimeError(f"model output not finite: stage={stage}, count={bad.size}, first_index={bad[0]}")
+      return output
+
     if self._combined_model_type == 'supercombo':
-      model_output = raw_outputs.numpy().flatten()
-      if self.chestnut and not np.all(np.isfinite(model_output)):
-        raise RuntimeError("model output not finite")
+      model_output = checked_output(raw_outputs, 'supercombo')
       sliced = {k: model_output[np.newaxis, v] for k, v in self.vision_output_slices.items()}
       outputs = self.parser.parse_outputs(sliced)
       if 'prev_feat' in self.numpy_inputs and 'hidden_state' in self.vision_output_slices:
         (self.numpy_inputs['prev_feat'].flat if self.adapter.is_native else self.numpy_inputs['prev_feat'])[:] = \
           model_output[self.vision_output_slices['hidden_state']]
     else:
-      vision_output = raw_outputs[0].numpy().flatten()
+      vision_output = checked_output(raw_outputs[0], 'vision')
+      policy_outputs = [checked_output(raw_outputs[i + 1], key) for i, key in enumerate(self._policy_keys)]
       vision_sliced = {k: vision_output[np.newaxis, v] for k, v in self.vision_output_slices.items()}
       outputs = self.parser.parse_vision_outputs(vision_sliced)
 
@@ -221,7 +228,7 @@ class ModelState(ModelStateBase):
           vision_output[self.vision_output_slices['hidden_state']]
 
       for i, policy_slices in enumerate(self._policy_slices_list):
-        policy_output = raw_outputs[i + 1].numpy().flatten()
+        policy_output = policy_outputs[i]
         policy_sliced = {k: policy_output[np.newaxis, v] for k, v in policy_slices.items()}
         parsed = self.parser.parse_policy_outputs(policy_sliced)
         if 'off' in self._policy_keys[i] and self._has_on_policy:

@@ -12,6 +12,61 @@ from tinygrad.engine import realize
 from tinygrad.runtime.support import usb
 
 
+class TestUSBConfiguration(unittest.TestCase):
+  def configure(self, current=1, claim_error=None, alt_error=None):
+    events = []
+
+    @contextlib.contextmanager
+    def lock():
+      events.append("lock")
+      try:
+        yield
+      finally:
+        events.append("unlock")
+
+    def get_configuration(handle, value):
+      ctypes.cast(value, ctypes.POINTER(ctypes.c_int))[0] = current
+      events.append("get")
+      return 0
+
+    def claim(*args):
+      events.append("claim")
+      if claim_error:
+        raise claim_error
+      return 0
+
+    with (
+      patch.object(usb, "usbgpu_bus_lock", lock),
+      patch.object(usb.libusb, "libusb_get_configuration", side_effect=get_configuration),
+      patch.object(usb.libusb, "libusb_set_configuration", side_effect=lambda *args: events.append("set") or 0),
+      patch.object(usb.libusb, "libusb_claim_interface", side_effect=claim),
+      patch.object(usb.libusb, "libusb_set_interface_alt_setting", side_effect=alt_error or (lambda *args: events.append("alt") or 0)),
+      patch.object(usb.libusb, "libusb_release_interface", side_effect=lambda *args: events.append("release") or 0),
+    ):
+      try:
+        usb.USB3._configure_interface(SimpleNamespace(handle=None))
+      finally:
+        self.events = events
+
+  def test_active_configuration_is_not_reset(self):
+    self.configure()
+    self.assertEqual(self.events, ["lock", "get", "claim", "alt", "unlock"])
+
+  def test_unconfigured_device_is_configured_before_claim(self):
+    self.configure(current=0)
+    self.assertEqual(self.events, ["lock", "get", "set", "claim", "alt", "unlock"])
+
+  def test_busy_owner_is_not_ignored_or_reset(self):
+    with self.assertRaisesRegex(RuntimeError, "Resource busy"):
+      self.configure(claim_error=RuntimeError("Resource busy"))
+    self.assertEqual(self.events, ["lock", "get", "claim", "unlock"])
+
+  def test_failed_alt_setting_releases_claim(self):
+    with self.assertRaisesRegex(RuntimeError, "No such device"):
+      self.configure(alt_error=RuntimeError("No such device"))
+    self.assertEqual(self.events, ["lock", "get", "claim", "release", "unlock"])
+
+
 class TestUSBExecutionLock(unittest.TestCase):
   def setUp(self):
     self.dev = Mock(is_usb=True)

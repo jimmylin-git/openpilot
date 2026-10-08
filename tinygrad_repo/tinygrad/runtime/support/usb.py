@@ -68,20 +68,37 @@ class USB3:
       _usb_locked(checked(libusb.libusb_detach_kernel_driver), self.handle, 0)
       _usb_locked(checked(libusb.libusb_reset_device), self.handle)
 
-    # Set configuration and claim interface
-    _usb_locked(checked(libusb.libusb_set_configuration), self.handle, 1)
-    _usb_locked(checked(libusb.libusb_claim_interface), self.handle, 0)
-    _usb_locked(checked(libusb.libusb_set_interface_alt_setting), self.handle, 0, 0)
+    try:
+      self._configure_interface()
+    except BaseException:
+      _usb_locked(libusb.libusb_close, self.handle)
+      raise
+
+  def _configure_interface(self):
+    with usbgpu_bus_lock():
+      configuration = ctypes.c_int()
+      checked(libusb.libusb_get_configuration)(self.handle, ctypes.byref(configuration))
+      # Setting an already-active configuration resets interfaces and can fail
+      # with BUSY when another handle has claimed one.
+      if configuration.value != 1:
+        checked(libusb.libusb_set_configuration)(self.handle, 1)
+      checked(libusb.libusb_claim_interface)(self.handle, 0)
+      try:
+        checked(libusb.libusb_set_interface_alt_setting)(self.handle, 0, 0)
+      except BaseException:
+        libusb.libusb_release_interface(self.handle, 0)
+        raise
 
   def control_write(self, request:int, value:int=0, index:int=0, data:bytes=b'', timeout:int=1000):
     assert len(data) <= len(self._ctrl_mv)
     self._ctrl_mv[:len(data)] = data
-    assert _usb_locked(checked(libusb.libusb_control_transfer),
+    assert _usb_locked(checked(libusb.libusb_control_transfer, f"USB {self.product} control OUT request=0x{request:02x}"),
                        self.handle, 0x40, request, value, index, self._ctrl_buf, len(data), timeout) == len(data)
 
   def control_read(self, request:int, length:int, value:int=0, index:int=0, timeout:int=1000) -> memoryview:
     assert length <= len(self._ctrl_mv)
-    assert _usb_locked(checked(libusb.libusb_control_transfer), self.handle, 0xC0, request, value, index, self._ctrl_buf, length, timeout) == length
+    assert _usb_locked(checked(libusb.libusb_control_transfer, f"USB {self.product} control IN request=0x{request:02x}"),
+                       self.handle, 0xC0, request, value, index, self._ctrl_buf, length, timeout) == length
     return self._ctrl_mv[:length]
 
   def bulk_write(self, payload:bytes, timeout:int=1000):

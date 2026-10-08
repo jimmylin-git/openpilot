@@ -747,6 +747,23 @@ skips a busy sample without closing its handle or publishing a false USB fault.
 Priority cannot preempt an in-flight transfer or guarantee the model's 50 ms
 deadline; no on-device performance improvement has been certified.
 
+V23 also avoids reapplying USB configuration 1 when it is already active.
+Configuration inspection, changes when needed, interface claim, and alternate
+setting selection share one transaction. A genuine interface-claim BUSY error
+still fails explicitly; failed configuration/claim setup closes the new handle.
+Control-transfer errors include the product and request direction/code to help
+distinguish initialization, GPU memory upload, and monitoring failures. A
+NO_DEVICE error is not retried against a stale handle or treated as success;
+the existing big-to-small model fallback remains in effect.
+
+Legacy model warmup resets device image/feature/desire histories as well as
+host inputs and packed camera slots. Raw supercombo, vision, and all policy
+outputs must be finite before parsing or updating host feature feedback, on
+both big and small models. Invalid outputs fail explicitly with stage/count/
+first-index diagnostics, not fabricated zero values. These fixes remove
+unnecessary USB reconfiguration and stale warmup state; they do not establish
+the cause of the recorded CTMv2 NaNs or physical USB disconnects.
+
 When the asynchronous JPEG sender or native H264 sender is busy, the HUD
 skips the new USB frame before readback/encoding, without waiting for capacity.
 Native H264 admits the next frame only after the previous encoded frame's
