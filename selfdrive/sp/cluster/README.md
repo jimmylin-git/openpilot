@@ -4,17 +4,19 @@ Standalone raylib cluster UI bundle for openpilot devices.
 
 ## MR.ONE baseline
 
-Branch `mrone-c3xl-dev-cluster` starts directly from MR.ONE `c3xl-dev`
+Branch `mrone-v23-c3xl-dev-cluster` starts directly from MR.ONE `c3xl-dev`
 commit `330d3f634d34bc3055d2a3141268836fc8220208` (2026-10-07
 19:55:49 +0800), rechecked as the upstream HEAD on 2026-10-08 (UTC+8).
 Cluster files are carried from `c3xl-dev-cluster` commit
 `46f8bd998ccaf01338204ca4f6b1daaa23c528f7`.
 
 MR.ONE updates are merged through commit
-`5ac92e6f096cf9800685d90c7d090c9d918cd7e0` (2026-10-08
-09:35:05 +0800). This update adjusts Volkswagen MQB EVO radar handling and
-includes the upstream updater import fix; it does not change model inference
-or calibration. Integration tests compare against this updated baseline.
+`770c8244645bd4bf79dbe6314fc0839ad9c704e6` (2026-10-08
+21:02:43 +0800). Upstream reverted the MQB EVO port and associated radar,
+safety and firmware changes, and updated the c3 client. Temporary launch
+overrides have no net difference from the previous baseline. This update does
+not change model inference or calibration. Integration tests compare against
+this updated baseline.
 
 The integration changes outside this bundle are Cluster process/parameter
 registration, the native H264 encoder bridge/build target, shared USB bus

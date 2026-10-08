@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 
 ROOT = Path(__file__).resolve().parents[4]
-BASELINE = "5ac92e6f096cf9800685d90c7d090c9d918cd7e0"
+BASELINE = "770c8244645bd4bf79dbe6314fc0839ad9c704e6"
 INTEGRATION_PATHS = {
     "openpilot/common/params_keys.h",
     "openpilot/common/usbgpu_bus_lock.py",

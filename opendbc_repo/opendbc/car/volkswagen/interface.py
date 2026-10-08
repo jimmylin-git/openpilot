@@ -42,15 +42,10 @@ class CarInterface(CarInterfaceBase):
       ret.networkLocation = NetworkLocation.gateway
       ret.dashcamOnly = is_release  # Release support needs HCA timeout fix, safety validation, revised J533 harness
 
-    elif ret.flags & (VolkswagenFlags.MEB | VolkswagenFlags.MQB_EVO):
+    elif ret.flags & VolkswagenFlags.MEB:
       # Set global MEB parameters
-      if ret.flags & VolkswagenFlags.MEB:
-        safety_configs = [get_safety_config(structs.CarParams.SafetyModel.volkswagenMeb)]
-      elif ret.flags & VolkswagenFlags.MQB_EVO:
-        safety_configs = [get_safety_config(structs.CarParams.SafetyModel.volkswagenMqbEvo)]
-
-      if ret.flags & (VolkswagenFlags.MEB_GEN2 | VolkswagenFlags.MQB_EVO_GEN2):
-        # Gen2 uses the alt CRC lengths for QFK_01/ESC_51/Motor_51
+      safety_configs = [get_safety_config(structs.CarParams.SafetyModel.volkswagenMeb)]
+      if ret.flags & VolkswagenFlags.MEB_GEN2:
         safety_configs[0].safetyParam |= VolkswagenSafetyFlags.MEB_ALT_CRC.value
 
       ret.transmissionType = TransmissionType.direct
@@ -66,9 +61,6 @@ class CarInterface(CarInterfaceBase):
 
       if any(msg in fingerprint[1] for msg in (0x520, 0x86, 0xFD, 0x13D)):  # Airbag_02, LWI_01, ESP_21, QFK_01
         ret.networkLocation = NetworkLocation.gateway
-        # The filtered radar tracks are published as Strukturen_01 (0x24F); not every car
-        # emits it, so only claim radar is available when it's actually on the bus.
-        ret.radarUnavailable = 0x24F not in fingerprint[0]
       else:
         ret.networkLocation = NetworkLocation.fwdCamera
         ret.radarUnavailable = True
@@ -79,12 +71,9 @@ class CarInterface(CarInterfaceBase):
         ret.flags |= VolkswagenFlags.STOCK_KLR_PRESENT.value
       if 0x3DC in fingerprint[0]:  # Gateway_73
         ret.flags |= VolkswagenFlags.ALT_GEAR.value
-      if ret.flags & VolkswagenFlags.MQB_EVO and 0x30B in fingerprint[0]:  # Kombi_01
-        ret.flags |= VolkswagenFlags.KOMBI_PRESENT.value
 
       # only allow gateway harness to escalate Emergency Assist
-      if ret.flags & VolkswagenFlags.MEB:
-        ret.dashcamOnly = ret.networkLocation == NetworkLocation.fwdCamera and not docs
+      ret.dashcamOnly = ret.networkLocation == NetworkLocation.fwdCamera and not docs
 
     else:
       # Set global MQB parameters
@@ -114,7 +103,7 @@ class CarInterface(CarInterfaceBase):
     if ret.flags & VolkswagenFlags.PQ or ret.flags & VolkswagenFlags.MLB:
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-    elif ret.flags & (VolkswagenFlags.MEB | VolkswagenFlags.MQB_EVO):
+    elif ret.flags & VolkswagenFlags.MEB:
       ret.steerActuatorDelay = 0.3
     else:
       ret.steerActuatorDelay = 0.1
@@ -126,7 +115,7 @@ class CarInterface(CarInterfaceBase):
 
     # Global longitudinal tuning defaults, can be overridden per-vehicle
 
-    if ret.flags & (VolkswagenFlags.MEB | VolkswagenFlags.MQB_EVO):
+    if ret.flags & VolkswagenFlags.MEB:
       ret.openpilotLongitudinalControl = True
       ret.longitudinalActuatorDelay = 0.3
       ret.longitudinalTuning.kiBP = [0., 30.]
