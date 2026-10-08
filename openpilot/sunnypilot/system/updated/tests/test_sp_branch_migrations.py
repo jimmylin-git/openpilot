@@ -12,6 +12,12 @@ from openpilot.system.updated.updated import Updater
 
 
 class TestBranchMigrations(OpenpilotTestCase):
+  def test_v22_default_after_manager_clears_target(self, mocker):
+    params = Params()
+    params.remove("UpdaterTargetBranch")
+    mocker.patch("openpilot.system.updated.updated.HARDWARE.get_device_type", return_value="tici")
+    assert Updater().target_branch == "mrone-v22-c3xl-dev-cluster"
+
   @parameterized.expand([
     ("tici", "staging-c3-new", "staging-tici"),
     ("tici", "dev-c3-new", "staging-tici"),

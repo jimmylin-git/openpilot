@@ -2,6 +2,10 @@
 
 Standalone raylib cluster UI bundle for openpilot devices.
 
+This V22 branch is published as `mrone-v22-c3xl-dev-cluster`. The updater
+defaults to that name after manager startup clears `UpdaterTargetBranch`;
+the former `c3xl-dev-cluster` remote branch no longer exists.
+
 Run from the openpilot root:
 
 ```bash
