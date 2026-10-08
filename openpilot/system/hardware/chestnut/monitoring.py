@@ -14,7 +14,9 @@ def read_chestnut_state(handle, gpu_state=None):
     msg.chestnutState = gpu_state
   state = msg.chestnutState
   try:
-    with usbgpu_bus_lock():
+    with usbgpu_bus_lock(low_priority=True, blocking=False) as acquired:
+      if not acquired:
+        return None
       raw = handle.controlRead(0xC0, 0xC0, 0, 0, 5, timeout=100)
       state.supplyVoltage, state.supplyCurrent, state.supplyFault = struct.unpack('<Hh?', bytes(raw))
       raw = handle.controlRead(0xC0, 0xE4, 0xB450, 0, 1, timeout=100)
@@ -37,16 +39,20 @@ def chestnut_state_thread(end_event):
                      d['product'] == CHESTNUT_USB_PRODUCT]
           if len(devices) == 1:
             try:
-              with usbgpu_bus_lock():
-                handle = context.openByVendorIDAndProductID(devices[0]['vendorId'], devices[0]['productId'], skip_on_error=True)
+              with usbgpu_bus_lock(low_priority=True, blocking=False) as acquired:
+                if acquired:
+                  handle = context.openByVendorIDAndProductID(devices[0]['vendorId'], devices[0]['productId'], skip_on_error=True)
             except usb1.USBError:
               pass
         if handle is not None:
           sm.update(0)
           gpu_valid = sm.alive['chestnutGpuState'] and sm.valid['chestnutGpuState']
           msg = read_chestnut_state(handle, sm['chestnutGpuState'] if gpu_valid else None)
+          if msg is None:
+            end_event.wait(1 / SERVICE_LIST['chestnutState'].frequency)
+            continue
           if not msg.valid:
-            with usbgpu_bus_lock():
+            with usbgpu_bus_lock(low_priority=True):
               handle.close()
             handle = None
           msg.valid &= not sm.seen['chestnutGpuState'] or gpu_valid
@@ -54,5 +60,5 @@ def chestnut_state_thread(end_event):
         end_event.wait(1 / SERVICE_LIST['chestnutState'].frequency if handle is not None else 1.)
     finally:
       if handle is not None:
-        with usbgpu_bus_lock():
+        with usbgpu_bus_lock(low_priority=True):
           handle.close()

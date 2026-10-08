@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterable
 import ctypes
+import contextlib
 from pathlib import Path
 import queue
 import threading
@@ -30,6 +31,7 @@ def load_class(file_name: str, name: str, methods: set[str] | None = None) -> ty
         "time": time,
         "queue": queue,
         "ctypes": ctypes,
+        "usbgpu_bus_lock": lambda **kwargs: contextlib.nullcontext(True),
         "Any": Any,
         "Iterable": Iterable,
         "NATIVE_PACKET_QUEUE_PUT_TIMEOUT_S": 0.05,
@@ -39,6 +41,28 @@ def load_class(file_name: str, name: str, methods: set[str] | None = None) -> ty
 
 
 class JpegBackpressureTests(unittest.TestCase):
+    def test_display_skips_whole_frame_without_usb_calls_when_model_waits(self):
+        cls = load_class("cluster_usb_display.py", "TuringUsbDisplay", {"_send_frame"})
+        send = cls._send_frame
+        send.__globals__["usbgpu_bus_lock"] = lambda **kwargs: contextlib.nullcontext(False)
+        display = cls()
+        display._usb_lock = threading.RLock()
+        display._send_frame_locked = Mock()
+        display._record_priority_skip = Mock()
+        display._send_frame(101, b"frame")
+        display._send_frame_locked.assert_not_called()
+        display._record_priority_skip.assert_called_once()
+
+    def test_display_sends_complete_frame_when_admitted(self):
+        cls = load_class("cluster_usb_display.py", "TuringUsbDisplay", {"_send_frame"})
+        display = cls()
+        display._usb_lock = threading.RLock()
+        display._send_frame_locked = Mock()
+        display._record_priority_skip = Mock()
+        display._send_frame(101, b"frame")
+        display._send_frame_locked.assert_called_once_with(101, b"frame")
+        display._record_priority_skip.assert_not_called()
+
     def test_busy_frame_dropped_until_usb_send_completes(self):
         cls = load_class("cluster_usb_pipeline.py", "AsyncJpegUsbPipeline")
         entered, release = threading.Event(), threading.Event()

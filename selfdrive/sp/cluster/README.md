@@ -735,6 +735,18 @@ and tinygrad Chestnut USB transfers use the same process-shared lock at
 `/tmp/carrot_usbgpu_bus.lock`; Chestnut transfers retain their asynchronous
 double-buffered upload path.
 
+V23 gives model transfers priority over new HUD transfers and Chestnut telemetry.
+The `.priority` companion file announces waiting model requests; it is an
+admission signal, not a second USB transfer lock. A waiting model excludes new
+low-priority transactions even before it acquires the shared bus. HUD admission
+is nonblocking: a busy bus skips the next raw frame before readback/encoding, and
+JPEG/PNG recheck admission before uploading. Skips are counted and rate-limited
+in the log. Already encoded H264 packets remain intact; their sender yields
+priority between chunks instead of dropping reference frames. Chestnut telemetry
+skips a busy sample without closing its handle or publishing a false USB fault.
+Priority cannot preempt an in-flight transfer or guarantee the model's 50 ms
+deadline; no on-device performance improvement has been certified.
+
 When the asynchronous JPEG sender or native H264 sender is busy, the HUD
 skips the new USB frame before readback/encoding, without waiting for capacity.
 Native H264 admits the next frame only after the previous encoded frame's
@@ -745,7 +757,7 @@ after encoding; the existing chunk yielding and USB lock remain in effect.
 The ffmpeg fallback writes raw frames on a worker with no pending-frame FIFO;
 new frames are skipped while that worker is writing. ffmpeg/OS pipe buffering
 still exists, so that fallback does not guarantee native's one-frame-in-flight
-bound. Synchronous JPEG/PNG paths naturally block rather than queue frames.
+bound. Synchronous JPEG/PNG paths skip busy-bus frames rather than queue frames.
 Missing native encoder output for three seconds raises an explicit error for
 autorun to restart the HUD; normal backpressure is not treated as an error.
 The regular status log's cumulative `usb_dropped` counter reports skipped

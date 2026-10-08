@@ -174,10 +174,28 @@ class TuringUsbDisplay:
         self._turbojpeg = None
         self._turbojpeg_unavailable = False
         self._jpeg_buffer = BytesIO()
-        self._usb_lock = threading.Lock()
+        self._usb_lock = threading.RLock()
         self.chunk_gap_s = 0.0
         self.profile_enabled = os.environ.get("CLUSTER_PROFILE_USB") == "1"
         self._profile_samples: list[tuple[str, float]] = []
+        self._priority_skipped_frames = 0
+        self._priority_log_time = 0.0
+
+    def frame_transfer_available(self) -> bool:
+        with usbgpu_bus_lock(low_priority=True, blocking=False) as acquired:
+            if not acquired:
+                self._record_priority_skip()
+            return acquired
+
+    def _record_priority_skip(self) -> None:
+        self._priority_skipped_frames += 1
+        now = time.monotonic()
+        if now - self._priority_log_time >= 5.0:
+            print(
+                f"Cluster USB yielding to model: {self._priority_skipped_frames} updates skipped",
+                flush=True,
+            )
+            self._priority_log_time = now
 
     def set_profile_enabled(self, enabled: bool) -> None:
         self.profile_enabled = enabled
@@ -252,7 +270,7 @@ class TuringUsbDisplay:
         try:
             import usb.util
 
-            with usbgpu_bus_lock():
+            with usbgpu_bus_lock(low_priority=True):
                 usb.util.dispose_resources(self.dev)
         except Exception:
             pass
@@ -275,12 +293,12 @@ class TuringUsbDisplay:
 
     def _find_expected_usb_device(self) -> tuple[Any, int]:
         if self.expected_product_id is None:
-            with usbgpu_bus_lock():
+            with usbgpu_bus_lock(low_priority=True):
                 return self._find_usb_device()
 
         import usb.core  # type: ignore
 
-        with usbgpu_bus_lock():
+        with usbgpu_bus_lock(low_priority=True):
             dev = usb.core.find(idVendor=TURZX_USB_VENDOR_ID, idProduct=self.expected_product_id)
             if dev is None:
                 raise ValueError(f"USB device not found for pid=0x{self.expected_product_id:04x}")
@@ -416,7 +434,7 @@ class TuringUsbDisplay:
             except Exception as exc:
                 print(f"USB reset failed: {exc}")
             try:
-                with usbgpu_bus_lock():
+                with usbgpu_bus_lock(low_priority=True):
                     usb.util.dispose_resources(self.dev)
             except Exception:
                 pass
@@ -687,7 +705,7 @@ class TuringUsbDisplay:
     def _write_payload_checked(self, payload: bytes, error_message: str, timeout_ms: int) -> bytes:
         if self._ep_out is None or self._ep_in is None:
             raise RuntimeError("USB endpoints are not open")
-        with self._usb_lock, usbgpu_bus_lock():
+        with self._usb_lock, usbgpu_bus_lock(low_priority=True):
             profile_stage = self._profile_start()
             self._clear_endpoint_halt()
             self._drain_input()
@@ -706,7 +724,7 @@ class TuringUsbDisplay:
     def _write_payload_no_ack(self, payload: bytes, error_message: str, timeout_ms: int) -> None:
         if self._ep_out is None:
             raise RuntimeError("USB OUT endpoint is not open")
-        with self._usb_lock, usbgpu_bus_lock():
+        with self._usb_lock, usbgpu_bus_lock(low_priority=True):
             profile_stage = self._profile_start()
             self._clear_endpoint_halt()
             self._drain_input()
@@ -734,6 +752,13 @@ class TuringUsbDisplay:
         return payload
 
     def _send_frame(self, command_id: int, frame: bytes) -> None:
+        with self._usb_lock, usbgpu_bus_lock(low_priority=True, blocking=False) as acquired:
+            if not acquired:
+                self._record_priority_skip()
+                return
+            self._send_frame_locked(command_id, frame)
+
+    def _send_frame_locked(self, command_id: int, frame: bytes) -> None:
         if self.wait_for_frame_ack:
             response = (
                 self._send_frame_fast(command_id, frame)
@@ -756,7 +781,7 @@ class TuringUsbDisplay:
         if self._ep_out is None or self._ep_in is None:
             raise RuntimeError("USB OUT endpoint is not open")
 
-        with self._usb_lock, usbgpu_bus_lock():
+        with self._usb_lock, usbgpu_bus_lock(low_priority=True):
             profile_stage = self._profile_start()
             self._clear_endpoint_halt()
             self._drain_input()
@@ -776,7 +801,7 @@ class TuringUsbDisplay:
         if self._ep_out is None:
             raise RuntimeError("USB OUT endpoint is not open")
 
-        with self._usb_lock, usbgpu_bus_lock():
+        with self._usb_lock, usbgpu_bus_lock(low_priority=True):
             profile_stage = self._profile_start()
             if drain_input:
                 self._drain_input(
@@ -837,7 +862,7 @@ class TuringUsbDisplay:
         if self._ep_out is None or self._ep_in is None:
             raise RuntimeError("USB endpoints are not open")
 
-        with self._usb_lock, usbgpu_bus_lock():
+        with self._usb_lock, usbgpu_bus_lock(low_priority=True):
             profile_stage = self._profile_start()
             payload = self._build_h264_chunk_payload(chunk, is_last=is_last)
             self._profile_add("usb.h264.payload", profile_stage)
@@ -872,7 +897,7 @@ class TuringUsbDisplay:
         if self._ep_out is None:
             raise RuntimeError("USB OUT endpoint is not open")
 
-        with self._usb_lock, usbgpu_bus_lock():
+        with self._usb_lock, usbgpu_bus_lock(low_priority=True):
             profile_stage = self._profile_start()
             if drain_input:
                 self._drain_input(

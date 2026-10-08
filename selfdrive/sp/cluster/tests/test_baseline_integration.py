@@ -165,10 +165,11 @@ class BaselineIntegrationTests(unittest.TestCase):
         events = []
 
         @contextlib.contextmanager
-        def lock():
+        def lock(**kwargs):
+            self.assertEqual(kwargs, {"low_priority": True, "blocking": False})
             events.append("lock")
             try:
-                yield
+                yield True
             finally:
                 events.append("unlock")
 
@@ -190,6 +191,20 @@ class BaselineIntegrationTests(unittest.TestCase):
         self.assertEqual(result.chestnutState.supplyVoltage, 12000)
         self.assertEqual(result.chestnutState.pcieLtssm, 0x78)
         self.assertEqual(events, ["lock", "unlock"])
+
+    def test_busy_chestnut_monitor_does_not_read_or_report_usb_failure(self):
+        path = ROOT / "openpilot" / "system" / "hardware" / "chestnut" / "monitoring.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "read_chestnut_state")
+        handle = Mock()
+        namespace = {
+            "usbgpu_bus_lock": lambda **kwargs: contextlib.nullcontext(False),
+            "messaging": SimpleNamespace(new_message=lambda _: SimpleNamespace(chestnutState=SimpleNamespace())),
+            "usb1": SimpleNamespace(USBError=RuntimeError),
+        }
+        exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
+        self.assertIsNone(namespace["read_chestnut_state"](handle))
+        handle.controlRead.assert_not_called()
 
 
 if __name__ == "__main__":

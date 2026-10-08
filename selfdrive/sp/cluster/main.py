@@ -1126,6 +1126,7 @@ def run_demo(
             usb_frame_ready = (
                 (usb_pipeline is None or usb_pipeline.wait_for_capacity(timeout=0.0))
                 and (h264_pipeline is None or h264_pipeline.ready_for_frame())
+                and (usb_display is None or usb_display.frame_transfer_available())
             )
             if usb_display is not None and not usb_frame_ready:
                 usb_dropped_frames += 1

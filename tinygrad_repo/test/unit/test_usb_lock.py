@@ -77,7 +77,11 @@ class TestUSBExecutionLock(unittest.TestCase):
   def test_nested_shared_context_is_reentrant(self):
     flock = Mock()
     fake_fcntl = SimpleNamespace(flock=flock, LOCK_EX=2, LOCK_UN=8)
-    with patch.object(shared_lock, "fcntl", fake_fcntl), patch.object(shared_lock, "_shared_lock_fd", return_value=123):
+    with (
+      patch.object(shared_lock, "fcntl", fake_fcntl),
+      patch.object(shared_lock, "_shared_lock_fd", return_value=123),
+      patch.object(shared_lock, "_priority_request", contextlib.nullcontext),
+    ):
       with shared_lock.usbgpu_bus_lock():
         with usb.usb_execution([self.dev]):
           self.assertEqual(shared_lock._thread_state.depth, 2)
