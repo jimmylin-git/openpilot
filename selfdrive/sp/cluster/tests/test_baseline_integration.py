@@ -39,6 +39,8 @@ INTEGRATION_PATHS = {
     "openpilot/selfdrive/ui/mici/onroad/alert_renderer.py",
     "openpilot/system/ui/tici_setup.py",
     "openpilot/system/ui/test/test_setup_download.py",
+    "openpilot/selfdrive/ui/installer/installer.cc",
+    "openpilot/selfdrive/ui/installer/tests/test_installer_failure.py",
 }
 
 

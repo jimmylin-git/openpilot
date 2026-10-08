@@ -94,25 +94,16 @@ class Calibrator:
                   wide_from_device_euler_init: np.ndarray = WIDE_FROM_DEVICE_EULER_INIT,
                   height_init: np.ndarray = HEIGHT_INIT,
                   smooth_from: np.ndarray | None = None) -> None:
-    if not np.isfinite(rpy_init).all():
-      self.rpy = RPY_INIT.copy()
-    else:
-      self.rpy = rpy_init.copy()
-
-    if not np.isfinite(height_init).all() or len(height_init) != 1:
-      self.height = HEIGHT_INIT.copy()
-    else:
-      self.height = height_init.copy()
-
-    if not np.isfinite(wide_from_device_euler_init).all() or len(wide_from_device_euler_init) != 3:
-      self.wide_from_device_euler = WIDE_FROM_DEVICE_EULER_INIT.copy()
-    else:
-      self.wide_from_device_euler = wide_from_device_euler_init.copy()
-
-    if not np.isfinite(valid_blocks) or valid_blocks < 0:
-      self.valid_blocks = 0
-    else:
-      self.valid_blocks = valid_blocks
+    vectors_valid = all(v.shape == shape and np.isfinite(v).all()
+                        for v, shape in ((rpy_init, (3,)), (height_init, (1,)), (wide_from_device_euler_init, (3,))))
+    blocks_valid = (np.isfinite(valid_blocks) and 0 <= valid_blocks <= INPUTS_WANTED and int(valid_blocks) == valid_blocks)
+    if not vectors_valid or not blocks_valid:
+      cloudlog.error("Invalid saved calibration state; discarding its samples and restoring uncalibrated defaults")
+      rpy_init, height_init, wide_from_device_euler_init, valid_blocks = RPY_INIT, HEIGHT_INIT, WIDE_FROM_DEVICE_EULER_INIT, 0
+    self.rpy = rpy_init.copy()
+    self.height = height_init.copy()
+    self.wide_from_device_euler = wide_from_device_euler_init.copy()
+    self.valid_blocks = int(valid_blocks)
 
     self.rpys = np.tile(self.rpy, (INPUTS_WANTED, 1))
     self.wide_from_device_eulers = np.tile(self.wide_from_device_euler, (INPUTS_WANTED, 1))
@@ -123,6 +114,9 @@ class Calibrator:
     self.v_ego = 0.0
     self._invalid_cam_odom = False
 
+    if smooth_from is not None and (smooth_from.shape != (3,) or not np.isfinite(smooth_from).all()):
+      cloudlog.error("Invalid calibration smoothing state; disabling smoothing")
+      smooth_from = None
     if smooth_from is None:
       self.old_rpy = RPY_INIT
       self.old_rpy_weight = 0.0

@@ -1,7 +1,9 @@
 #include <array>
 #include <cassert>
+#include <cstdio>
 #include <fstream>
 #include <map>
+#include <stdexcept>
 
 #include "common/swaglog.h"
 #include "common/util.h"
@@ -27,6 +29,7 @@ const std::string BRANCH_STR = get_str(BRANCH "?                                
 
 const std::string INSTALL_PATH = "/data/openpilot";
 const std::string VALID_CACHE_PATH = "/data/.openpilot_cache";
+const std::string BACKUP_INSTALL_PATH = "/data/openpilot.install-backup";
 
 #define TMP_INSTALL_PATH "/data/tmppilot"
 
@@ -77,7 +80,30 @@ void branchMigration() {
 
 void run(const char* cmd) {
   int err = std::system(cmd);
-  assert(err == 0);
+  if (err != 0) {
+    LOGE("Installer command failed (%d): %s", err, cmd);
+    throw std::runtime_error(util::string_format("Command failed (%d): %s", err, cmd));
+  }
+}
+
+void showInstallError(const std::string &reason) {
+  LOGE("Installation failed: %s", reason.c_str());
+  SetTargetFPS(20);
+  while (!WindowShouldClose()) {
+    BeginDrawing();
+    ClearBackground(BLACK);
+    const float scale = tici_device ? 1.0f : 0.3f;
+    DrawTextEx(font_inter, "Installation failed", (Vector2){40 * scale, 80 * scale}, 90 * scale, 0, WHITE);
+    const char *instruction = util::file_exists(BACKUP_INSTALL_PATH) ?
+                              "Previous installation preserved. Recovery needed." :
+                              "Check connection and URL, then reboot to retry.";
+    DrawTextEx(font_inter, instruction,
+               (Vector2){40 * scale, 220 * scale}, 40 * scale, 0, WHITE);
+    DrawTextEx(font_inter, reason.substr(0, 110).c_str(), (Vector2){40 * scale, 380 * scale}, 30 * scale, 0, WHITE);
+    DrawTextEx(font_inter, "Details are recorded in the installer log.",
+               (Vector2){40 * scale, 300 * scale}, 40 * scale, 0, WHITE);
+    EndDrawing();
+  }
 }
 
 void finishInstall() {
@@ -116,6 +142,9 @@ void renderProgress(int progress) {
 }
 
 int doInstall() {
+  if (util::file_exists(BACKUP_INSTALL_PATH)) {
+    throw std::runtime_error("Previous install backup exists; recover /data/openpilot.install-backup before retrying");
+  }
   // wait for valid time
   while (!util::system_time_valid()) {
     util::sleep_for(500);
@@ -166,6 +195,7 @@ int executeGitCommand(const std::string &cmd) {
   char buffer[512];
   while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
     std::string line(buffer);
+    LOGD("%s", line.c_str());
     int base = 0;
     for (const auto &[text, weight] : stages) {
       if (line.find(text) != std::string::npos) {
@@ -185,21 +215,28 @@ int executeGitCommand(const std::string &cmd) {
 
 void cloneFinished(int exitCode) {
   LOGD("git finished with %d", exitCode);
-  assert(exitCode == 0);
-
-  renderProgress(100);
+  if (exitCode != 0) {
+    throw std::runtime_error(util::string_format("Git download failed (%d)", exitCode));
+  }
 
   // ensure correct branch is checked out
   int err = chdir(TMP_INSTALL_PATH);
-  assert(err == 0);
+  if (err != 0) throw std::runtime_error("Cannot enter downloaded repository");
   run(("git checkout " + migrated_branch).c_str());
   run(("git reset --hard origin/" + migrated_branch).c_str());
-  run("git submodule update --init");
+  run("git submodule update --init --recursive");
 
-  // move into place
+  const bool had_install = util::file_exists(INSTALL_PATH);
+  if (had_install && std::rename(INSTALL_PATH.c_str(), BACKUP_INSTALL_PATH.c_str()) != 0) {
+    throw std::runtime_error("Cannot preserve the previous installation");
+  }
+  if (std::rename(TMP_INSTALL_PATH, INSTALL_PATH.c_str()) != 0) {
+    if (had_install && std::rename(BACKUP_INSTALL_PATH.c_str(), INSTALL_PATH.c_str()) != 0) {
+      throw std::runtime_error("Install replacement failed; previous installation remains at /data/openpilot.install-backup");
+    }
+    throw std::runtime_error("Install replacement failed; previous installation preserved");
+  }
   run(("rm -f " + VALID_CACHE_PATH).c_str());
-  run(("rm -rf " + INSTALL_PATH).c_str());
-  run(util::string_format("mv %s %s", TMP_INSTALL_PATH, INSTALL_PATH.c_str()).c_str());
 
 #ifdef INTERNAL
   run("mkdir -p /data/params/d/");
@@ -224,15 +261,17 @@ void cloneFinished(int exitCode) {
 
   // write continue.sh
   FILE *of = fopen("/data/continue.sh.new", "wb");
-  assert(of != NULL);
+  if (of == nullptr) throw std::runtime_error("Cannot create installer continuation script");
 
   size_t num = str_continue_end - str_continue;
   size_t num_written = fwrite(str_continue, 1, num, of);
-  assert(num == num_written);
-  fclose(of);
+  int close_result = fclose(of);
+  if (num != num_written || close_result != 0) throw std::runtime_error("Cannot write installer continuation script");
 
   run("chmod +x /data/continue.sh.new");
   run("mv /data/continue.sh.new " CONTINUE_PATH);
+  if (had_install) run(("rm -rf " + BACKUP_INSTALL_PATH).c_str());
+  renderProgress(100);
 
   // wait for the installed software's UI to take over
   finishInstall();
@@ -254,17 +293,23 @@ int main(int argc, char *argv[]) {
 
   branchMigration();
 
-  if (util::file_exists(CONTINUE_PATH)) {
-    finishInstall();
-  } else {
-    renderProgress(0);
-    int result = doInstall();
-    cloneFinished(result);
+  int exit_code = 0;
+  try {
+    if (util::file_exists(CONTINUE_PATH)) {
+      finishInstall();
+    } else {
+      renderProgress(0);
+      int result = doInstall();
+      cloneFinished(result);
+    }
+  } catch (const std::exception &e) {
+    showInstallError(e.what());
+    exit_code = 1;
   }
 
   CloseWindow();
   UnloadFont(font_inter);
   UnloadFont(font_roman);
   UnloadFont(font_display);
-  return 0;
+  return exit_code;
 }

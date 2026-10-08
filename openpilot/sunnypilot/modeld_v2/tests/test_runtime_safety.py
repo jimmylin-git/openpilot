@@ -1,6 +1,9 @@
 import ast
 import enum
 import inspect
+import subprocess
+import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -240,6 +243,39 @@ class TestModelCompatibility(unittest.TestCase):
 
 
 class TestCalibrationInputSafety(unittest.TestCase):
+  def test_saved_state_bounds_and_shapes(self):
+    path = ROOT.parents[1] / "selfdrive" / "locationd" / "calibrationd.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Calibrator")
+    reset = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "reset")
+    namespace = {"np": np, "cloudlog": Mock(), "RPY_INIT": np.zeros(3), "HEIGHT_INIT": np.array([1.22]),
+                 "WIDE_FROM_DEVICE_EULER_INIT": np.zeros(3), "INPUTS_WANTED": 50}
+    module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), reset],
+                        type_ignores=[])
+    exec(compile(ast.fix_missing_locations(module), str(path), "exec"), namespace)
+    reset = namespace["reset"]
+    valid = [np.array([0., 0.03, 0.01]), 5, np.array([0., 0.01, 0.02]), np.array([1.3])]
+    for index, invalid in ((0, np.array([0., 0.])), (0, np.array([[0., 0., 0.]])),
+                           (0, np.array([0., np.nan, 0.])), (1, 51), (1, -1), (1, 1.5), (1, np.inf),
+                           (2, np.zeros(2)), (3, np.zeros(2)), (3, np.array([np.inf]))):
+      with self.subTest(index=index, invalid=invalid):
+        args = valid.copy()
+        args[index] = invalid
+        obj = SimpleNamespace()
+        reset(obj, *args)
+        self.assertEqual(obj.valid_blocks, 0)
+        np.testing.assert_array_equal(obj.rpy, np.zeros(3))
+        self.assertEqual(obj.rpys.shape, (50, 3))
+        self.assertEqual(obj.heights.shape, (50, 1))
+    for blocks in (0, 5, 50):
+      obj = SimpleNamespace()
+      reset(obj, valid[0], blocks, valid[2], valid[3], smooth_from=np.array([0., 0.02, 0.]))
+      self.assertEqual(obj.valid_blocks, blocks)
+      np.testing.assert_array_equal(obj.rpy, valid[0])
+      self.assertEqual(obj.old_rpy_weight, 1.)
+    reset(obj, *valid, smooth_from=np.array([0., np.nan, 0.]))
+    self.assertEqual(obj.old_rpy_weight, 0.)
+
   def test_production_input_guard_rejects_bad_samples_without_mutation(self):
     path = ROOT.parents[1] / "selfdrive" / "locationd" / "calibrationd.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -288,6 +324,87 @@ class TestCalibrationInputSafety(unittest.TestCase):
     for updated, valid, accepted in ((True, True, True), (True, False, False), (False, True, False)):
       sm = SimpleNamespace(updated={"cameraOdometry": updated}, valid={"cameraOdometry": valid})
       self.assertEqual(eval(condition, {"sm": sm}), accepted)
+
+
+class TestBigModelLoader(unittest.TestCase):
+  def load(self, factory):
+    namespace = load_functions("modeld.py", {"load_big_model"}, {
+      "threading": threading, "cloudlog": Mock(), "ModelState": factory, "BIG_MODEL_TIMEOUT": 60,
+    })
+    return namespace["load_big_model"], namespace["cloudlog"]
+
+  def test_success_returns_warmed_model(self):
+    model = Mock()
+    factory = Mock(return_value=model)
+    load, _ = self.load(factory)
+    self.assertIs(load(1928, 1208), model)
+    model.warmup.assert_called_once()
+    factory.assert_called_once_with(cam_w=1928, cam_h=1208, chestnut=True)
+
+  def test_completed_load_failure_keeps_small_fallback(self):
+    for phase in ("init", "warmup"):
+      with self.subTest(phase=phase):
+        model = Mock()
+        factory = Mock(return_value=model)
+        if phase == "init":
+          factory.side_effect = RuntimeError("USB disconnected")
+        else:
+          model.warmup.side_effect = RuntimeError("non-finite warmup")
+        load, logger = self.load(factory)
+        self.assertIsNone(load(1928, 1208))
+        logger.exception.assert_called_once()
+
+  def test_timeout_raises_instead_of_returning_small_fallback(self):
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+    def warmup():
+      entered.set()
+      release.wait(5)
+      finished.set()
+
+    model = Mock()
+    model.warmup.side_effect = warmup
+    load, _ = self.load(Mock(return_value=model))
+    try:
+      with self.assertRaisesRegex(TimeoutError, "restarting modeld"):
+        load(1928, 1208, timeout=0.02)
+      self.assertTrue(entered.is_set())
+      self.assertFalse(finished.is_set())
+    finally:
+      release.set()
+      self.assertTrue(finished.wait(2))
+
+  def test_main_timeout_clears_flags_and_propagates_before_small_model(self):
+    tree = ast.parse((ROOT / "modeld.py").read_text(encoding="utf-8"))
+    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    block = next(n for n in main.body if isinstance(n, ast.If) and isinstance(n.test, ast.Name) and n.test.id == "CHESTNUT"
+                 and any(isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "load_big_model"
+                         for call in ast.walk(n)))
+    params = Mock()
+    namespace = {"CHESTNUT": True, "params": params, "cloudlog": Mock(),
+                 "vipc_client_main": SimpleNamespace(width=1928, height=1208),
+                 "load_big_model": Mock(side_effect=TimeoutError("timed out"))}
+    with self.assertRaises(TimeoutError):
+      exec(compile(ast.Module(body=[block], type_ignores=[]), "modeld.py", "exec"), namespace)
+    self.assertEqual(params.put_bool.call_args_list[0].args, ("ChestnutActive", False))
+    self.assertEqual(params.put_bool.call_args_list[1].args, ("ChestnutLoading", False))
+
+  def test_timeout_process_exits_with_daemon_loader_still_blocked(self):
+    tree = ast.parse((ROOT / "modeld.py").read_text(encoding="utf-8"))
+    function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "load_big_model")
+    script = """import threading
+from types import SimpleNamespace
+BIG_MODEL_TIMEOUT = 60
+cloudlog = SimpleNamespace(exception=lambda message: print(message))
+class ModelState:
+  def __init__(self, **kwargs): pass
+  def warmup(self): threading.Event().wait()
+"""
+    script += ast.unparse(function) + "\nload_big_model(1928, 1208, timeout=0.02)\nprint('small model started')\n"
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=5)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn("TimeoutError", result.stderr)
+    self.assertNotIn("small model started", result.stdout)
 
 
 if __name__ == "__main__":

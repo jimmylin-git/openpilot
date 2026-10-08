@@ -32,6 +32,25 @@ def process_messages(c, cam_odo_calib, cycles,
 
 class TestCalibrationd(OpenpilotTestCase):
 
+  def test_saved_calibration_bounds_and_shapes(self):
+    c = Calibrator(param_put=False)
+    for rpy, blocks, wide, height in (
+      (np.zeros(2), 5, np.zeros(3), HEIGHT_INIT),
+      (np.zeros(3), INPUTS_WANTED + 1, np.zeros(3), HEIGHT_INIT),
+      (np.zeros(3), 1.5, np.zeros(3), HEIGHT_INIT),
+      (np.zeros(3), 5, np.array([0., np.nan, 0.]), HEIGHT_INIT),
+      (np.zeros(3), 5, np.zeros(3), np.zeros(2)),
+    ):
+      c.reset(rpy, blocks, wide, height)
+      c.update_status()
+      assert c.valid_blocks == 0
+      assert c.cal_status == log.ExtrinsicsCalibration.Status.uncalibrated
+      np.testing.assert_array_equal(c.rpy, np.zeros(3))
+    c.reset(np.zeros(3), INPUTS_WANTED, np.zeros(3), HEIGHT_INIT)
+    c.update_status()
+    assert c.valid_blocks == INPUTS_WANTED
+    assert c.cal_status == log.ExtrinsicsCalibration.Status.calibrated
+
   def test_invalid_odometry_preserves_calibration(self):
     c = Calibrator(param_put=False)
     process_messages(c, [0.0, 0.0, 0.0], BLOCK_SIZE * INPUTS_NEEDED)

@@ -50,6 +50,27 @@ PROCESS_NAME = "openpilot.selfdrive.modeld.modeld_tinygrad"
 BIG_MODEL_TIMEOUT = 60
 
 
+def load_big_model(cam_w: int, cam_h: int, timeout: float = BIG_MODEL_TIMEOUT) -> "ModelState | None":
+  big_model = None
+
+  def load():
+    nonlocal big_model
+    try:
+      model = ModelState(cam_w=cam_w, cam_h=cam_h, chestnut=True)
+      model.warmup()
+      big_model = model
+    except Exception:
+      cloudlog.exception("chestnut load failed")
+
+  loader = threading.Thread(target=load, daemon=True)
+  loader.start()
+  loader.join(timeout)
+  if loader.is_alive():
+    # A Python thread cannot cancel an in-flight GPU allocation or USB call.
+    raise TimeoutError(f"Chestnut model load exceeded {timeout}s; restarting modeld to release the loader")
+  return big_model
+
+
 def _pkl_exists(path):
   # a bare chunkmanifest is written eagerly for every model in the catalog, so it
   # must NOT be treated as downloaded - require the pkl or every chunk file
@@ -322,19 +343,13 @@ def main(demo=False):
 
   model = None
   if CHESTNUT:
-    big_model = None
-    def load_big():
-      nonlocal big_model
-      try:
-        m = ModelState(cam_w=vipc_client_main.width, cam_h=vipc_client_main.height, chestnut=True)
-        m.warmup()
-        big_model = m
-      except Exception:
-        cloudlog.exception("chestnut load failed")
-    loader = threading.Thread(target=load_big, daemon=True)
-    loader.start()
-    loader.join(BIG_MODEL_TIMEOUT)
-    model = big_model
+    try:
+      model = load_big_model(vipc_client_main.width, vipc_client_main.height)
+    except TimeoutError:
+      params.put_bool("ChestnutActive", False)
+      params.put_bool("ChestnutLoading", False)
+      cloudlog.exception("chestnut loader timed out; exiting without starting a concurrent small model")
+      raise
     params.put_bool("ChestnutActive", model is not None)
 
   small_model = ModelState(cam_w=vipc_client_main.width, cam_h=vipc_client_main.height, chestnut=False) if model is None or CHESTNUT else None

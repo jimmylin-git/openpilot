@@ -789,6 +789,28 @@ modify AGNOS or certify MR.ONE installer compatibility. Clean model/warp rebuild
 still need the matching missing `compile_onnx.py` and `compile_warp.py` tools;
 `compile3.py` is not an ABI-compatible replacement and is not substituted.
 
+If Chestnut loading exceeds 60 seconds, modeld now raises a logged timeout and
+exits for manager to restart it. It does not start a small model while its daemon
+loader can still allocate GPU resources or run warmup. This intentionally changes
+timeout behavior: persistent load hangs can cause repeated modeld restarts, not
+continuous small-model operation. Completed load failures still use the normal
+small-model fallback. Safe timeout fallback would require process isolation.
+
+Saved calibration vectors must have exact dimensions and finite values, and
+the sample block count must be an integer from zero through `INPUTS_WANTED`.
+Corrupt state is logged and discarded together rather than preserving a valid
+sample count attached to replacement zero angles. Valid saved calibration is
+unchanged; invalid smoothing state is also logged and disabled.
+
+The C++ installer checks clone/fetch, checkout, reset, and recursive submodule
+commands before replacing the installation. Errors remain on an explicit failure
+screen rather than exiting through assertions. The previous installation is
+renamed to `/data/openpilot.install-backup`; a failed replacement rename restores
+it. The backup is removed only after the continuation script is installed.
+Failures later in setup retain the backup for manual recovery, and an existing
+backup blocks another installation attempt rather than overwriting recovery data.
+These source fixes do not replace the externally hosted MR.ONE installer binary.
+
 When the asynchronous JPEG sender or native H264 sender is busy, the HUD
 skips the new USB frame before readback/encoding, without waiting for capacity.
 Native H264 admits the next frame only after the previous encoded frame's
