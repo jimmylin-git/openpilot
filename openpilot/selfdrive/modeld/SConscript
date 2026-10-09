@@ -47,8 +47,8 @@ def chestnut_action(command):
         break
       time.sleep(1)
     else:
-      print("Chestnut not ready, skipping warp build")
-      return
+      print("ERROR: Chestnut not ready after 10 link checks; warp build failed")
+      return 1
     return env.Execute(command)
   return Action(do_compile, "  [CHESTNUT] $TARGET")
 

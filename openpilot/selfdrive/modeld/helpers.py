@@ -1,10 +1,8 @@
-import io
-import pickle
-import struct
 from pathlib import Path
 
 from openpilot.common.file_chunker import get_manifest_path
 from openpilot.common.hardware.usb import CHESTNUT_USB_PRODUCT, USB_DEVICES_PATH, is_chestnut_usb_id
+from openpilot.common.model_pickle import load_oob as _load_oob
 
 MODELS_DIR = Path(__file__).resolve().parent / 'models'
 
@@ -14,14 +12,7 @@ def modeld_pkl_path(chestnut: bool):
   return MODELS_DIR / f'{prefix}driving_tinygrad.pkl'
 
 def load_oob(f):
-  opcodes = f.read(struct.unpack('<q', f.read(8))[0])
-  def buffers():
-    while (h := f.read(8)):
-      pb = pickle.PickleBuffer(bytearray(struct.unpack('<q', h)[0]))
-      if f.readinto(pb) != pb.raw().nbytes:
-        raise EOFError("incomplete model buffer")
-      yield pb
-  return pickle.load(io.BytesIO(opcodes), buffers=buffers())
+  return _load_oob(f)
 
 def chestnut_present() -> bool:
   for d in USB_DEVICES_PATH.glob("*"):

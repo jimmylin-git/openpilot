@@ -178,7 +178,8 @@ class NativeTinygradAdapter(BaseModelAdapter):
     self.frame_copy_size = stride * (y_height + uv_height)
 
     self.input_shapes_orig = self.jits['metadata']['input_shapes']
-    self._vision_input_names = [k for k in self.input_shapes_orig if 'img' in k]
+    # Native new_img is the combined warp output, not an individual camera stream.
+    self._vision_input_names = ['img', 'big_img']
     self.vision_output_slices = pickle.loads(codecs.decode(self.jits['metadata']['metadata']['output_slices'].encode(), 'base64'))
 
     self.run_warp = self._load_warp()

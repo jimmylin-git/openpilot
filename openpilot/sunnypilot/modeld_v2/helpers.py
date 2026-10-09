@@ -14,6 +14,8 @@ import tempfile
 import shutil
 import enum
 
+from openpilot.common.model_pickle import load_oob as _load_oob
+
 
 def _pad_args(func, args, kwargs):
   sig = inspect.signature(func)
@@ -61,7 +63,10 @@ def _dynamic_factory(real_class):
     __slots__ = ()
 
     def __new__(cls, *args, **kwargs):
-      return factory(*args, **kwargs)
+      # Pickle NEWOBJ restores attributes separately and must not invoke __init__.
+      if real_class.__new__ is object.__new__:
+        return object.__new__(real_class)
+      return real_class.__new__(real_class, *args, **kwargs)
 
   DynamicProxy.__name__ = real_class.__name__
   DynamicProxy.__module__ = real_class.__module__
@@ -77,13 +82,7 @@ class DynamicTinygradUnpickler(pickle.Unpickler):
 
 
 def load_oob(f):
-  opcodes = f.read(struct.unpack('<q', f.read(8))[0])
-  def buffers():
-    while (h := f.read(8)):
-      pb = pickle.PickleBuffer(bytearray(struct.unpack('<q', h)[0]))
-      f.readinto(pb)
-      yield pb
-  return DynamicTinygradUnpickler(io.BytesIO(opcodes), buffers=buffers()).load()
+  return _load_oob(f, DynamicTinygradUnpickler)
 
 
 def dump_oob(obj, f):
