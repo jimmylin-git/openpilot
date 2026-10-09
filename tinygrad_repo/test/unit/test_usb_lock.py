@@ -42,7 +42,7 @@ class TestUSBConfiguration(unittest.TestCase):
           patch.object(usb.libusb, "libusb_close") as close,
         ):
           if failed_stage == "unsupported_product":
-            with self.assertRaises(AssertionError):
+            with self.assertRaisesRegex(RuntimeError, "Unsupported USB bridge"):
               usb.USB3(None)
           elif failed_stage is not None:
             with self.assertRaisesRegex(RuntimeError, f"failed {failed_stage}"):

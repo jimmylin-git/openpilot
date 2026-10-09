@@ -52,6 +52,7 @@ class USB3:
     self._async_locks: dict[int, Any] = {}
     self._async_pool: list = []
     self._async_cb = libusb.libusb_transfer_cb_fn(self._on_bulk_done)
+    self._interface_claimed = False
 
     self.handle = c.init_c_var(c.POINTER[libusb.struct_libusb_device_handle], lambda x: _usb_locked(checked(libusb.libusb_open), dev, x))
 
@@ -62,7 +63,8 @@ class USB3:
       _usb_locked(checked(libusb.libusb_get_device_descriptor), libusb.libusb_get_device(self.handle), ctypes.byref(_desc))
       _ret = _usb_locked(checked(libusb.libusb_get_string_descriptor_ascii), self.handle, _desc.iProduct, _buf, 256)
       self.product = bytes(_buf[:_ret]).decode("ascii", errors="replace")
-      assert self.product.startswith("custom") or self.product.startswith("AS2462")
+      if not (self.product.startswith("custom") or self.product.startswith("AS2462")):
+        raise RuntimeError(f"Unsupported USB bridge product: {self.product!r}")
 
       # Detach kernel driver if needed
       if _usb_locked(checked(libusb.libusb_kernel_driver_active), self.handle, 0):
@@ -71,7 +73,7 @@ class USB3:
 
       self._configure_interface()
     except BaseException:
-      _usb_locked(libusb.libusb_close, self.handle)
+      self.close()
       raise
 
   def _configure_interface(self):
@@ -83,30 +85,53 @@ class USB3:
       if configuration.value != 1:
         checked(libusb.libusb_set_configuration)(self.handle, 1)
       checked(libusb.libusb_claim_interface)(self.handle, 0)
+      self._interface_claimed = True
       try:
         checked(libusb.libusb_set_interface_alt_setting)(self.handle, 0, 0)
       except BaseException:
         libusb.libusb_release_interface(self.handle, 0)
+        self._interface_claimed = False
         raise
 
+  def close(self):
+    with usbgpu_bus_lock():
+      if self.handle is None: return
+      if self._async_pending:
+        raise RuntimeError("Cannot close USB bridge while async transfers are pending")
+      try:
+        if self._interface_claimed:
+          checked(libusb.libusb_release_interface, "USB interface release failed")(self.handle, 0)
+      finally:
+        libusb.libusb_close(self.handle)
+        self.handle, self._interface_claimed = None, False
+        for transfer in self._async_pool: libusb.libusb_free_transfer(transfer)
+        self._async_pool.clear()
+
   def control_write(self, request:int, value:int=0, index:int=0, data:bytes=b'', timeout:int=1000):
-    assert len(data) <= len(self._ctrl_mv)
-    self._ctrl_mv[:len(data)] = data
-    assert _usb_locked(checked(libusb.libusb_control_transfer, f"USB {self.product} control OUT request=0x{request:02x}"),
-                       self.handle, 0x40, request, value, index, self._ctrl_buf, len(data), timeout) == len(data)
+    with usbgpu_bus_lock():
+      if len(data) > len(self._ctrl_mv): raise ValueError(f"USB control payload too large: {len(data)}")
+      self._ctrl_mv[:len(data)] = data
+      actual = checked(libusb.libusb_control_transfer, f"USB {self.product} control OUT request=0x{request:02x}")(
+        self.handle, 0x40, request, value, index, self._ctrl_buf, len(data), timeout)
+      if actual != len(data): raise RuntimeError(f"USB control OUT request=0x{request:02x} short write: {actual}/{len(data)} bytes")
 
   def control_read(self, request:int, length:int, value:int=0, index:int=0, timeout:int=1000) -> memoryview:
-    assert length <= len(self._ctrl_mv)
-    assert _usb_locked(checked(libusb.libusb_control_transfer, f"USB {self.product} control IN request=0x{request:02x}"),
-                       self.handle, 0xC0, request, value, index, self._ctrl_buf, length, timeout) == length
-    return self._ctrl_mv[:length]
+    with usbgpu_bus_lock():
+      if not 0 <= length <= len(self._ctrl_mv): raise ValueError(f"Invalid USB control read length: {length}")
+      actual = checked(libusb.libusb_control_transfer, f"USB {self.product} control IN request=0x{request:02x}")(
+        self.handle, 0xC0, request, value, index, self._ctrl_buf, length, timeout)
+      if actual != length: raise RuntimeError(f"USB control IN request=0x{request:02x} short read: {actual}/{length} bytes")
+      # Results must remain valid after the shared staging buffer is reused.
+      return memoryview(bytes(self._ctrl_mv[:length]))
 
   def bulk_write(self, payload:bytes, timeout:int=1000):
-    if len(payload) > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(len(payload))
-    self._bulk_mv[:len(payload)] = payload
-    _usb_locked(checked(libusb.libusb_bulk_transfer, "bulk OUT 0x02 failed"),
-                self.handle, 0x02, self._bulk_buf, len(payload), self._transferred, timeout)
-    assert self._transferred.value == len(payload), f"bulk OUT short write: {self._transferred.value}/{len(payload)} bytes"
+    with usbgpu_bus_lock():
+      if len(payload) > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(len(payload))
+      self._bulk_mv[:len(payload)] = payload
+      checked(libusb.libusb_bulk_transfer, "bulk OUT 0x02 failed")(
+        self.handle, 0x02, self._bulk_buf, len(payload), self._transferred, timeout)
+      if self._transferred.value != len(payload):
+        raise RuntimeError(f"bulk OUT short write: {self._transferred.value}/{len(payload)} bytes")
 
   def _on_bulk_done(self, xfer):  # runs in libusb event handling; latch errors (exceptions here are unraisable)
     exp = xfer.contents.length - 8 if xfer.contents.type == libusb.LIBUSB_TRANSFER_TYPE_CONTROL else xfer.contents.length
@@ -116,21 +141,24 @@ class USB3:
   def _submit_async(self, endpoint:int, xtype:int, payload:bytes|bytearray|memoryview, timeout:int) -> int:  # payload kept alive till bulk_wait
     bus_lock = usbgpu_bus_lock()
     bus_lock.__enter__()
-    tag = None
+    tag, tr = None, None
     try:
+      if self._async_err: raise RuntimeError(f"USB async context failed: status={self._async_err}")
       tr = self._async_pool.pop() if self._async_pool else libusb.libusb_alloc_transfer(0)
+      if not tr: raise MemoryError("libusb_alloc_transfer failed")
       tr.contents.dev_handle, tr.contents.endpoint, tr.contents.type = self.handle, endpoint, xtype
       tr.contents.timeout, tr.contents.length = timeout, len(payload)
       tr.contents.buffer = ctypes.cast(from_mv(memoryview(payload), ctypes.c_ubyte), ctypes.POINTER(ctypes.c_ubyte))
       tr.contents.callback, tr.contents.user_data = self._async_cb, (tag := next(self._async_seq))
       self._async_pending[tag] = (tr, payload)
       self._async_locks[tag] = bus_lock
-      _usb_locked(checked(libusb.libusb_submit_transfer, "async submit failed"), tr)
+      checked(libusb.libusb_submit_transfer, "async submit failed")(tr)
       return tag
     except BaseException:
       if tag is not None:
         self._async_locks.pop(tag, None)
         self._async_pending.pop(tag, None)
+      if tr: libusb.libusb_free_transfer(tr)
       bus_lock.__exit__(*sys.exc_info())
       raise
 
@@ -150,19 +178,56 @@ class USB3:
 
   def bulk_wait(self, tag:int):
     """Block until the tagged transfer completes; raises if any async transfer failed. LIBUSB_ERROR_INTERRUPTED is retried."""
+    errors: list[Exception] = []
+    event_errors: set[int] = set()
+    cancelled, warned = False, False
+    transfer = self._async_pending.get(tag)
+    timeout_ms = transfer[0].contents.timeout if transfer else 0
+    deadline = time.monotonic() + timeout_ms / 1000 + 1 if timeout_ms else float("inf")
+
+    def cancel():
+      nonlocal cancelled, deadline
+      cancelled, deadline = True, time.monotonic() + 1
+      if tag in self._async_pending:
+        rc = libusb.libusb_cancel_transfer(self._async_pending[tag][0])
+        if rc < 0: errors.append(RuntimeError(f"async USB cancellation failed: {rc}"))
+
     try:
       while tag in self._async_pending:
-        if (rc:=_usb_locked(libusb.libusb_handle_events, None)) < 0 and rc != libusb.LIBUSB_ERROR_INTERRUPTED:
-          raise RuntimeError(f"libusb_handle_events: {ctypes.string_at(libusb.libusb_strerror(rc)).decode()}")
-      if self._async_err: raise RuntimeError(f"async bulk OUT failed: status={self._async_err}")
+        if time.monotonic() >= deadline:
+          if not cancelled:
+            errors.append(TimeoutError("async USB transfer completion timed out"))
+            cancel()
+          elif not warned:
+            message = "async USB cancellation incomplete; retaining bus lock until completion"
+            print(message, file=sys.stderr)
+            errors.append(TimeoutError(message))
+            warned = True
+        timeout = libusb.struct_timeval()
+        timeout.tv_usec = 10000
+        rc = _usb_locked(libusb.libusb_handle_events_timeout, self.ctx(), ctypes.byref(timeout))
+        if rc < 0 and rc != libusb.LIBUSB_ERROR_INTERRUPTED:
+          if rc not in event_errors:
+            event_errors.add(rc)
+            errors.append(RuntimeError(f"async USB event handling failed: {rc}"))
+          if not cancelled: cancel()
+          time.sleep(0.01)
+      if self._async_err: errors.append(RuntimeError(f"async USB transfer failed: status={self._async_err}"))
+      if errors: raise ExceptionGroup("async USB transfer completion failed", errors)
     finally:
-      bus_lock = self._async_locks.pop(tag, None)
+      # Even an unexpected exception cannot release a transfer still owned by libusb.
+      bus_lock = self._async_locks.pop(tag, None) if tag not in self._async_pending else None
       if bus_lock is not None: bus_lock.__exit__(*sys.exc_info())
 
   def bulk_read(self, length:int, timeout:int=1000) -> memoryview:
-    if length > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(length)
-    _usb_locked(checked(libusb.libusb_bulk_transfer, "bulk IN 0x81 failed"), self.handle, 0x81, self._bulk_buf, length, self._transferred, timeout)
-    return self._bulk_mv[:self._transferred.value]
+    with usbgpu_bus_lock():
+      if length < 0: raise ValueError(f"Invalid USB bulk read length: {length}")
+      if length > len(self._bulk_mv): self._bulk_buf, self._bulk_mv = alloc_cbuffer(length)
+      checked(libusb.libusb_bulk_transfer, "bulk IN 0x81 failed")(
+        self.handle, 0x81, self._bulk_buf, length, self._transferred, timeout)
+      if self._transferred.value != length:
+        raise RuntimeError(f"bulk IN short read: {self._transferred.value}/{length} bytes")
+      return memoryview(bytes(self._bulk_mv[:length]))
 
   # NOTE: keep it for flash.py
   def send_batch(self, cdbs:list[bytes], odata:list[bytes|None]|None=None):

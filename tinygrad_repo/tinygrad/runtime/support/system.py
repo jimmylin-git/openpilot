@@ -256,10 +256,14 @@ class USBPCIDevice(PCIDevice):
     self.pcibus, self.peer_group = pcibus, f"USBPCIDevice_{pcibus}"
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     usb = USB3(dev)
-    if DEBUG >= 1: print(f"am {self.pcibus}: product string: {usb.product!r}")
-    self.usb: CustomASM24Controller = CustomASM24Controller(usb)
-    self._bar_info = System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
-    self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
+    try:
+      if DEBUG >= 1: print(f"am {self.pcibus}: product string: {usb.product!r}")
+      self.usb: CustomASM24Controller = CustomASM24Controller(usb)
+      self._bar_info = System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
+      self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
+    except BaseException:
+      usb.close()
+      raise
 
   def dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:

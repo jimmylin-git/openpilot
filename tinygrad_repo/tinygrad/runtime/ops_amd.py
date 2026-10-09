@@ -811,8 +811,12 @@ class USBIface(PCIIface):
     if dev_id >= len(visible:=hcq_filter_visible_devices(USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001), "AMD")):
       raise RuntimeError(f"AMD:{dev_id} does not exist ({pluralize('device', len(visible))} available)")
     self.dev, self.pci_dev, self.vram_bar, self.count = dev, USBPCIDevice("AM", *visible[dev_id]), 0, len(visible)
-    self.dev_impl = AMDev(self.pci_dev)
-    self._compute_props()
+    try:
+      self.dev_impl = AMDev(self.pci_dev)
+      self._compute_props()
+    except BaseException:
+      self.pci_dev.usb.usb.close()
+      raise
 
   @functools.cached_property
   def ctrl(self) -> Buffer:

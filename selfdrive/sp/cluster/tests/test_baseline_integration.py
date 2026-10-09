@@ -37,6 +37,8 @@ INTEGRATION_PATHS = {
     "tinygrad_repo/tinygrad/engine/realize.py",
     "tinygrad_repo/tinygrad/runtime/support/usb.py",
     "tinygrad_repo/test/unit/test_usb_lock.py",
+    "tinygrad_repo/test/unit/test_usb_safety.py",
+    "tinygrad_repo/tinygrad/runtime/ops_amd.py",
     "tinygrad_repo/tinygrad/runtime/support/system.py",
     "tinygrad_repo/test/unit/test_system_lock.py",
     "tinygrad_repo/examples/openpilot/compile_onnx.py",
