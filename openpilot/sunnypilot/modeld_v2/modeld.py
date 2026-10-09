@@ -178,12 +178,31 @@ class ModelState(ModelStateBase):
 
     self.parser = Parser()
     self.prev_desire = np.zeros(self.constants.DESIRE_LEN, dtype=np.float32)
+    self._timing_frames = 0
+    self._timing_totals: dict[str, float] = {}
+    self._timing_max: dict[str, float] = {}
+
+  def _record_runtime_timing(self, stages: dict[str, float]) -> None:
+    self._timing_frames += 1
+    for name, seconds in stages.items():
+      self._timing_totals[name] = self._timing_totals.get(name, 0.) + seconds
+      self._timing_max[name] = max(self._timing_max.get(name, 0.), seconds)
+    if self._timing_frames == 100:
+      cloudlog.event("model_runtime_timing", big=self.chestnut, model_type=self._combined_model_type, frames=self._timing_frames,
+                     mean_ms={name: seconds * 1000 / self._timing_frames for name, seconds in self._timing_totals.items()},
+                     max_ms={name: seconds * 1000 for name, seconds in self._timing_max.items()})
+      self._timing_frames = 0
+      self._timing_totals.clear()
+      self._timing_max.clear()
 
   def warmup(self) -> None:
     dummy_frames, transforms, dummy_inputs = self.adapter.get_dummy_inputs()
     self.run(dummy_frames, transforms, dummy_inputs)
     self.adapter.reset_warmup_buffers()
     self.prev_desire[:] = 0
+    self._timing_frames = 0
+    self._timing_totals.clear()
+    self._timing_max.clear()
 
   @property
   def mlsim(self) -> bool:
@@ -200,6 +219,7 @@ class ModelState(ModelStateBase):
   def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
           inputs: dict[str, np.ndarray],
           after_enqueue: Callable[[], None] | None = None) -> dict[str, np.ndarray] | None:
+    started = time.perf_counter()
     self.adapter.copy_frames(bufs)
 
     desire_key = self.desire_key
@@ -220,13 +240,20 @@ class ModelState(ModelStateBase):
       self.numpy_inputs['tfm'][:, :] = transforms[self._road_key].reshape(3, 3)
       self.numpy_inputs['big_tfm'][:, :] = transforms[self._wide_key].reshape(3, 3)
 
+    inputs_ready = time.perf_counter()
     raw_outputs = self.adapter.run()
+    enqueued = time.perf_counter()
 
     if after_enqueue is not None:
       after_enqueue()
 
+    telemetry_done = time.perf_counter()
+    readback_seconds = 0.
     def checked_output(raw, stage):
+      nonlocal readback_seconds
+      readback_started = time.perf_counter()
       output = raw.numpy().flatten()
+      readback_seconds += time.perf_counter() - readback_started
       if not np.all(np.isfinite(output)):
         bad = np.flatnonzero(~np.isfinite(output))
         raise RuntimeError(f"model output not finite: stage={stage}, count={bad.size}, first_index={bad[0]}")
@@ -273,6 +300,12 @@ class ModelState(ModelStateBase):
       buf[0, :-1] = buf[0, 1:]
       buf[0, -1, :] = outputs['desired_curvature'][0, :] if not self.mlsim else 0
 
+    finished = time.perf_counter()
+    self._record_runtime_timing({
+      "inputs": inputs_ready - started, "enqueue": enqueued - inputs_ready,
+      "telemetry": telemetry_done - enqueued, "readback": readback_seconds,
+      "parse_and_state": finished - telemetry_done - readback_seconds, "total": finished - started,
+    })
     return outputs
 
   def get_action_from_model(self, model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
@@ -516,6 +549,7 @@ def main(demo=False):
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
                      frame_drop_ratio, meta_main.timestamp_eof, model_execution_time, live_calib_seen, meta_constants)
       modelv2_send.modelV2.big = model.chestnut
+      drivingdata_send.drivingModelData.big = model.chestnut
 
       desire_state = modelv2_send.modelV2.meta.desireState
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]

@@ -26,3 +26,13 @@ export STREAM=1
 export STREAM_PORT=8082
 export STREAM_QUALITY=50
 export STREAM_FPS=10
+
+# Cold boots on AGNOS can restore a date older than the TLS certificates.
+# This is only a lower bound; NTP/GPS must still synchronize the clock.
+if [ -f /AGNOS ] && [ "$(date +%Y%m%d)" -lt 20261009 ]; then
+  if sudo date -s "2026-10-09 12:00:00" >/dev/null; then
+    printf 'seeded %s (was earlier than 2026-10-09)\n' "$(date -Is)" >> /data/time_seed.log
+  else
+    echo "Failed to seed system time; TLS may fail until NTP/GPS synchronizes" >&2
+  fi
+fi

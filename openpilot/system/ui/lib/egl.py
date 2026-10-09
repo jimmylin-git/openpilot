@@ -132,7 +132,7 @@ def create_egl_image(width: int, height: int, stride: int, fd: int, uv_offset: i
     # Duplicate fd since EGL needs it
     dup_fd = os.dup(fd)
   except OSError as e:
-    cloudlog.exception(f"Failed to duplicate frame fd when creating EGL image: {e}")
+    cloudlog.exception(f"Failed to duplicate frame fd {fd} ({width}x{height}, stride={stride}, uv_offset={uv_offset}): {e}")
     return None
 
   # Create image attributes for EGL
@@ -149,28 +149,36 @@ def create_egl_image(width: int, height: int, stride: int, fd: int, uv_offset: i
     EGL_NONE
   ]
 
-  attr_array = _egl.ffi.new("int[]", img_attrs)
-  egl_image = _egl.create_image_khr(_egl.display, _egl.NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, _egl.ffi.NULL, attr_array)
-
-  if egl_image == _egl.NO_IMAGE_KHR:
-    cloudlog.error(f"Failed to create EGL image: {_egl.get_error()}")
-    os.close(dup_fd)
-    return None
-
-  return EGLImage(egl_image=egl_image, fd=dup_fd)
+  imported = False
+  try:
+    attr_array = _egl.ffi.new("int[]", img_attrs)
+    egl_image = _egl.create_image_khr(_egl.display, _egl.NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, _egl.ffi.NULL, attr_array)
+    if egl_image == _egl.NO_IMAGE_KHR:
+      cloudlog.error(f"Failed to create EGL image: {_egl.get_error()}, source_fd={fd}, size={width}x{height}, stride={stride}")
+      return None
+    image = EGLImage(egl_image=egl_image, fd=dup_fd)
+    imported = True
+    return image
+  finally:
+    if not imported:
+      os.close(dup_fd)
 
 
 def destroy_egl_image(egl_image: EGLImage) -> None:
   assert _egl.initialized, "EGL not initialized"
 
-  _egl.destroy_image_khr(_egl.display, egl_image.egl_image)
-
-  # Close the duplicated fd we created in create_egl_image()
-  # We need to handle OSError since the fd might already be closed
+  if egl_image.fd < 0:
+    return
+  fd = egl_image.fd
+  egl_image.fd = -1
   try:
-    os.close(egl_image.fd)
-  except OSError:
-    pass
+    if not _egl.destroy_image_khr(_egl.display, egl_image.egl_image):
+      cloudlog.error(f"Failed to destroy EGL image: {_egl.get_error()}")
+  finally:
+    try:
+      os.close(fd)
+    except OSError:
+      cloudlog.exception(f"Failed to close EGL image fd {fd}")
 
 
 def bind_egl_image_to_texture(texture_id: int, egl_image: EGLImage) -> None:

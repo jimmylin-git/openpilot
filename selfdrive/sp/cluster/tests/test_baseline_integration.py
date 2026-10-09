@@ -9,10 +9,11 @@ import subprocess
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[4]
-BASELINE = "770c8244645bd4bf79dbe6314fc0839ad9c704e6"
+BASELINE = "1e58de131abd96fa4df8b09f768e189f3e5468e7"
 INTEGRATION_PATHS = {
     "openpilot/common/params_keys.h",
     "openpilot/common/usbgpu_bus_lock.py",
@@ -54,6 +55,21 @@ INTEGRATION_PATHS = {
     "openpilot/sunnypilot/modeld_v2/fill_model_msg.py",
     "openpilot/selfdrive/locationd/calibrationd.py",
     "openpilot/selfdrive/locationd/test/test_calibrationd.py",
+    "openpilot/selfdrive/locationd/locationd.py",
+    "openpilot/selfdrive/locationd/test/test_locationd_staleness.py",
+    "openpilot/selfdrive/ui/soundd.py",
+    "openpilot/selfdrive/ui/tests/test_soundd_initialization.py",
+    "openpilot/selfdrive/ui/tests/test_camera_recovery.py",
+    "openpilot/selfdrive/ui/onroad/cameraview.py",
+    "openpilot/selfdrive/ui/mici/onroad/cameraview.py",
+    "openpilot/system/ui/lib/egl.py",
+    "openpilot/selfdrive/car/card.py",
+    "openpilot/selfdrive/car/tests/test_cruise_diagnostics.py",
+    "openpilot/selfdrive/selfdrived/selfdrived.py",
+    "openpilot/selfdrive/selfdrived/events.py",
+    "openpilot/selfdrive/ui/sunnypilot/layouts/settings/models.py",
+    "launch_env.sh",
+    "tinygrad_repo/test/unit/test_usb_compiled_faults.py",
     "openpilot/selfdrive/ui/mici/onroad/alert_renderer.py",
     "openpilot/system/ui/tici_setup.py",
     "openpilot/system/ui/test/test_setup_download.py",
@@ -63,6 +79,20 @@ INTEGRATION_PATHS = {
 
 
 class BaselineIntegrationTests(unittest.TestCase):
+    def test_updater_defers_optional_pyserial_dependency(self):
+        archive = ROOT / "openpilot" / "common" / "hardware" / "comma" / "updater"
+        with zipfile.ZipFile(archive) as updater:
+            self.assertIsNone(updater.testzip())
+            tree = ast.parse(updater.read("openpilot/system/hardware/tici/hardware.py").decode())
+        top_level_lpa = [n for n in tree.body if isinstance(n, ast.ImportFrom) and n.module.endswith(".lpa")]
+        self.assertEqual(top_level_lpa, [])
+        cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Tici")
+        get_lpa = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "get_sim_lpa")
+        self.assertTrue(any(isinstance(n, ast.ImportFrom) and n.module.endswith(".lpa") for n in get_lpa.body))
+        launch = (ROOT / "launch_chffrplus.sh").read_text(encoding="utf-8")
+        self.assertNotIn("pip install", launch)
+        self.assertNotIn("import serial", launch)
+
     def test_language_menu_only_offers_english(self):
         languages = ROOT / "openpilot" / "selfdrive" / "ui" / "translations" / "languages.json"
         self.assertEqual(json.loads(languages.read_text(encoding="utf-8")), {"English": "en"})

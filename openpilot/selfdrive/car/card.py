@@ -80,6 +80,9 @@ class Car:
     self.CS_prev = car.CarState.new_message()
     self.CS_SP_prev = custom.CarStateSP.new_message()
     self.initialized_prev = False
+    self._cruise_log_state = None
+    self._cruise_log_frame = -500
+    self._last_actuation_nanos = None
 
     self.last_actuators_output = structs.CarControl.Actuators()
 
@@ -200,6 +203,7 @@ class Car:
     RD: structs.RadarDataT | None = self.RI.update(can_list)
 
     self.sm.update(0)
+    self._log_toyota_cruise_state(CS)
 
     can_rcv_valid = len(can_strs) > 0
 
@@ -221,6 +225,33 @@ class Car:
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
 
     return CS, CS_SP, RD
+
+  def _log_toyota_cruise_state(self, CS: structs.CarState) -> None:
+    if self.CP.brand != "toyota":
+      return
+    CC = self.sm["carControl"]
+    state = (CS.cruiseState.available, CS.cruiseState.enabled, CS.accFaulted, CS.carFaultedNonCritical,
+             CS.canValid, CS.canTimeout, CC.cruiseControl.cancel, self.sm.alive["carControl"], self.sm.valid["carControl"])
+    if state == self._cruise_log_state and self.sm.frame - self._cruise_log_frame < 500:
+      return
+    self._cruise_log_state = state
+    self._cruise_log_frame = self.sm.frame
+    pcm = []
+    for parser in self.CI.can_parsers.values():
+      for message, fields in (("PCM_CRUISE", ("CRUISE_ACTIVE", "CRUISE_STATE")),
+                              ("PCM_CRUISE_2", ("MAIN_ON", "ACC_FAULTED", "LOW_SPEED_LOCKOUT")),
+                              ("DSU_CRUISE", ("MAIN_ON",))):
+        if message in parser.vl:
+          pcm.append({"bus": parser.bus, "message": message,
+                      "signals": {field: parser.vl[message][field] for field in fields},
+                      "timestamps_ns": {field: parser.ts_nanos[message][field] for field in fields}})
+    cloudlog.event("toyota_cruise_state", available=CS.cruiseState.available, enabled=CS.cruiseState.enabled,
+                   acc_faulted=CS.accFaulted, temporary_acc_faulted=CS.carFaultedNonCritical,
+                   can_valid=CS.canValid, can_timeout=CS.canTimeout, pcm=pcm,
+                   requested_cancel=CC.cruiseControl.cancel,
+                   last_applied_cancel=self.CC_prev.cruiseControl.cancel if self._last_actuation_nanos is not None else None,
+                   last_actuation_time_ns=self._last_actuation_nanos,
+                   car_control_alive=self.sm.alive["carControl"], car_control_valid=self.sm.valid["carControl"])
 
   def state_publish(self, CS: car.CarState, CS_SP: custom.CarStateSP, RD: structs.RadarDataT | None):
     """carState and carParams publish loop"""
@@ -281,6 +312,7 @@ class Car:
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
       self.CC_prev = CC
+      self._last_actuation_nanos = now_nanos
 
   def step(self):
     CS, CS_SP, RD = self.state_update()

@@ -49,6 +49,7 @@ class HandleLogResult(Enum):
   TIMING_INVALID = 1
   INPUT_INVALID = 2
   SENSOR_SOURCE_INVALID = 3
+  CAMERA_ODO_STALE = 4
 
 
 class LocationEstimator:
@@ -60,6 +61,8 @@ class LocationEstimator:
     self.posenet_stds = np.array([POSENET_STD_INITIAL_VALUE] * (POSENET_STD_HIST_HALF * 2))
     self.car_speed = 0.0
     self.camodo_yawrate_distribution = np.array([0.0, 10.0])  # mean, std
+    self.camodo_yawrate_time: float | None = None
+    self.camodo_yawrate_stale = False
     self.device_from_calib = np.eye(3)
 
     obs_kinds = [ObservationKind.PHONE_ACCEL, ObservationKind.PHONE_GYRO, ObservationKind.CAMERA_ODO_ROTATION, ObservationKind.CAMERA_ODO_TRANSLATION]
@@ -68,6 +71,12 @@ class LocationEstimator:
 
   def reset(self, t: float | None, x_initial: np.ndarray = PoseKalman.initial_x, P_initial: np.ndarray = PoseKalman.initial_P):
     self.kf.init_state(x_initial, covs=P_initial, filter_time=t)
+    self.camodo_yawrate_time = None
+    self.camodo_yawrate_distribution = np.array([0.0, 10.0])
+    self.camodo_yawrate_stale = False
+
+  def camera_odometry_fresh(self, t: float) -> bool:
+    return self.camodo_yawrate_time is not None and abs(t - self.camodo_yawrate_time) <= MAX_FILTER_REWIND_TIME
 
   def _validate_sensor_source(self, source: log.SensorEventData.SensorSource):
     # some segments have two IMUs, ignore the second one
@@ -131,12 +140,22 @@ class LocationEstimator:
       v = msg.gyroUncalibrated.v
       meas = np.array([-v[2], -v[1], -v[0]])
 
+      if not np.isfinite(meas).all() or np.linalg.norm(meas) >= ROTATION_SANITY_CHECK:
+        return HandleLogResult.INPUT_INVALID
+
+      # A stalled model is not evidence that the current gyro measurement is bad.
+      if self.camodo_yawrate_time is not None and not self.camera_odometry_fresh(sensor_time):
+        if not self.camodo_yawrate_stale:
+          cloudlog.warning("Gyroscope comparison deferred: camera odometry is stale")
+        self.camodo_yawrate_stale = True
+        return HandleLogResult.CAMERA_ODO_STALE
+
       gyro_bias = self.kf.x[States.GYRO_BIAS]
       gyro_camodo_yawrate_err = np.abs((meas[2] - gyro_bias[2]) - self.camodo_yawrate_distribution[0])
       gyro_camodo_yawrate_err_threshold = YAWRATE_CROSS_ERR_CHECK_FACTOR * self.camodo_yawrate_distribution[1]
       gyro_valid = gyro_camodo_yawrate_err < gyro_camodo_yawrate_err_threshold
 
-      if np.linalg.norm(meas) >= ROTATION_SANITY_CHECK or not gyro_valid:
+      if not gyro_valid:
         return HandleLogResult.INPUT_INVALID
 
       gyro_res = self.kf.predict_and_observe(sensor_time, ObservationKind.PHONE_GYRO, meas)
@@ -193,6 +212,10 @@ class LocationEstimator:
       cam_odo_rot_res = self.kf.predict_and_observe(t, ObservationKind.CAMERA_ODO_ROTATION, rot_device, np.array([np.diag(rot_device_noise)]))
       cam_odo_trans_res = self.kf.predict_and_observe(t, ObservationKind.CAMERA_ODO_TRANSLATION, trans_device, np.array([np.diag(trans_device_noise)]))
       self.camodo_yawrate_distribution =  np.array([rot_device[2], rot_device_std[2]])
+      self.camodo_yawrate_time = t
+      if self.camodo_yawrate_stale:
+        cloudlog.info("Camera odometry recovered; resuming gyroscope consistency checks")
+      self.camodo_yawrate_stale = False
       if cam_odo_rot_res is not None:
         _, new_x, _, new_P, _, _, (cam_odo_rot_err,), _, _ = cam_odo_rot_res
         self.observation_errors[ObservationKind.CAMERA_ODO_ROTATION] = np.array(cam_odo_rot_err)
@@ -329,7 +352,8 @@ def main():
 
     if sm.updated["cameraOdometry"]:
       critical_service_inputs_valid = all(observation_input_invalid[s] < input_invalid_threshold[s] for s in critical_services)
-      inputs_valid = sm.all_valid() and critical_service_inputs_valid
+      odometry_time = sm.logMonoTime["cameraOdometry"] * 1e-9 if SIMULATION else time.monotonic()
+      inputs_valid = sm.all_valid() and critical_service_inputs_valid and estimator.camera_odometry_fresh(odometry_time)
       sensors_valid = sensor_all_checks(acc_msgs, gyro_msgs, sensor_valid, sensor_recv_time, sensor_alive, SIMULATION)
 
       msg = estimator.get_msg(sensors_valid, inputs_valid, filter_initialized)

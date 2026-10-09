@@ -8,7 +8,6 @@ from openpilot.cereal import log, messaging, custom
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import Ratekeeper
-from openpilot.common.utils import retry
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.system import micd
@@ -168,12 +167,18 @@ class Soundd(QuietMode):
     volume = ((weighted_db - AMBIENT_DB) / DB_SCALE) * (MAX_VOLUME - MIN_VOLUME) + MIN_VOLUME
     return math.pow(VOLUME_BASE, (np.clip(volume, MIN_VOLUME, MAX_VOLUME) - 1))
 
-  @retry(attempts=10, delay=3)
   def get_stream(self, sd):
-    # reload sounddevice to reinitialize portaudio
-    sd._terminate()
-    sd._initialize()
-    return sd.OutputStream(channels=1, samplerate=SAMPLE_RATE, callback=self.callback, blocksize=SAMPLE_BUFFER)
+    for attempt in range(10):
+      try:
+        # Reload sounddevice to reinitialize portaudio.
+        sd._terminate()
+        sd._initialize()
+        return sd.OutputStream(channels=1, samplerate=SAMPLE_RATE, callback=self.callback, blocksize=SAMPLE_BUFFER)
+      except sd.PortAudioError:
+        cloudlog.exception(f"soundd stream initialization failed (attempt {attempt + 1}/10)")
+        if attempt == 9:
+          raise
+        time.sleep(3)
 
   def soundd_thread(self):
     # sounddevice must be imported after forking processes

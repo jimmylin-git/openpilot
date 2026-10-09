@@ -10,23 +10,68 @@ commit `330d3f634d34bc3055d2a3141268836fc8220208` (2026-10-07
 Cluster files are carried from `c3xl-dev-cluster` commit
 `46f8bd998ccaf01338204ca4f6b1daaa23c528f7`.
 
-MR.ONE updates are merged through commit
-`770c8244645bd4bf79dbe6314fc0839ad9c704e6` (2026-10-08
-21:02:43 +0800). Upstream reverted the MQB EVO port and associated radar,
-safety and firmware changes, and updated the c3 client. Temporary launch
-overrides have no net difference from the previous baseline. This update does
-not change model inference or calibration. Integration tests compare against
-this updated baseline.
+MR.ONE updates are integrated through commit
+`1e58de131abd96fa4df8b09f768e189f3e5468e7`. Since the previous
+`770c8244645bd4bf79dbe6314fc0839ad9c704e6` baseline, the net changes are the
+pyserial-free AGNOS updater and a boot-time clock lower bound. No Toyota,
+Panda, tinygrad or model changes are present in this upstream update.
+The clock seed is limited to AGNOS and reports failures rather than claiming
+success; it is not a substitute for NTP/GPS synchronization.
+Integration tests compare against this updated baseline.
 
-The integration changes outside this bundle are Cluster process/parameter
+The initial integration changes outside this bundle were Cluster process/parameter
 registration, the native H264 encoder bridge/build target, shared USB bus
 serialization and its tests. The USB coordination touches tinygrad
 `engine/realize.py`, `runtime/support/usb.py` and Chestnut monitoring so that
 Cluster transfers cannot overlap GPU transfers; those files are therefore not
 byte-identical to upstream. The GPU ownership flock, pickle loader, model
 adapters, compilers, catalogs, model assets, driver monitoring, car/Panda code
-and main UI (except the requested homepage and language-menu overrides below) remain upstream originals. No previous custom model protections,
-model defaults or vehicle/UI changes are carried onto this branch.
+and main UI (except the requested homepage and language-menu overrides below)
+were initially upstream originals. Subsequent compiler and runtime hardening
+is covered by the integration allowlist and regression tests.
+
+The October 9 recordings reproduced a ten-second model outage followed by
+small-model inference. During the outage, locationd compared live gyroscope
+measurements against stale camera odometry, creating 145 false gyro sanity
+failures and a long-lived input-invalid counter. Stale comparisons are now
+deferred without fusing those gyro observations or counting them as gyro
+faults. Fresh camera odometry is required for valid localization output.
+Existing magnitude, consistency and recovery thresholds are unchanged.
+This does not resolve the original eGPU/PCIe outage.
+
+Both `modelV2` and `drivingModelData` now report the same big-model marker.
+Audio initialization retries log the PortAudio cause and preserve the final
+exception instead of replacing it with a generic retry error.
+Failed big-model loads no longer generate a "Big Model Ready" alert.
+Model status text does not claim the small model is driving or available
+without evidence that it is ready; safety event types remain unchanged.
+Live freshness uses monotonic time; simulation/replay uses recorded event time
+so historical recordings retain their original timing behavior.
+The compiled USB fault probes still contain five expected failures:
+they document unresolved production error handling, not a completed fix.
+
+Camera views now discard failed EGL imports, release the previous image cache,
+and replace the VisionIPC client with connection attempts throttled by the
+existing retry interval. Both standard and mici views use this recovery path.
+EGL duplicates are closed on failed/exceptional imports, and image destruction
+is idempotent to avoid closing a subsequently reused descriptor. This prevents
+repeated imports of the same bad frame; it does not prove why the recorded
+camera descriptors became invalid.
+
+Custom modeld emits `model_runtime_timing` every 100 successful runs, with
+mean/max milliseconds for host inputs, enqueue, GPU telemetry, output readback,
+parsing/state updates and total runtime. Warmup is excluded. Readback may include
+waiting for GPU execution, so these stages are not GPU kernel timings.
+The October 9 big-model averages (about 50.7 and 55.5 ms) exceed a 50 ms
+20 Hz frame budget; diagnostics alone do not make those models meet it.
+
+For Toyota, card logs `toyota_cruise_state` on cruise/fault/cancel/connection
+transitions and every five seconds. It includes parser bus, raw PCM signals,
+signal timestamps (zero means never received), requested cancellation and the
+last applied cancellation with its timestamp. Applied commands are not proof
+of transmission past Panda safety. Received `MAIN_ON=0` and `CRUISE_ACTIVE=0`
+are not overridden; no Toyota decoding, controller or safety gates are changed.
+The vehicle-side reason for those zero states still requires fresh CAN evidence.
 
 The original updater fix added `time`, required by the Git download progress
 callback. Upstream now includes the same fix, so `system/updated/updated.py`
@@ -51,10 +96,10 @@ ratio, using the same height and bottom alignment as the other status icons.
 
 The pinned upstream model SConscript references
 `tinygrad_repo/examples/openpilot/compile_onnx.py` and `compile_warp.py`, but
-neither script exists in that revision. This branch deliberately does not
-carry the previous fork's replacement compiler. A clean full source rebuild
-therefore has this upstream prerequisite unresolved; do not remove prebuilt
-model artifacts or deploy this branch as a verified build.
+neither script exists in that revision. This branch restores the compiler
+scripts from pinned tinygrad commit `fe5d3169ba4f41d0947ad174925f413cbea9d056`
+with compatibility tests. Host tests still do not certify a full device build,
+Chestnut operation or ACC engagement.
 
 Run from the openpilot root:
 

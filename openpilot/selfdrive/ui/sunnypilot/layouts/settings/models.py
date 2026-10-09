@@ -205,26 +205,15 @@ class ModelsLayout(Widget):
       item.set_description("")
 
   def _status_note(self) -> str:
-    """The failover story for the Model Status row. One-way big -> small, and the
-    fallback is runner-matched: a Default big can only fall back to the Default
-    small (stock modeld), a custom big has no automatic fallback yet."""
     if not ui_state.chestnut_present:
       return ""
     big_bundle = get_selected_bundle(ui_state.params, "chestnut")
     big_name = big_bundle.internalName if big_bundle else default_model_name("chestnut")
-    big_is_default = big_bundle is None
-    fallback_name = default_model_name("qcom")
     state = big_model_state()
     if state == 'failed':
-      if big_is_default:
-        return tr("Big model unavailable, {} is driving until the next drive.").format(fallback_name)
       return tr("Big model unavailable until the next drive.")
     if state == 'loading':
-      if big_is_default:
-        return tr("{} drives until the big model is ready.").format(fallback_name)
       return tr("Getting the big model ready.")
-    if big_is_default:
-      return tr("{} will drive. If it fails during a drive, {} takes over until the next drive.").format(big_name, fallback_name)
     return tr("{} will drive when the chestnut is ready.").format(big_name)
 
   @staticmethod

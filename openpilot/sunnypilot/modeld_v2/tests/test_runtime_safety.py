@@ -4,10 +4,11 @@ import inspect
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -19,7 +20,7 @@ def load_method(filename, cls, method):
   tree = ast.parse((ROOT / filename).read_text(encoding="utf-8"))
   definition = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == cls)
   function = next(n for n in definition.body if isinstance(n, ast.FunctionDef) and n.name == method)
-  namespace = {"np": np}
+  namespace = {"np": np, "time": time}
   module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), function],
                       type_ignores=[])
   exec(compile(ast.fix_missing_locations(module), filename, "exec"), namespace)
@@ -35,6 +36,82 @@ def load_functions(filename, names, namespace):
 
 
 class TestRuntimeSafety(unittest.TestCase):
+  def test_runtime_timing_reports_stage_means_maxima_and_resets(self):
+    record = load_method("modeld.py", "ModelState", "_record_runtime_timing")
+    logger = Mock()
+    record.__globals__["cloudlog"] = logger
+    obj = SimpleNamespace(_timing_frames=0, _timing_totals={}, _timing_max={}, chestnut=True, _combined_model_type="supercombo")
+    for _ in range(99):
+      record(obj, {"enqueue": .020, "readback": .025, "total": .050})
+    logger.event.assert_not_called()
+    record(obj, {"enqueue": .040, "readback": .035, "total": .100})
+    fields = logger.event.call_args.kwargs
+    self.assertEqual(fields["frames"], 100)
+    self.assertTrue(fields["big"])
+    self.assertAlmostEqual(fields["mean_ms"]["enqueue"], 20.2)
+    self.assertAlmostEqual(fields["mean_ms"]["readback"], 25.1)
+    self.assertAlmostEqual(fields["mean_ms"]["total"], 50.5)
+    self.assertEqual(fields["max_ms"]["total"], 100.)
+    self.assertEqual(obj._timing_frames, 0)
+    self.assertEqual(obj._timing_totals, {})
+    self.assertEqual(obj._timing_max, {})
+
+  def test_runtime_timing_separates_telemetry_and_readback(self):
+    state = self.state(SimpleNamespace(numpy=lambda: np.array([1., 2.])))
+    state.parser.parse_outputs.return_value = {}
+    run = load_method("modeld.py", "ModelState", "run")
+    clock = SimpleNamespace(perf_counter=Mock(side_effect=[0., 1., 3., 8., 8.5, 9., 10.]))
+    callback = Mock()
+    with patch.dict(run.__globals__, {"time": clock}):
+      run(state, {}, {"img": np.eye(3), "big_img": np.eye(3)}, {"desire": np.zeros(2)}, callback)
+    callback.assert_called_once()
+    state._record_runtime_timing.assert_called_once_with(
+      {"inputs": 1., "enqueue": 2., "telemetry": 5., "readback": .5, "parse_and_state": 1.5, "total": 10.})
+
+  def test_big_ready_alert_requires_successful_load(self):
+    source = ROOT.parents[1] / "selfdrive" / "selfdrived" / "selfdrived.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "SelfdriveD")
+    method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "update_events")
+    block = next(n for n in method.body if isinstance(n, ast.If) and any(
+      isinstance(call, ast.Attribute) and call.attr == "bigModelReady" for call in ast.walk(n)))
+    for active in (True, False, None):
+      obj = SimpleNamespace(big_model_loading=True, big_model_ready_t=0., events_sp=Mock())
+      namespace = {"self": obj, "loading": False, "big_active": active, "time": SimpleNamespace(monotonic=lambda: 123.),
+                   "custom": SimpleNamespace(OnroadEventSP=SimpleNamespace(EventName=SimpleNamespace(bigModelReady=42)))}
+      exec(compile(ast.Module(body=[block], type_ignores=[]), str(source), "exec"), namespace)
+      self.assertEqual(obj.big_model_ready_t, 123.)
+      self.assertEqual(obj.events_sp.add.call_count, int(active is True))
+
+  def test_model_status_does_not_claim_unverified_small_model_readiness(self):
+    source = ROOT.parents[1] / "selfdrive" / "ui" / "sunnypilot" / "layouts" / "settings" / "models.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    method = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_status_note")
+    for bundle in (None, SimpleNamespace(internalName="Custom big")):
+      for state, expected in (("failed", "Big model unavailable until the next drive."),
+                              ("loading", "Getting the big model ready.")):
+        namespace = {"ui_state": SimpleNamespace(chestnut_present=True, params=Mock()),
+                     "get_selected_bundle": Mock(return_value=bundle), "default_model_name": Mock(return_value="Default big"),
+                     "big_model_state": Mock(return_value=state), "tr": lambda text: text}
+        exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), "exec"), namespace)
+        self.assertEqual(namespace["_status_note"](SimpleNamespace()), expected)
+
+  def test_model_source_marker_matches_in_both_publications(self):
+    tree = ast.parse((ROOT / "modeld.py").read_text(encoding="utf-8"))
+    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    markers = [n for n in ast.walk(main) if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Attribute)
+               and n.targets[0].attr == "big"]
+    publication_markers = [n for n in markers if isinstance(n.targets[0].value, ast.Attribute)
+                           and n.targets[0].value.attr in {"modelV2", "drivingModelData"}]
+    self.assertEqual(len(publication_markers), 2)
+    for big in (True, False):
+      modelv2 = SimpleNamespace(modelV2=SimpleNamespace())
+      driving = SimpleNamespace(drivingModelData=SimpleNamespace())
+      namespace = {"model": SimpleNamespace(chestnut=big), "modelv2_send": modelv2, "drivingdata_send": driving}
+      exec(compile(ast.Module(body=publication_markers, type_ignores=[]), "modeld.py", "exec"), namespace)
+      self.assertEqual(modelv2.modelV2.big, big)
+      self.assertEqual(driving.drivingModelData.big, big)
+
   def test_legacy_reset_real_cpu_tensors_preserves_queue_identity(self):
     from tinygrad import Tensor
     reset = load_method("model_adapters.py", "LegacyModelAdapter", "reset_warmup_buffers")
@@ -86,6 +163,7 @@ class TestRuntimeSafety(unittest.TestCase):
       _road_key="img", _wide_key="big_img", _combined_model_type=model_type, chestnut=True,
       vision_output_slices={"hidden_state": slice(0, 2)}, parser=Mock(), _policy_keys=["policy"],
       _policy_slices_list=[{}], _has_on_policy=False, mlsim=False,
+      _record_runtime_timing=Mock(),
     )
 
   def run_state(self, state):

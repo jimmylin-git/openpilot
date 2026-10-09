@@ -198,6 +198,9 @@ class CameraView(Widget):
     self.frame = None
     self.available_streams.clear()
     self.client = None
+    self._target_client = None
+    self._target_stream_type = None
+    self._switching = False
 
   def __del__(self):
     self.close()
@@ -284,6 +287,7 @@ class CameraView(Widget):
       if egl_image:
         self.egl_images[idx] = egl_image
       else:
+        self._reset_connection()
         return
 
     # Update texture dimensions to match current frame
@@ -328,6 +332,7 @@ class CameraView(Widget):
   def _ensure_connection(self) -> bool:
     if not self.client.is_connected():
       self.frame = None
+      self._clear_textures()
       self.available_streams.clear()
 
       # Throttle connection attempts
@@ -344,6 +349,14 @@ class CameraView(Widget):
       self.available_streams = self.client.available_streams(self._name, block=False)
 
     return True
+
+  def _reset_connection(self) -> None:
+    cloudlog.error(f"Camera EGL import failed; reconnecting {self._name} stream {self._stream_type}")
+    self.frame = None
+    self._clear_textures()
+    self.available_streams.clear()
+    self.client = VisionIpcClient(self._name, self._stream_type, conflate=True)
+    self.last_connection_attempt = rl.get_time()
 
   def _handle_switch(self) -> None:
     """Check if target stream is ready and switch immediately."""
