@@ -22,6 +22,19 @@ class ExtractedPolicy:
   removed_calls: int
   retained_calls: int
   qualified: bool = False
+  state: Tensor | None = None
+
+
+def _resident_feedback(ret, control_bytes: int) -> tuple[Tensor, UOp, UOp]:
+  if (not isinstance(ret, tuple) or len(ret) != 1 or not isinstance(ret[0], Tensor) or
+      ret[0].shape != (1, 18452) or ret[0].dtype != dtypes.float32 or ret[0].device != 'AMD'):
+    raise ValueError("Resident state requires the inspected CTMV2 float32 output")
+  output = ret[0].uop.reshape((18452,))
+  hidden = output.shrink(((2066, 18450),)).bitcast(dtypes.uint8)
+  state = UOp.new_buffer('AMD', 65536, dtypes.uint8)
+  if control_bytes - math.prod(state.shape) != 120:
+    raise ValueError("Unexpected CTMV2 previous-feature offset")
+  return Tensor(state), hidden, output.shrink(((0, 2066),))
 
 
 def _check_control_access(call: UOp, packed: UOp, limit: int) -> None:
@@ -55,7 +68,7 @@ def _check_control_access(call: UOp, packed: UOp, limit: int) -> None:
     raise ValueError("Cannot prove policy control access bounds")
 
 
-def extract_ctmv2(artifact: dict, camera_size: tuple[int, int], frame_bytes: int) -> ExtractedPolicy:
+def extract_ctmv2(artifact: dict, camera_size: tuple[int, int], frame_bytes: int, *, resident_state: bool = False) -> ExtractedPolicy:
   """Construct an unqualified candidate from a trusted artifact, without changing it.
 
   The kernel binaries and scratch arena are retained. Compact images are copied
@@ -127,26 +140,39 @@ def extract_ctmv2(artifact: dict, camera_size: tuple[int, int], frame_bytes: int
   if not all(warped in get_call_arg_uops(call) for call in policy[:2]):
     raise ValueError("Image history kernels do not consume the identified warp output")
 
-  image_offset = (control_bytes + 511) // 512 * 512
+  state, hidden, visible = _resident_feedback(capture.ret, control_bytes) if resident_state else (None, None, None)
+  upload_controls = 120 if resident_state else control_bytes
+  image_offset = (upload_controls + 511) // 512 * 512
   input_bytes = image_offset + math.prod(IMAGE_SHAPE)
   compact = UOp.new_buffer('AMD', input_bytes, dtypes.uint8)
   compact_host = UOp.param(4, dtypes.uint8, input_bytes, 'NPY')
-  controls = compact.shrink(((0, control_bytes),))
+  controls = UOp.new_buffer('AMD', control_bytes, dtypes.uint8) if resident_state else compact.shrink(((0, control_bytes),))
   images = compact.shrink(((image_offset, input_bytes),))
   rewritten = tuple(c.replace(src=(c.src[0], *(b.substitute({packed: controls}) for b in c.src[1:]))) for c in policy)
   policy_graph = graph.replace(src=(graph.src[0].replace(src=rewritten),))
+  calls_before = [compact_host.copy_to_device('AMD').call(compact, compact_host)]
+  calls_after = []
+  if state is not None:
+    header = compact.shrink(((0, upload_controls),))
+    calls_before.extend((
+      header.copy_to_device('AMD').call(controls.shrink(((0, upload_controls),)), header),
+      state.uop.copy_to_device('AMD').call(controls.shrink(((upload_controls, control_bytes),)), state.uop),
+    ))
+    calls_after.append(hidden.copy_to_device('AMD').call(state.uop, hidden))
   new_linear = linear.replace(src=(
-    compact_host.copy_to_device('AMD').call(compact, compact_host),
+    *calls_before,
     images.copy_to_device('AMD').call(warped, images),
     graph_call.replace(src=(policy_graph, *graph_call.src[1:])),
+    *calls_after,
   ))
   info = list(capture.expected_input_info)
   old_view, variables, dtype, device = info[4]
   if variables or dtype != dtypes.uint8 or device != 'NPY' or old_view.op is not Ops.NOOP:
     raise ValueError("Unsupported host input specification")
-  run_policy = _TinyJit(None, CapturedJit(capture.ret, new_linear, list(capture.expected_names), info))
+  ret = (Tensor(visible).reshape((1, 2066)),) if resident_state else capture.ret
+  run_policy = _TinyJit(None, CapturedJit(ret, new_linear, list(capture.expected_names), info))
   reference_linear = linear.replace(src=(upload, graph_call.replace(src=(
     graph.replace(src=(graph.src[0].replace(src=prefix),)), *graph_call.src[1:]))))
   reference_warp = _TinyJit(None, CapturedJit(Tensor(warped).reshape(IMAGE_SHAPE), reference_linear,
                                           list(capture.expected_names), list(capture.expected_input_info)))
-  return ExtractedPolicy(run_policy, reference_warp, control_bytes, image_offset, input_bytes, len(prefix), len(policy))
+  return ExtractedPolicy(run_policy, reference_warp, upload_controls, image_offset, input_bytes, len(prefix), len(policy), state=state)

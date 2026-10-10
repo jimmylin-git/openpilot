@@ -189,3 +189,51 @@ versus extracted outputs and history across changing inputs, QCOM versus the
 original AMD warp, serialization/reload, same-model fallback, sustained latency
 and Cluster contention. No QCOM frontend or ready artifact has been installed
 for this candidate. Never use it for driving based only on static inspection.
+
+#### Compact upload and AMD-resident feature feedback
+
+The explicit research option `extract_ctmv2(..., resident_state=True)` removes
+the previous feature from the host payload. It retains the original history
+kernels and their state queues; it does not substitute another model or change
+their sampling semantics. Each call uploads a 120-byte transform/control header
+and 393,216 image bytes in a 393,728-byte aligned buffer. AMD-local copies fill
+the original control layout and warp-output view. A dedicated 65,536-byte AMD
+buffer feeds the prior hidden feature into the next call and receives output
+floats `[2066:18450]` after the model finishes. Initialize it to zero before the
+first call. The returned public output is `(1, 2066)` float32 (8,264 bytes),
+excluding hidden state and trailing padding; this return contract is for the
+isolated experiment, not the production parser.
+
+This follows carrot's data-movement/state-residency approach without assuming
+its generic artifact or state ABI is compatible with CTMV2. The default
+extractor still returns the original output and accepts host previous features.
+Both candidates remain unqualified and unselected by modeld.
+
+`openpilot.sunnypilot.modeld_v2.verify_extracted_policy` connects this candidate
+to the existing coherent-copy QCOM warp backend in a parked-only process:
+
+```sh
+python -m openpilot.sunnypilot.modeld_v2.verify_extracted_policy \
+  --model /absolute/path/to/driving_cinque_terre_model_v2_september_08_2026_tinygrad.pkl \
+  --camera 1928x1208 --warmup 10 --runs 100 --roundtrip
+```
+
+Use the vehicle's existing Python environment. The path can be the base path
+of a complete chunked model. The tool pins the inspected v25 source SHA, rejects
+onroad operation, concurrent modeld and absent Chestnut, and changes no vehicle
+parameters or installed artifacts. Do not run against an untrusted pickle.
+It builds QCOM warp in a temporary cache, demands exact QCOM/AMD pixels, compares
+public outputs, resident features and all four history queues across changing
+inputs, and reports mean/P95/P99 plus counts exceeding the 50 ms budget.
+Unlike the older host-warp path, sampling-boundary differences fail this
+qualification experiment rather than being accepted. `--roundtrip` reloads the
+candidate before a further compared frame and needs additional RAM/VRAM/disk.
+Errors stop the experiment; it does not silently switch models/backends.
+
+Host tests execute the copy schedule on the tinygrad interpreter and cover
+payload size, feature offsets, changing frames, guards and timing thresholds.
+They are not evidence of real CTMV2/QCOM/AMD equivalence. Even successful parked
+results report `qualified: false`: live frame IDs/Chestnut dropped frames,
+representative camera/calibration inputs, sustained performance, same-model
+fallback and production selection still need validation. TT/IDM, original PKLs
+and Cluster remain on their existing paths.

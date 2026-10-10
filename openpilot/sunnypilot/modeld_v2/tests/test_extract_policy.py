@@ -1,7 +1,10 @@
 import unittest
 
-from tinygrad import dtypes
+import numpy as np
+
+from tinygrad import Tensor, dtypes
 from tinygrad.engine.jit import CapturedJit, _TinyJit
+from tinygrad.engine.realize import get_call_arg_uops, run_linear
 from tinygrad.uop.ops import Ops, ProgramInfo, UOp
 
 from openpilot.sunnypilot.modeld_v2.extract_policy import CHECKPOINT, INPUT_NAMES, _check_control_access, extract_ctmv2
@@ -75,6 +78,80 @@ class TestExtractPolicyGuards(unittest.TestCase):
       capture._linear.src[0], graph_call.replace(src=(graph.replace(src=(graph.src[0].replace(src=tuple(calls)),)),))))
     with self.assertRaisesRegex(ValueError, "recurrent inputs"):
       extract_ctmv2(artifact, (1928, 1208), 3735552)
+
+  def test_resident_candidate_uploads_no_previous_feature(self):
+    artifact, original = synthetic_artifact()
+    output = UOp.new_buffer('AMD', 18452, dtypes.float32)
+    original.ret = (Tensor(output).reshape((1, 18452)),)
+    linear = original._linear
+    result = extract_ctmv2(artifact, (1928, 1208), 3735552, resident_state=True)
+    self.assertIs(original._linear, linear)
+    self.assertFalse(result.qualified)
+    self.assertEqual((result.control_bytes, result.image_offset, result.input_bytes), (120, 512, 393728))
+    self.assertEqual((result.state.shape, result.state.dtype, result.state.device), ((65536,), dtypes.uint8, 'AMD'))
+    self.assertEqual(result.run_policy.captured.ret[0].shape, (1, 2066))
+    calls = result.run_policy.captured._linear.src
+    self.assertEqual(len(calls), 6)
+    state_destination, hidden = calls[-1].src[1:]
+    self.assertIs(state_destination, result.state.uop)
+    self.assertEqual(hidden.shape, (65536,))
+    self.assertIn(output, hidden.toposort())
+    previous_feature, state_source = calls[2].src[1:]
+    self.assertEqual(previous_feature.shape, (65536,))
+    self.assertIs(state_source, result.state.uop)
+    self.assertIs(calls[4].src[0].src[0].src[0].src[0], linear.src[1].src[0].src[0].src[7].src[0])
+
+  def test_resident_candidate_requires_exact_output_contract(self):
+    for ret in (None, (), (Tensor(UOp.new_buffer('AMD', 2580, dtypes.float32)).reshape((1, 2580)),),
+                (Tensor(UOp.new_buffer('QCOM', 18452, dtypes.float32)).reshape((1, 18452)),)):
+      with self.subTest(ret=ret):
+        artifact, capture = synthetic_artifact()
+        capture.ret = ret
+        with self.assertRaisesRegex(ValueError, "inspected CTMV2 float32 output"):
+          extract_ctmv2(artifact, (1928, 1208), 3735552, resident_state=True)
+
+  def test_resident_copy_schedule_replays_changing_frames_without_host_feature(self):
+    artifact, capture = synthetic_artifact()
+    output = UOp.new_buffer('AMD', 18452, dtypes.float32)
+    capture.ret = (Tensor(output).reshape((1, 18452)),)
+    result = extract_ctmv2(artifact, (1928, 1208), 3735552, resident_state=True)
+    calls = result.run_policy.captured._linear.src
+    packed = np.zeros(result.input_bytes, dtype=np.uint8)
+    host = Tensor(packed, device='NPY').realize()
+    compact = Tensor(np.zeros_like(packed), device='PYTHON').realize()
+    controls = Tensor.zeros(65656, dtype=dtypes.uint8, device='PYTHON').realize()
+    state = Tensor.zeros(65536, dtype=dtypes.uint8, device='PYTHON').realize()
+    images = Tensor.zeros(393216, dtype=dtypes.uint8, device='PYTHON').realize()
+    returned = Tensor.zeros(18452, dtype=dtypes.float32, device='PYTHON').realize()
+    replacements = {
+      get_call_arg_uops(calls[0])[0]: compact.uop,
+      get_call_arg_uops(calls[1])[0].base: controls.uop,
+      result.state.uop: state.uop,
+      get_call_arg_uops(calls[3])[0]: images.uop,
+      output: returned.uop,
+    }
+
+    def replay(indices):
+      copies = []
+      for index in indices:
+        destination, source = (arg.substitute(replacements) for arg in get_call_arg_uops(calls[index]))
+        copies.append(source.copy_to_device('PYTHON').call(destination, source))
+      run_linear(UOp(Ops.LINEAR, src=tuple(copies)), input_uops=[host.uop] * 5, wait=True)
+
+    previous = np.zeros(16384, dtype=np.float32)
+    for step in range(5):
+      packed[:120] = step + 1
+      packed[512:] = step + 10
+      replay((0, 1, 2, 3))
+      np.testing.assert_array_equal(controls.numpy()[:120], step + 1)
+      np.testing.assert_array_equal(controls.numpy()[120:].view(np.float32), previous)
+      np.testing.assert_array_equal(images.numpy(), step + 10)
+      values = np.arange(18452, dtype=np.float32) + step
+      returned.assign(Tensor(values, device='PYTHON')).realize()
+      replay((5,))
+      previous = values[2066:18450].copy()
+      np.testing.assert_array_equal(state.numpy().view(np.float32), previous)
+      np.testing.assert_array_equal(packed[120:512], 0)
 
   def test_control_access_accepts_last_control_byte(self):
     for offset in (0, 72, 120, 65655):
