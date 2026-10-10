@@ -158,9 +158,10 @@ class TestRuntimeSafety(unittest.TestCase):
   def state(self, outputs, model_type="supercombo"):
     host = {"desire": np.zeros(2), "tfm": np.eye(3), "big_tfm": np.eye(3), "prev_feat": np.zeros(2)}
     return SimpleNamespace(
-      adapter=SimpleNamespace(copy_frames=Mock(), run=lambda: outputs, is_native=False),
+      adapter=SimpleNamespace(copy_frames=Mock(), run=Mock(return_value=outputs), is_native=False),
       desire_key="desire", numpy_inputs=host, prev_desire=np.zeros(2), _vision_input_names=["img", "big_img"],
       _road_key="img", _wide_key="big_img", _combined_model_type=model_type, chestnut=True,
+      model_path="/models/test.pkl", generation=11, DEV="AMD", camera_size=(1928, 1208),
       vision_output_slices={"hidden_state": slice(0, 2)}, parser=Mock(), _policy_keys=["policy"],
       _policy_slices_list=[{}], _has_on_policy=False, mlsim=False,
       _record_runtime_timing=Mock(),
@@ -176,10 +177,17 @@ class TestRuntimeSafety(unittest.TestCase):
         with self.subTest(chestnut=chestnut, value=value):
           state = self.state(SimpleNamespace(numpy=lambda v=value: np.array([v, 1.])))
           state.chestnut = chestnut
-          with self.assertRaisesRegex(RuntimeError, "stage=supercombo"):
+          with self.assertRaisesRegex(RuntimeError, "stage=supercombo.*first_indices=.*shape=.*model=/models/test.pkl"):
             self.run_state(state)
           state.parser.parse_outputs.assert_not_called()
           self.assertTrue(np.all(state.numpy_inputs["prev_feat"] == 0))
+
+  def test_nonfinite_model_inputs_are_rejected_before_backend_run(self):
+    state = self.state(SimpleNamespace(numpy=lambda: np.array([1., 2.])))
+    state.numpy_inputs["action_t"] = np.array([0., np.nan])
+    with self.assertRaisesRegex(RuntimeError, "model input not finite: key=action_t, count=1"):
+      self.run_state(state)
+    state.adapter.run.assert_not_called()
 
   def test_split_policy_failure_is_rejected_before_parser_or_feedback(self):
     finite = SimpleNamespace(numpy=lambda: np.array([1., 2.]))

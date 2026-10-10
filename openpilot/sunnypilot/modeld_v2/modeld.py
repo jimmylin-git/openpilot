@@ -143,6 +143,8 @@ class ModelState(ModelStateBase):
 
     pkl_path = _find_driving_pkl(model_bundle, chestnut=chestnut)
     assert pkl_path is not None, f"No driving pkl found for {'chestnut' if chestnut else 'small model'} — all models must be compiled with compile_modeld.py"
+    self.model_path = str(pkl_path)
+    self.camera_size = (cam_w, cam_h)
     self._init_combined(pkl_path, cam_w, cam_h, model_bundle)
 
   def _init_combined(self, pkl_path, cam_w, cam_h, bundle):
@@ -240,6 +242,14 @@ class ModelState(ModelStateBase):
       self.numpy_inputs['tfm'][:, :] = transforms[self._road_key].reshape(3, 3)
       self.numpy_inputs['big_tfm'][:, :] = transforms[self._wide_key].reshape(3, 3)
 
+    checked_input_keys = {self.desire_key, 'prev_feat', 'prev_desired_curv', 'tfm', 'big_tfm',
+                          'action_t', 'lateral_control_params', 'traffic_convention'}
+    for key in checked_input_keys:
+      value = self.numpy_inputs.get(key)
+      if isinstance(value, np.ndarray) and not np.isfinite(value).all():
+        bad = np.argwhere(~np.isfinite(value))
+        raise RuntimeError(f"model input not finite: key={key}, count={bad.shape[0]}, first_indices={bad[:5].tolist()}")
+
     inputs_ready = time.perf_counter()
     raw_outputs = self.adapter.run()
     enqueued = time.perf_counter()
@@ -252,12 +262,19 @@ class ModelState(ModelStateBase):
     def checked_output(raw, stage):
       nonlocal readback_seconds
       readback_started = time.perf_counter()
-      output = raw.numpy().flatten()
+      output = raw.numpy()
       readback_seconds += time.perf_counter() - readback_started
       if not np.all(np.isfinite(output)):
-        bad = np.flatnonzero(~np.isfinite(output))
-        raise RuntimeError(f"model output not finite: stage={stage}, count={bad.size}, first_index={bad[0]}")
-      return output
+        bad = np.argwhere(~np.isfinite(output))
+        finite = output[np.isfinite(output)]
+        finite_range = (float(finite.min()), float(finite.max())) if finite.size else None
+        raise RuntimeError(
+          f"model output not finite: stage={stage}, count={bad.shape[0]}, first_indices={bad[:5].tolist()}, "
+          f"shape={output.shape}, dtype={output.dtype}, finite_range={finite_range}, "
+          f"model={getattr(self, 'model_path', 'unknown')}, generation={self.generation}, device={self.DEV}, "
+          f"adapter={type(self.adapter).__name__}, model_type={self._combined_model_type}, "
+          f"camera={getattr(self, 'camera_size', 'unknown')}, chestnut={self.chestnut}")
+      return output.flatten()
 
     if self._combined_model_type == 'supercombo':
       model_output = checked_output(raw_outputs, 'supercombo')
@@ -526,7 +543,10 @@ def main(demo=False):
     except Exception:
       if not params.get_bool("ChestnutActive"):
         raise
-      cloudlog.exception("big model failed, fall back to small")
+      cloudlog.exception(
+        f"big model failed, fall back to small: frame={meta_main.frame_id}, run={run_count}, "
+        f"model={model.model_path}, generation={model.generation}, device={model.DEV}, "
+        f"adapter={type(model.adapter).__name__}, model_type={model._combined_model_type}")
       params.put_bool("ChestnutActive", False)
       assert small_model is not None
       model = small_model
