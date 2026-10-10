@@ -8,6 +8,7 @@ import time
 import traceback
 import datetime
 from collections.abc import Iterator
+from urllib.parse import urlsplit
 
 from openpilot.cereal import log
 import openpilot.cereal.messaging as messaging
@@ -142,10 +143,25 @@ class Uploader:
     if url_resp.status_code == 412:
       return url_resp
 
-    url_resp_json = json.loads(url_resp.text)
-    url = url_resp_json['url']
-    headers = url_resp_json['headers']
-    cloudlog.debug("upload_url v1.4 %s %s", url, str(headers))
+    response_info = (f"HTTP {url_resp.status_code}, " +
+                     f"content-type={url_resp.headers.get('Content-Type', 'unknown')}, bytes={len(url_resp.content)}")
+    if url_resp.status_code != 200:
+      raise RuntimeError(f"Upload URL API rejected request: {response_info}")
+    try:
+      url_resp_json = json.loads(url_resp.text)
+    except json.JSONDecodeError as e:
+      raise ValueError(f"Upload URL API returned invalid JSON: {response_info}") from e
+    if not isinstance(url_resp_json, dict):
+      raise ValueError(f"Upload URL API returned a non-object JSON response: {response_info}")
+    url = url_resp_json.get('url')
+    headers = url_resp_json.get('headers')
+    if not isinstance(url, str) or not isinstance(headers, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in headers.items()):
+      raise ValueError(f"Upload URL API returned invalid url/headers: {response_info}")
+    parsed_url = urlsplit(url)
+    if parsed_url.scheme not in ('http', 'https') or not parsed_url.hostname:
+      raise ValueError(f"Upload URL API returned an invalid upload URL: {response_info}")
+    cloudlog.debug("upload_url v1.4 received")
 
     if fake_upload:
       return FakeResponse()
@@ -185,7 +201,7 @@ class Uploader:
       except Exception as e:
         last_exc = (e, traceback.format_exc())
 
-      if stat is not None and stat.status_code in (200, 201, 401, 403, 412):
+      if stat is not None and stat.status_code in (200, 201, 412):
         self.last_filename = fn
         dt = time.monotonic() - start_time
         if stat.status_code == 412:

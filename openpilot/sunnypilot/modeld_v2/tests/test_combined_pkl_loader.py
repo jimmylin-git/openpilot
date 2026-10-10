@@ -26,8 +26,17 @@ ModelState = modeld_module.ModelState
 # Pkl discovery
 
 class TestFindDrivingPkl(OpenpilotTestCase):
-  def test_returns_none_when_no_bundle(self):
+  def test_returns_none_when_no_bundle_and_no_bundled_model(self, monkeypatch):
+    monkeypatch.delenv("COMBINED_MODEL_PKL", raising=False)
+    monkeypatch.setattr(modeld_module, "model_file_exists", lambda path: False)
     assert _find_driving_pkl(None) is None
+
+  def test_uses_bundled_model_when_no_bundle(self, monkeypatch):
+    from openpilot.selfdrive.modeld.helpers import modeld_pkl_path
+    monkeypatch.delenv("COMBINED_MODEL_PKL", raising=False)
+    monkeypatch.setattr(modeld_module, "model_file_exists", lambda path: True)
+    for chestnut in (False, True):
+      assert _find_driving_pkl(None, chestnut=chestnut) == str(modeld_pkl_path(chestnut))
 
   def test_returns_none_when_no_models(self):
     bundle = DummyBundle(models=[])

@@ -33,6 +33,8 @@ class MockResponse:
   def __init__(self, text, status_code):
     self.text = text
     self.status_code = status_code
+    self.headers = {"Content-Type": "application/json"}
+    self.content = text.encode()
 
 class MockApi:
   def __init__(self, dongle_id):

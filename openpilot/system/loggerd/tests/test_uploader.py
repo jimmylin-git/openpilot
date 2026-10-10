@@ -2,6 +2,10 @@ import os
 import threading
 import logging
 import json
+import io
+import unittest
+from unittest import mock
+import requests
 from pathlib import Path
 from openpilot.common.hardware.hw import Paths
 
@@ -9,6 +13,99 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system.loggerd.uploader import clear_locks, main, Uploader, UPLOAD_ATTR_NAME, UPLOAD_ATTR_VALUE
 
 from openpilot.system.loggerd.tests.loggerd_tests_common import UploaderTestCase
+from openpilot.system.loggerd import uploader as uploader_module
+
+
+class TestUploadUrlResponse(unittest.TestCase):
+  def setUp(self):
+    self.uploader = Uploader.__new__(Uploader)
+    self.uploader.api = mock.Mock()
+    self.uploader.dongle_id = "test-device"
+    self.uploader.last_filename = ""
+    self.stream = io.BytesIO(b"file data")
+    stream_patch = mock.patch.object(uploader_module, "get_upload_stream", return_value=(self.stream, 9))
+    put_patch = mock.patch.object(uploader_module.requests, "put")
+    fake_patch = mock.patch.object(uploader_module, "fake_upload", False)
+    for patcher in (stream_patch, put_patch, fake_patch):
+      self.addCleanup(patcher.stop)
+    self.stream_mock = stream_patch.start()
+    self.put = put_patch.start()
+    fake_patch.start()
+
+  def response(self, status: int, body: str):
+    response = requests.Response()
+    response.status_code = status
+    response._content = body.encode()
+    response.headers["Content-Type"] = "application/json" if body.startswith("{") else "text/html"
+    self.uploader.api.get.return_value = response
+    return response
+
+  def test_http_errors_are_not_parsed_or_uploaded(self):
+    for status in (401, 403, 404, 429, 500):
+      with self.subTest(status=status):
+        self.response(status, "<html>error</html>")
+        with self.assertRaisesRegex(RuntimeError, f"HTTP {status}"):
+          self.uploader.do_upload("boot/test", "unused")
+    self.put.assert_not_called()
+    self.stream_mock.assert_not_called()
+
+  def test_invalid_json_and_shape_are_rejected(self):
+    for body in ("", "<html>not JSON</html>", "[]", "null", "{}", '{"url": 1, "headers": {}}',
+                 '{"url": "https://storage.test/file", "headers": []}',
+                 '{"url": "https://storage.test/file", "headers": {"key": 1}}',
+                 '{"url": "file:///tmp/test", "headers": {}}'):
+      with self.subTest(body=body):
+        self.response(200, body)
+        with self.assertRaises(ValueError):
+          self.uploader.do_upload("boot/test", "unused")
+    self.put.assert_not_called()
+    self.stream_mock.assert_not_called()
+
+  def test_valid_url_uploads_and_closes_stream(self):
+    self.response(200, '{"url": "https://storage.test/file", "headers": {"x-test": "value"}}')
+    result = self.uploader.do_upload("boot/test", "unused")
+    self.assertIs(result, self.put.return_value)
+    self.put.assert_called_once_with("https://storage.test/file", data=self.stream, headers={"x-test": "value"}, timeout=10)
+    self.assertTrue(self.stream.closed)
+
+  def test_ignored_response_does_not_open_file(self):
+    response = self.response(412, "")
+    self.assertIs(self.uploader.do_upload("boot/test", "unused"), response)
+    self.put.assert_not_called()
+    self.stream_mock.assert_not_called()
+
+  def test_put_failure_closes_stream(self):
+    self.response(200, '{"url": "https://storage.test/file", "headers": {}}')
+    self.put.side_effect = requests.Timeout("upload timed out")
+    with self.assertRaises(requests.Timeout):
+      self.uploader.do_upload("boot/test", "unused")
+    self.assertTrue(self.stream.closed)
+
+  def test_success_and_explicit_ignore_mark_file_uploaded(self):
+    with mock.patch.object(uploader_module.os.path, "getsize", return_value=9), \
+         mock.patch.object(uploader_module, "setxattr") as tag, \
+         mock.patch.object(uploader_module.time, "monotonic", side_effect=range(6)), \
+         mock.patch.object(self.uploader, "do_upload") as upload:
+      for status in (200, 201, 412):
+        with self.subTest(status=status):
+          upload.return_value.status_code = status
+          upload.return_value.request.headers = {"Content-Length": "9"}
+          self.assertTrue(self.uploader.upload("qlog", "route/qlog", "unused", 1, False))
+      self.assertEqual(tag.call_count, 3)
+
+  def test_failures_do_not_mark_file_uploaded(self):
+    with mock.patch.object(uploader_module.os.path, "getsize", return_value=9), \
+         mock.patch.object(uploader_module, "setxattr") as tag, \
+         mock.patch.object(uploader_module.cloudlog, "event") as event:
+      self.response(404, "<html>not found</html>")
+      self.assertFalse(self.uploader.upload("qlog", "route/qlog", "unused", 1, False))
+      for status in (401, 403, 500):
+        self.response(200, '{"url": "https://storage.test/file", "headers": {}}')
+        self.put.return_value.status_code = status
+        self.assertFalse(self.uploader.upload("qlog", "route/qlog", "unused", 1, False))
+      tag.assert_not_called()
+      self.assertEqual(self.uploader.last_filename, "")
+      self.assertEqual(sum(call.args[0] == "upload_failed" for call in event.call_args_list), 4)
 
 
 class FakeLogHandler(logging.Handler):

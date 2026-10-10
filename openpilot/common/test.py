@@ -157,6 +157,31 @@ class MonkeyPatch:
     patcher.start()
     self._add_cleanup(patcher.stop)
 
+  def _save_env(self, name: str) -> None:
+    previous = os.environ.get(name)
+
+    def restore():
+      if previous is None:
+        os.environ.pop(name, None)
+      else:
+        os.environ[name] = previous
+
+    self._add_cleanup(restore)
+
+  def setenv(self, name: str, value: str, prepend: str | None = None) -> None:
+    self._save_env(name)
+    if prepend is not None and name in os.environ:
+      value = value + prepend + os.environ[name]
+    os.environ[name] = value
+
+  def delenv(self, name: str, raising: bool = True) -> None:
+    if name not in os.environ:
+      if raising:
+        raise KeyError(name)
+      return
+    self._save_env(name)
+    del os.environ[name]
+
 
 class SubTests:
   def __init__(self, test_case):
