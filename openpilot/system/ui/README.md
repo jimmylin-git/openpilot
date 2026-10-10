@@ -15,6 +15,10 @@ Quick start:
 * https://www.raylib.com/cheatsheet/cheatsheet.html
 * https://electronstudio.github.io/raylib-python-cffi/README.html#quickstart
 
+The MR.ONE sunnypilot onroad HUD omits the speed-limit sign and its associated
+ahead/confirmation indicators. Speed-limit assist logic and the cruise set-speed
+display are unchanged.
+
 Style guide:
 * All graphical elements should subclass [`Widget`](/openpilot/system/ui/widgets/__init__.py).
   * Prefer a stateful widget over a function for easy migration from QT
