@@ -45,6 +45,7 @@ class BaseModelAdapter:
     self._blob_cache = {}
     self.nv12_info = get_nv12_info(cam_w, cam_h)
     self.is_native = False
+    self.host_warp = False
 
   def _init_common(self):
     self._desire_key = next((key for key in getattr(self, 'numpy_inputs', {}) if key.startswith('desire')), 'desire')
@@ -81,12 +82,23 @@ class LegacyModelAdapter(BaseModelAdapter):
     super().__init__(*args, **kwargs)
 
     metadata = self.jits['metadata']
+    camera_input_abi = metadata.get('camera_input_abi')
+    if camera_input_abi not in (None, 'warped_yuv_v1'):
+      raise RuntimeError(f"Unsupported camera input ABI: {camera_input_abi}")
+    self.host_warp = self.chestnut and camera_input_abi == 'warped_yuv_v1'
+    if camera_input_abi is not None:
+      if not self.chestnut or 'model' not in metadata or 'run_policy' not in self.jits or metadata.get('warp_dev') != 'QCOM':
+        raise RuntimeError("Host-warp bundle requires Chestnut, a supercombo policy and QCOM warp")
+      if (self.cam_w, self.cam_h) not in self.jits:
+        raise RuntimeError(f"Host-warp bundle has no QCOM warp for camera size {self.cam_w}x{self.cam_h}")
+      if type(metadata.get('frame_skip')) is not int or metadata['frame_skip'] < 1:
+        raise RuntimeError("Host-warp bundle has no valid frame_skip")
     self.frame_copy_size = nv12_copy_size(*self.nv12_info[:3])
 
     if self.chestnut and 'model' not in metadata:
       raise RuntimeError("Legacy split Chestnut model has no supported packed-camera ABI; use a native or supercombo bundle")
 
-    if self.chestnut:
+    if self.chestnut and not self.host_warp:
       self.WARP_DEV = self.DEV
 
     if 'model' in metadata:
@@ -94,12 +106,15 @@ class LegacyModelAdapter(BaseModelAdapter):
       self.input_shapes = model_metadata['input_shapes']
       self.vision_output_slices = model_metadata['output_slices']
       self._vision_input_names = [key for key in self.input_shapes if 'img' in key]
-      self.frame_skip = derive_frame_skip({}, self.input_shapes)
-      if self.chestnut:
+      self.frame_skip = metadata['frame_skip'] if self.host_warp else derive_frame_skip({}, self.input_shapes)
+      if not isinstance(self.frame_skip, int) or self.frame_skip < 1:
+        raise RuntimeError(f"Invalid model frame skip: {self.frame_skip}")
+      if self.chestnut and not self.host_warp:
         self.input_queues, self.numpy_inputs, self.frame_slots = stock_make_input_queues(
           self.input_shapes, self.frame_skip, device=self.QUEUE_DEV, frame_copy_size=self.frame_copy_size)
       else:
-        self.input_queues, self.numpy_inputs = make_supercombo_input_queues(self.input_shapes, self.frame_skip, device=self.QUEUE_DEV)
+        self.input_queues, self.numpy_inputs = make_supercombo_input_queues(
+          self.input_shapes, self.frame_skip, device=self.QUEUE_DEV, host_inputs=self.host_warp)
       self.run_policy = self.jits['run_policy'] if 'run_policy' in self.jits else self.jits[(self.cam_w, self.cam_h)]
     else:
       self.run_policy = self.jits['run_policy']
@@ -119,7 +134,7 @@ class LegacyModelAdapter(BaseModelAdapter):
 
     self.run_warp = self._load_warp()
     self._init_common()
-    if not self.chestnut:
+    if not self.chestnut or self.host_warp:
       yuv_size = self.frame_buf_params[self._road_key][3]
       frame_tensor = Tensor(np.zeros(yuv_size, dtype=np.uint8), device=self.WARP_DEV).contiguous().realize()
       big_frame_tensor = Tensor(np.zeros(yuv_size, dtype=np.uint8), device=self.WARP_DEV).contiguous().realize()
@@ -127,7 +142,7 @@ class LegacyModelAdapter(BaseModelAdapter):
                     frame=frame_tensor, big_frame=big_frame_tensor)
 
   def copy_frames(self, bufs):
-    if self.chestnut:
+    if self.chestnut and not self.host_warp:
       for key in self._vision_input_names:
         if key in bufs:
           data = bufs[key].data if hasattr(bufs[key], 'data') else bufs[key]
@@ -151,16 +166,19 @@ class LegacyModelAdapter(BaseModelAdapter):
     if self.chestnut and hasattr(self, 'frame_slots'):
       for frame in self.frame_slots.values():
         frame[:] = 0
-    if not self.chestnut:
+    if not self.chestnut or self.host_warp:
       self.full_frames.clear()
       self._blob_cache.clear()
 
   def run(self):
-    if self.chestnut:
+    if self.chestnut and not self.host_warp:
       return self.run_policy(**{k: self.input_queues[k] for k in POLICY_INPUTS if k in self.input_queues})
 
     warped = self.run_warp(**{k: self.input_queues[k] for k in ('tfm', 'big_tfm')},
                            frame=self.full_frames[self._road_key], big_frame=self.full_frames[self._wide_key])
+    if self.host_warp:
+      # Only the reduced model image crosses USB; QCOM camera buffers stay local.
+      warped = warped.to('CPU').realize()
     return self.run_policy(**{k: self.input_queues[k] for k in POLICY_INPUTS if k in self.input_queues}, warped=warped)
 
 

@@ -151,7 +151,7 @@ def get_policy_npy_shapes(input_shapes: dict, is_supercombo: bool = False) -> tu
 
 
 def generate_queues_and_npy(input_shapes: dict, frame_skip: int, device: str = Device.DEFAULT,
-                            is_supercombo: bool = False) -> tuple[dict, dict]:
+                            is_supercombo: bool = False, host_inputs: bool = False) -> tuple[dict, dict]:
   road_key, _ = _detect_vision_keys(input_shapes)
   if not road_key:
     raise ValueError("Vision road key missing from input shapes.")
@@ -185,7 +185,7 @@ def generate_queues_and_npy(input_shapes: dict, frame_skip: int, device: str = D
     'big_img_q': Tensor(np.zeros(img_buf_shape, dtype=np.uint8), device=device).contiguous().realize(),
     'desire_q': Tensor(np.zeros((frame_skip * desire_shape[1], desire_shape[0], desire_shape[2]),
                   dtype=np.float32), device=device).contiguous().realize(),
-    'packed_npy_inputs': Tensor(packed_npy_inputs, device=device if os.getenv('CHESTNUT') else 'NPY').realize(),
+    'packed_npy_inputs': Tensor(packed_npy_inputs, device=device if os.getenv('CHESTNUT') and not host_inputs else 'NPY').realize(),
   }
 
   if features_buffer:
@@ -208,8 +208,8 @@ def make_split_input_queues(vision_input_shapes: dict, policy_input_shapes: dict
 
 
 def make_supercombo_input_queues(input_shapes: dict, frame_skip: int,
-                                 device: str = Device.DEFAULT) -> tuple[dict, dict]:
-  return generate_queues_and_npy(input_shapes, frame_skip, device, is_supercombo=True)
+                                 device: str = Device.DEFAULT, host_inputs: bool = False) -> tuple[dict, dict]:
+  return generate_queues_and_npy(input_shapes, frame_skip, device, is_supercombo=True, host_inputs=host_inputs)
 
 
 def make_random_images(keys, shape, device, rng=None):
@@ -376,10 +376,15 @@ def _load_policy_runners(args: argparse.Namespace) -> tuple[list, list]:
   return runners, keys
 
 
-def _compile_warp_resolution_worker(cam_w, cam_h, model_w, model_h, benchmark_runs, result_path):
+def _compile_warp_resolution_worker(cam_w, cam_h, model_w, model_h, benchmark_runs, result_path, warp_device=None):
+  with Context(DEV=warp_device or Device.DEFAULT):
+    _compile_warp_resolution(cam_w, cam_h, model_w, model_h, benchmark_runs, result_path,
+                             warp_device or os.getenv('WARP_DEV', Device.DEFAULT))
+
+
+def _compile_warp_resolution(cam_w, cam_h, model_w, model_h, benchmark_runs, result_path, frame_device):
   nv12 = stock.NV12Frame(cam_w, cam_h, *get_nv12_info(cam_w, cam_h))
-  WARP_DEV = os.getenv('WARP_DEV', Device.DEFAULT)
-  make_random_warp_inputs = partial(make_random_images, keys=['frame', 'big_frame'], shape=nv12.size, device=WARP_DEV)
+  make_random_warp_inputs = partial(make_random_images, keys=['frame', 'big_frame'], shape=nv12.size, device=frame_device)
   warp = TinyJit(stock.make_warp(nv12, model_w, model_h), prune=True)
 
   def cleanup_warp():
@@ -410,6 +415,8 @@ if __name__ == "__main__":
   parser.add_argument('--frame-skip', type=int, default=None, help='frame skip value (auto-derived if not provided)')
   parser.add_argument('--benchmark-runs', type=int, default=1, help='benchmark runs')
   parser.add_argument('--output', required=True)
+  parser.add_argument('--chestnut-host-warp', action='store_true',
+                      help='experimental supercombo ABI: QCOM warp, CPU staging, AMD inference; requires recompilation')
 
   parser.add_argument('--vision-onnx', help='vision ONNX (for split models)')
   parser.add_argument('--policy-onnx', help='policy ONNX (for vision_policy)')
@@ -418,6 +425,10 @@ if __name__ == "__main__":
   parser.add_argument('--supercombo-onnx', help='supercombo ONNX (for supercombo)')
 
   args = parser.parse_args()
+  if args.chestnut_host_warp and (args.model_type != 'supercombo' or not os.getenv('CHESTNUT')):
+    parser.error('--chestnut-host-warp requires --model-type supercombo and CHESTNUT=1')
+  if args.chestnut_host_warp and Device.DEFAULT.split(':')[0] != 'AMD':
+    parser.error('--chestnut-host-warp requires AMD inference (DEV=USB+AMD:LLVM)')
   model_w, model_h = args.model_size
   output_data = {}
 
@@ -432,7 +443,7 @@ if __name__ == "__main__":
     assert args.supercombo_onnx
     model_metadata = make_metadata_dict(args.supercombo_onnx)
     derived_frame_skip = args.frame_skip or derive_frame_skip({}, model_metadata['input_shapes'])
-    if derived_frame_skip != 1 and os.getenv('CHESTNUT'):
+    if derived_frame_skip != 1 and os.getenv('CHESTNUT') and not args.chestnut_host_warp:
       is_unified_supercombo = True
 
   if is_unified_supercombo:
@@ -491,8 +502,9 @@ if __name__ == "__main__":
     print(f"Compiling run_policy JIT (model_size={model_w}x{model_h}, frame_skip={derived_frame_skip})...")
     run_policy_func = make_run_policy(vision_runner, policy_runners, features_slice, derived_frame_skip, all_shapes)
     run_policy_jit = TinyJit(run_policy_func, prune=True)
-    make_policy_queues = partial(generate_queues_and_npy, all_shapes, derived_frame_skip, is_supercombo=is_supercombo)
-    WARP_DEV = os.getenv('WARP_DEV', Device.DEFAULT)
+    make_policy_queues = partial(generate_queues_and_npy, all_shapes, derived_frame_skip,
+                                is_supercombo=is_supercombo, host_inputs=args.chestnut_host_warp)
+    WARP_DEV = 'CPU' if args.chestnut_host_warp else os.getenv('WARP_DEV', Device.DEFAULT)
     make_random_model_inputs = partial(make_random_images, keys=['warped'], shape=(2, 6, model_h // 2, model_w // 2), device=WARP_DEV)
 
     def cleanup_policy():
@@ -510,7 +522,9 @@ if __name__ == "__main__":
       tmp_res = tempfile.NamedTemporaryFile(delete=False, suffix=".pkl", dir=".")
       tmp_res.close()
 
-      p = ctx.Process(target=_compile_warp_resolution_worker, args=(cam_w, cam_h, model_w, model_h, args.benchmark_runs, tmp_res.name))
+      p = ctx.Process(target=_compile_warp_resolution_worker,
+                     args=(cam_w, cam_h, model_w, model_h, args.benchmark_runs, tmp_res.name,
+                           'QCOM' if args.chestnut_host_warp else None))
       p.start()
       p.join()
       if p.exitcode != 0:
@@ -523,7 +537,11 @@ if __name__ == "__main__":
       output_data[(cam_w, cam_h)] = compiled_jit
       output_data['input_devices']['warp'] = dev_name
       os.remove(tmp_name)
-    output_data['metadata']['warp_dev'] = Device.DEFAULT
+    output_data['metadata']['warp_dev'] = 'QCOM' if args.chestnut_host_warp else Device.DEFAULT
+    if args.chestnut_host_warp:
+      output_data['metadata']['camera_input_abi'] = 'warped_yuv_v1'
+      output_data['metadata']['frame_skip'] = derived_frame_skip
+      output_data['input_devices']['model'] = Device.DEFAULT
 
   with open(args.output, "wb") as file:
     dump_oob(output_data, file)

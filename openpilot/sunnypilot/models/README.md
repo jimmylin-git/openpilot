@@ -80,3 +80,36 @@ Recovery does not make an unhealthy USB bridge reliable or guarantee 20 Hz model
 performance. It does not bypass driver monitoring, calibration, or engagement
 checks. Missing/invalid model messages remain subject to existing safety checks;
 no stale predictions are published during recovery.
+
+## Experimental Chestnut host warp
+
+Legacy supercombo models can be rebuilt with `--chestnut-host-warp`. This is a new
+camera input ABI, not a runtime switch for an existing compiled bundle. The
+compiler records `camera_input_abi=warped_yuv_v1` and embeds a QCOM warp for each
+requested camera resolution. Unmarked bundles retain their existing behavior.
+
+In this path, raw NV12 camera buffers and calibration matrices are processed on
+QCOM. The resulting uint8 model-sized YUV tensors are staged on CPU and copied
+over USB to AMD; temporal image queues and inference remain on AMD. Packed policy
+inputs remain live host arrays. A pair of 512x256 YUV420 images occupies 393,216
+bytes, versus 9,609,216 bytes for two raw 1928x1208 buffers with the current
+allocation layout. This reduces image transport bytes, not necessarily total
+execution time.
+
+Compile only in a parked maintenance session with the normal model process
+stopped and reaped. Do not run the compiler concurrently with vehicle inference:
+
+```sh
+CHESTNUT=1 DEV=USB+AMD:LLVM GMMU=0 FLOAT16=1 JIT_BATCH_SIZE=0 \
+  python -m openpilot.sunnypilot.modeld_v2.compile_modeld \
+  --model-type supercombo --supercombo-onnx /path/to/source.onnx \
+  --model-size 512x256 --camera-resolutions 1928x1208 \
+  --chestnut-host-warp --benchmark-runs 3 --output /data/host-warp-test.pkl
+```
+
+Use the same source ONNX, camera frames, and calibration matrices for both
+baselines. Validate warped pixels, recurrent inputs, outputs, serialized replay,
+and sustained end-to-end latency before selecting the new bundle. CPU unit tests
+check geometry/packing/history equivalence; QCOM-versus-AMD numerical equivalence
+and 20 Hz performance still require hardware measurements. A stock-model test is
+not proof of CTMV2 equivalence. Do not overwrite an existing downloaded bundle.

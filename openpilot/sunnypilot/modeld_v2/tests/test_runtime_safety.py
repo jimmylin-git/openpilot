@@ -143,7 +143,7 @@ class TestRuntimeSafety(unittest.TestCase):
       arrays[key] = array
     packed = Mock()
     queues["packed_npy_inputs"] = packed
-    obj = SimpleNamespace(numpy_inputs={"prev_feat": host}, input_queues=queues, chestnut=True,
+    obj = SimpleNamespace(numpy_inputs={"prev_feat": host}, input_queues=queues, chestnut=True, host_warp=False,
                           frame_slots={"img": frame})
     reset(obj)
     self.assertTrue(np.all(host == 0))
