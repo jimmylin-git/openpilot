@@ -117,3 +117,13 @@ and sustained end-to-end latency before selecting the new bundle. CPU unit tests
 check geometry/packing/history equivalence; QCOM-versus-AMD numerical equivalence
 and 20 Hz performance still require hardware measurements. A stock-model test is
 not proof of CTMV2 equivalence. Do not overwrite an existing downloaded bundle.
+
+Initial isolated stock-ONNX measurements on the test vehicle did not meet the
+50 ms budget: 100 warmed runs averaged 91.2 ms, with P95 136.0 ms and 99/100
+runs above 50 ms. A separate 30-run stage sample averaged 80.6 ms total
+(QCOM warp enqueue 12.6 ms, CPU staging 21.6 ms, AMD enqueue 28.4 ms,
+readback 17.8 ms). Stages include synchronization costs, not just compute or
+transfer time. These are synthetic-frame stock-model measurements, not a
+same-model CTMV2 comparison or a road-frame drop measurement. Keep this path
+experimental and unselected until staging overhead and sustained latency are
+resolved; smaller USB payloads alone are not a performance acceptance test.
