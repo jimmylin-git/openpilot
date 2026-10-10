@@ -38,6 +38,7 @@ from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value
 from openpilot.selfdrive.modeld.modeld import ChestnutState
+from openpilot.selfdrive.modeld.camera_sync import receive_camera_pair
 
 from openpilot.selfdrive.modeld.compile_modeld import (
   MODELD_INPUTS,
@@ -88,16 +89,6 @@ def _find_driving_pkl(bundle, chestnut: bool = False):
   if model_file_exists(pkl_path):
     return pkl_path
   return None
-
-
-class FrameMeta:
-  frame_id: int = 0
-  timestamp_sof: int = 0
-  timestamp_eof: int = 0
-
-  def __init__(self, vipc=None):
-    if vipc is not None:
-      self.frame_id, self.timestamp_sof, self.timestamp_eof = vipc.frame_id, vipc.timestamp_sof, vipc.timestamp_eof
 
 
 class ModelState(ModelStateBase):
@@ -489,9 +480,6 @@ def main(demo=False):
   model_transform_main = np.zeros((3, 3), dtype=np.float32)
   model_transform_extra = np.zeros((3, 3), dtype=np.float32)
   live_calib_seen = False
-  buf_main, buf_extra = None, None
-  meta_main = FrameMeta()
-  meta_extra = FrameMeta()
   camera_offset_helper = CameraOffsetHelper()
 
 
@@ -510,37 +498,11 @@ def main(demo=False):
   RELC = RoadEdgeLaneChangeController()
 
   while True:
-    # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
-    while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
-      buf_main = vipc_client_main.recv()
-      meta_main = FrameMeta(vipc_client_main)
-      if buf_main is None:
-        break
-
-    if buf_main is None:
-      cloudlog.debug("vipc_client_main no frame")
+    frames = receive_camera_pair(vipc_client_main, vipc_client_extra if use_extra_client else None)
+    if frames is None:
+      cloudlog.debug("camera pair unavailable or out of sync")
       continue
-
-    if use_extra_client:
-      # Keep receiving extra frames until frame id matches main camera
-      while True:
-        buf_extra = vipc_client_extra.recv()
-        meta_extra = FrameMeta(vipc_client_extra)
-        if buf_extra is None or meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
-          break
-
-      if buf_extra is None:
-        cloudlog.debug("vipc_client_extra no frame")
-        continue
-
-      if abs(meta_main.timestamp_sof - meta_extra.timestamp_sof) > 10000000:
-        cloudlog.error(f"frames out of sync! main: {meta_main.frame_id} ({meta_main.timestamp_sof / 1e9:.5f}),\
-                       extra: {meta_extra.frame_id} ({meta_extra.timestamp_sof / 1e9:.5f})")
-
-    else:
-      # Use single camera
-      buf_extra = buf_main
-      meta_extra = meta_main
+    buf_main, meta_main, buf_extra, meta_extra = frames
 
     sm.update(0)
     desire = DH.desire

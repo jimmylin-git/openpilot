@@ -116,11 +116,26 @@ chunk manifest/chunks). No production bundle is automatically selected.
   or USB-wire measurements. AMD fallback upload timing includes reference warp
   dispatch; its control upload remains inside policy dispatch.
 
-Carrot's separate bounded 20 ms camera-pairing fix is not copied blindly.
-This branch's existing loop logs skew over 10 ms but proceeds; it does not
-discard a pair because of that warning. Changing that warning threshold would
-not reproduce carrot's fix. Camera/odometry validity and Cluster behavior are
-unchanged.
+### Bounded camera pairing
+
+Stock modeld and modeld_v2 share carrot's `camera_sync.py` implementation from
+commit `c60cde06cb10908da5e559732a6a0b2b1ff1d0d3`, independently of host warp.
+Each call receives fresh frames, compares their current SOF timestamps, and
+accepts skew up to and including 20 ms in either direction. Only the older
+camera advances during resynchronization, with the original ten-iteration
+bound. Timeouts or an unsuccessful resync skip model dispatch; stale buffers
+are not reused. Single-camera operation uses each fresh frame for both inputs.
+
+This replaces the previous-exposure-plus-25-ms rule, preserving valid
+23/77-ms alternating exposure intervals. Unlike carrot's old strict 10 ms
+limit, our previous final skew check only logged and proceeded, so the EV9
+frame-drop improvement cannot be assumed here. Real frame gaps still reach the
+existing dropped-frame and cameraOdometry validity checks. No camera driver,
+pose-validity, downstream fault check or Cluster renderer is changed.
+Both Chestnut and small models use this pairing rule without rebuilding their
+artifacts. Host tests reproduce carrot's EV9 timing cases, boundary rejection,
+missing frames and resync behavior; on-device timing and driving validation
+remain required.
 
 ### Building and testing
 
