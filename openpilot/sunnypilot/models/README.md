@@ -80,7 +80,8 @@ input dtypes, image/history queues and external hidden-state feedback. Old
 
 The normal compiler and downloaded bundles are unchanged. This requires
 `CHESTNUT=1`, AMD inference and a new output path (including no existing
-chunk manifest/chunks). No production bundle is automatically selected.
+chunk manifest/chunks). Installed bundles are never overwritten. Automatic preparation/selection below
+requires exact source provenance and a successful offroad hardware qualification.
 
 ### Runtime contract
 
@@ -147,6 +148,54 @@ it is a strong reason to keep this ABI opt-in. Host/interpreter tests cover
 payload layout, state advancement/equivalence, compiler capture/replay/pickle,
 validation, cache round trips and failure paths. They do not establish QCOM/AMD
 hardware equivalence, the real ONNX's output equivalence or sustained 20 Hz.
+
+### Automatic offroad preparation
+
+On C3/C3X the process manager runs `host_warp_manager` only offroad. It consumes
+the selected Chestnut bundle and its raw cached catalog's optional `host_warp`
+descriptor. The descriptor must bind the exact baseline PKL SHA-256 to a
+SHA-256-verified HTTPS ONNX source, supercombo model size and camera size:
+
+```json
+"host_warp": {
+  "baseline_sha256": "<selected PKL SHA-256>",
+  "model_type": "supercombo",
+  "onnx": {"url": "https://.../source.onnx", "sha256": "<source SHA-256>"},
+  "model_size": [512, 256],
+  "camera_size": [1928, 1208]
+}
+```
+
+Missing provenance leaves the original model in use and reports "waiting for
+verified ONNX source" in the C3 Models panel and preparation logs. URLs are not
+guessed from a model name. The current CTMV2 catalog provides only a PKL, so it
+cannot automatically become a qualified host-warp artifact until the publisher
+supplies this descriptor. The bundled small ONNX is not a substitute.
+
+An isolated worker downloads/verifies the source, checks baseline/source
+checkpoint and input/output metadata, compiles the v2 artifact, validates QCOM
+pixels and compares 30 sequential model outputs/hidden states against the
+unchanged baseline. The warmed measured P99 must be below 50 ms. Only then is a
+readiness receipt published atomically. A receipt includes the selected bundle's
+generation/overrides/artifact identity, source, hardware, runtime/compiler hashes
+and each artifact file's SHA-256, size and mtime. Offroad hashes are rechecked;
+startup checks identity and file stats rather than hashing gigabytes onroad.
+
+Changing model or entering onroad/driver-view/live-stream mode terminates the
+worker process group, including any compiler child, and removes only that
+attempt's partial files. Failed preparations are logged to
+`.host-warp/prepare.log` under the persistent model directory and retried after an
+hour; unavailable hardware waits without changing the selected model.
+Source/runtime changes get a new cache identity after the usual process restart.
+
+modeld_v2 selects only a matching ready receipt for its actual camera size.
+Explicit environment overrides retain precedence; no fixed override is needed
+for automatic use. Failed automatic initialization revokes readiness and loads
+the original selected model, preserving small-model fallback. C4 and stock
+modeld do not select these modeld_v2 artifacts. Synthetic parked qualification
+is not a road/thermal/contention certification; verify real camera performance
+and downstream validity separately. No onroad compilation or live-model switch
+is performed.
 
 Build only while parked, with modeld stopped, the exact source ONNX and a new
 output path:

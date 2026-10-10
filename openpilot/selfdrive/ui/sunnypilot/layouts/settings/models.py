@@ -11,6 +11,7 @@ import pyray as rl
 
 from openpilot.cereal import custom
 from openpilot.sunnypilot.models.helpers import ACTIVE_BUNDLE_KEYS, get_selected_bundle, resolve_bundle_by_ref
+from openpilot.sunnypilot.models.host_warp import status_for_bundle
 from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.ui_state import device, ui_state
 from openpilot.selfdrive.ui.sunnypilot.model_info import big_model_state, bundles_for_source, carrying_model, default_model_name, queued_name
@@ -64,6 +65,9 @@ class ModelsLayout(Widget):
       action_item=ScrollingButtonAction(tr("SELECT")),
       callback=lambda: self._open_source_dialog("chestnut")
     )
+    self.host_warp_item = ListItemSP(title=tr("Chestnut Host Warp"), description="", action_item=None)
+    self.host_warp_item.show_description(True)
+    self._host_warp_status_time = 0.
 
     self.download_item = download_status_item(lambda: tr("Download") if self._downloading else tr("Model Status"))
 
@@ -106,7 +110,8 @@ class ModelsLayout(Widget):
                                         1, None, True, "", style.BUTTON_ACTION_WIDTH, None, True,
                                         lambda v: f"{v / 100:.2f} m")
 
-    self.items = [self.small_model_item, self.big_model_item, self.cancel_download_item, self.download_item, self.refresh_item, self.clear_cache_item,
+    self.items = [self.small_model_item, self.big_model_item, self.host_warp_item, self.cancel_download_item,
+                  self.download_item, self.refresh_item, self.clear_cache_item,
                   self.lane_turn_value_control, self.delay_control, self.camera_offset]
 
   def _update_lagd_description(self, lagd_toggle: bool):
@@ -333,6 +338,9 @@ class ModelsLayout(Widget):
     self._update_lagd_description(live_delay)
     self.model_manager = ui_state.sm["modelManagerSP"]
     self._handle_bundle_download_progress()
+    if time.monotonic() - self._host_warp_status_time > 1:
+      self._host_warp_status_time = time.monotonic()
+      self.host_warp_item.set_description(status_for_bundle(get_selected_bundle(ui_state.params, "chestnut")))
 
     carry_source, _, carry_display = carrying_model()
     for item, item_source in ((self.small_model_item, "qcom"), (self.big_model_item, "chestnut")):

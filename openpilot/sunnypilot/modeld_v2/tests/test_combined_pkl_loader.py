@@ -79,6 +79,58 @@ class TestFindDrivingPkl(OpenpilotTestCase):
 # Init — assertion guard
 
 class TestModelStateCombinedInit(OpenpilotTestCase):
+  def test_automatic_artifact_preserves_bundle_and_uses_ready_qcom(self, monkeypatch, tmp_path):
+    bundle = DummyBundle(generation=12, is_20hz=True)
+    loaded = []
+    monkeypatch.delenv("CHESTNUT_COMBINED_MODEL_PKL", raising=False)
+    monkeypatch.delenv("COMBINED_MODEL_PKL", raising=False)
+    monkeypatch.setattr(modeld_module, "get_active_bundle", lambda **kwargs: bundle)
+    monkeypatch.setattr(modeld_module, "_find_driving_pkl", lambda *args, **kwargs: "baseline.pkl")
+    monkeypatch.setattr(modeld_module, "select_artifact", lambda *args: tmp_path / "qualified.pkl")
+
+    def initialize(state, path, cam_w, cam_h, selected):
+      from types import SimpleNamespace
+      loaded.append((path, selected))
+      state.host_warp_runtime = SimpleNamespace(local=object())
+
+    monkeypatch.setattr(ModelState, "_init_combined", initialize)
+    state = ModelState(CAM_W, CAM_H, chestnut=True)
+    assert loaded == [(str(tmp_path / "qualified.pkl"), bundle)]
+    assert state.generation == 12
+    assert state.LAT_SMOOTH_SECONDS == .1
+
+  def test_automatic_failure_revokes_receipt_and_loads_original(self, monkeypatch, tmp_path):
+    bundle = DummyBundle()
+    loaded, rejected = [], []
+    monkeypatch.delenv("CHESTNUT_COMBINED_MODEL_PKL", raising=False)
+    monkeypatch.delenv("COMBINED_MODEL_PKL", raising=False)
+    monkeypatch.setattr(modeld_module, "get_active_bundle", lambda **kwargs: bundle)
+    monkeypatch.setattr(modeld_module, "_find_driving_pkl", lambda *args, **kwargs: "baseline.pkl")
+    monkeypatch.setattr(modeld_module, "select_artifact", lambda *args: tmp_path / "qualified.pkl")
+    monkeypatch.setattr(modeld_module, "reject_artifact", lambda path, error: rejected.append(path))
+
+    def initialize(state, path, *args):
+      from types import SimpleNamespace
+      loaded.append(path)
+      if path != "baseline.pkl":
+        state.host_warp_runtime = SimpleNamespace(local=None)
+      else:
+        assert state.host_warp_runtime is None
+
+    monkeypatch.setattr(ModelState, "_init_combined", initialize)
+    ModelState(CAM_W, CAM_H, chestnut=True)
+    assert loaded == [str(tmp_path / "qualified.pkl"), "baseline.pkl"]
+    assert rejected == [tmp_path / "qualified.pkl"]
+
+  def test_small_model_never_selects_automatic_chestnut_artifact(self, monkeypatch):
+    monkeypatch.delenv("CHESTNUT_COMBINED_MODEL_PKL", raising=False)
+    monkeypatch.delenv("COMBINED_MODEL_PKL", raising=False)
+    monkeypatch.setattr(modeld_module, "get_active_bundle", lambda **kwargs: DummyBundle())
+    monkeypatch.setattr(modeld_module, "_find_driving_pkl", lambda *args, **kwargs: "small.pkl")
+    monkeypatch.setattr(modeld_module, "select_artifact", lambda *args: self.fail("small model requested host warp"))
+    monkeypatch.setattr(ModelState, "_init_combined", lambda *args: None)
+    ModelState(CAM_W, CAM_H, chestnut=False)
+
   def test_chestnut_override_preserves_selected_bundle_settings(self, monkeypatch):
     bundle = DummyBundle(generation=12, is_20hz=True)
     loaded = []
