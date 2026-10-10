@@ -64,20 +64,74 @@ This layered strategy ensures safe evolution of the model selection system while
 
 ## Experimental Chestnut QCOM host warp
 
-`compile_modeld.py --chestnut-host-warp` builds a separate, explicitly marked
-supercombo artifact that warps camera frames on QCOM, stages the reduced YUV
-images through CPU memory, and runs policy inference on AMD. It requires
-`CHESTNUT=1`, AMD inference, and a new output path. The normal model compiler
-and active model bundles are unchanged.
+This implements the guarded pre-upload workflow from carrot-wip
+[`local_gpu_warp.py`](https://github.com/ajouatom/openpilot/blob/c60cde06cb10908da5e559732a6a0b2b1ff1d0d3/openpilot/selfdrive/modeld/local_gpu_warp.py)
+and its [validation notes](https://github.com/ajouatom/openpilot/blob/c60cde06cb10908da5e559732a6a0b2b1ff1d0d3/docs/c3_preupload_warp.md),
+adapted to modeld_v2's supercombo format. The upstream code is MIT licensed;
+see the repository's [license](../../../LICENSE).
+
+The mechanisms match, but the artifact formats are not interchangeable.
+Carrot wraps its generic precompiled runtime. Here,
+`compile_modeld.py --chestnut-host-warp` builds an opt-in `warped_yuv_v2`
+artifact from the exact ONNX: a compact-input AMD policy, a same-model AMD
+fallback policy, and the reference AMD warp. Both policies use the same weights,
+input dtypes, image/history queues and external hidden-state feedback. Old
+`warped_yuv_v1` experiments are rejected and must be rebuilt.
+
+The normal compiler and downloaded bundles are unchanged. This requires
+`CHESTNUT=1`, AMD inference and a new output path (including no existing
+chunk manifest/chunks). No production bundle is automatically selected.
+
+### Runtime contract
+
+* Only C3/C3X (`tici`/`tizi`) attempts QCOM preparation. C4 (`mici`) and other
+  devices stay on the artifact's AMD path.
+* Raw NV12 frames and transforms are copied into a persistent local QCOM buffer
+  **on every frame**. A cached `from_blob` mapping is not used as a substitute
+  for CPU/GPU cache coherence.
+* The local warp uses the same implementation as the compiled AMD reference.
+  Its source and the full tinygrad Python source tree are hashed at build
+  time. A mismatch disables QCOM and logs a same-model AMD fallback. The local
+  JIT cache is separate, source/version/layout keyed, and atomically written.
+* Before accepting QCOM, initialization compares random NV12 inputs under
+  identity, projective and border-clamped transforms against the actual AMD
+  warp. Shape, dtype, repeat instability or unexplained pixels reject QCOM.
+  Only nearest-neighbour differences within **0.00025 source pixels** of a
+  half-pixel boundary are accepted, and every differing value must be one of
+  the correct camera/plane's adjacent source pixels. No image-error percentage
+  or arbitrary intensity tolerance is used.
+* Probes run no model inference and clear their host inputs afterward.
+  QCOM initialization/validation/frame-preparation failures retain the same
+  model, recurrent queues and AMD warp. Policy inference errors are not retried
+  after potentially advancing state; they use the existing small-model failure
+  handling. Warmup clears the experiment's inputs and recurrent queues.
+* QCOM results are read into a compact host buffer, then explicitly uploaded
+  once to AMD before policy dispatch. At 512x256, image data is 393,216 bytes;
+  the total is this plus the actual float32 controls/previous-feature payload,
+  padded to 512 bytes. **393,728 is not assumed for every supercombo**: models
+  with larger hidden features need larger control payloads.
+* Logs include `warp_backend`, calculated `usb_input_bytes`, `local_prepare_ms`,
+  `input_upload_ms`, `model_call_ms`, `output_read_ms`, total model execution
+  and frame-drop percentage. These are host-call timings, not pure GPU kernel
+  or USB-wire measurements. AMD fallback upload timing includes reference warp
+  dispatch; its control upload remains inside policy dispatch.
+
+Carrot's separate bounded 20 ms camera-pairing fix is not copied blindly.
+This branch's existing loop logs skew over 10 ms but proceeds; it does not
+discard a pair because of that warning. Changing that warning threshold would
+not reproduce carrot's fix. Camera/odometry validity and Cluster behavior are
+unchanged.
+
+### Building and testing
 
 This path is experimental and must not be selected for driving based only on
 reduced transfer size. A prior isolated stock-model trial on the V23 branch
 averaged 91.2 ms over 100 warmed runs (P95 136.0 ms; 99/100 over the 50 ms
 frame budget). That was not a CTMV2 comparison or a camera-drop road test, but
-it is a strong reason to keep this ABI opt-in and unselected. The compiler
-performs its normal JIT replay checks; QCOM-versus-AMD image equivalence,
-the exact selected model's recurrent-state equivalence, and sustained on-device
-latency must still be validated before creating/selecting a production bundle.
+it is a strong reason to keep this ABI opt-in. Host/interpreter tests cover
+payload layout, state advancement/equivalence, compiler capture/replay/pickle,
+validation, cache round trips and failure paths. They do not establish QCOM/AMD
+hardware equivalence, the real ONNX's output equivalence or sustained 20 Hz.
 
 Build only while parked, with modeld stopped, the exact source ONNX and a new
 output path:
@@ -92,16 +146,20 @@ CHESTNUT=1 DEV=USB+AMD:LLVM GMMU=0 FLOAT16=1 JIT_BATCH_SIZE=0 \
 
 Keep the test artifact separate from installed/downloaded bundles. First verify
 its compiler replay checks and artifact metadata; then compare the selected
-model against its unchanged baseline on the same device and camera input. The
-compiler also refuses an output path with an existing chunk manifest or chunks.
-The artifact is not selectable through the normal model bundle list; to test it,
-point `COMBINED_MODEL_PKL` at its chunked artifact only in an isolated, parked
-test process. Do not add it to the active model manifest until hardware checks
-pass.
+model against its unchanged baseline on the same device and camera input.
+In an isolated, parked modeld test process, set
+`CHESTNUT_COMBINED_MODEL_PKL=/data/host-warp-test.pkl`. This override accepts
+chunked artifacts and applies only to Chestnut, preserving the selected bundle's
+generation, constants and overrides while leaving the small model available for
+fallback. Compile the exact ONNX corresponding to that selected bundle. A
+missing/incomplete override is an explicit initialization error. Do not use the
+global `COMBINED_MODEL_PKL` override for this test: it also applies to the small
+model.
 
-The marked runtime ABI is accepted only for Chestnut supercombo artifacts with
-a QCOM warp and matching camera resolution/frame-skip metadata. Model
-initialization or inference failures continue through the existing small-model
-fallback. While active, modeld periodically logs frame-drop percentage,
-end-to-end model execution time, QCOM warp time, CPU staging time, AMD policy
-time, and output-read time.
+Require logs confirming `warp_backend=qcom`, the expected compact byte count and
+no fallback warning. Compare the same ONNX's image outputs, model outputs and
+recurrent state against the AMD baseline, then sustained end-to-end latency,
+P95/P99, real frame gaps, odometry validity and thermal/resource contention with
+Cluster. Compare C4 separately and verify it never initializes QCOM. A smaller
+transfer alone does not prove a 50 ms loop budget. Do not publish/select a
+production bundle until these hardware checks pass.

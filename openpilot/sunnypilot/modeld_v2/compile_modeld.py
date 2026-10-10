@@ -36,24 +36,16 @@ import openpilot.selfdrive.modeld.compile_modeld as stock
 from tinygrad import dtypes
 from tinygrad.device import Device
 from tinygrad.engine.jit import TinyJit
-from tinygrad.helpers import Context
 from tinygrad.tensor import Tensor
+from openpilot.sunnypilot.modeld_v2.host_warp import (
+  CAMERA_INPUT_ABI, CompactInput, derive_frame_skip, make_compact_policy,
+  validate_chestnut_host_warp, warp_source_hash,
+)
 
 MODEL_TYPES = ('vision_policy', 'supercombo', 'vision_multi_policy')
 WARP_INPUTS = ['tfm', 'big_tfm']
 POLICY_INPUTS = ['img_q', 'big_img_q', 'feat_q', 'desire_q', 'packed_npy_inputs']
-CHESTNUT_HOST_WARP_ABI = 'warped_yuv_v1'
 nv12_copy_size = stock.nv12_copy_size
-
-
-def validate_chestnut_host_warp(model_type: str, enabled: bool, chestnut: bool,
-                                inference_device: str | None) -> None:
-  if not enabled:
-    return
-  if model_type != 'supercombo' or not chestnut:
-    raise ValueError("Chestnut host warp requires --model-type supercombo and CHESTNUT=1")
-  if inference_device is None or inference_device.split(':', 1)[0] != 'AMD':
-    raise ValueError("Chestnut host warp requires AMD inference (DEV=USB+AMD:LLVM)")
 
 
 def _detect_desire_key(shapes: dict) -> str | None:
@@ -66,11 +58,6 @@ def _detect_vision_keys(shapes: dict) -> tuple[str | None, str | None]:
     next((key for key in img_keys if 'big' not in key), None),
     next((key for key in img_keys if 'big' in key), None)
   )
-
-
-def derive_frame_skip(vision_input_shapes: dict, policy_input_shapes: dict) -> int:
-  features_buffer = policy_input_shapes.get('features_buffer')
-  return 1 if not features_buffer or features_buffer[1] >= 99 else 4
 
 
 def get_policy_npy_shapes(input_shapes: dict, is_supercombo: bool = False) -> tuple[dict, list[int]]:
@@ -154,6 +141,40 @@ def make_supercombo_input_queues(input_shapes: dict, frame_skip: int,
   return generate_queues_and_npy(input_shapes, frame_skip, device, is_supercombo=True)
 
 
+def make_host_warp_input_queues(input_shapes: dict, frame_skip: int, device: str):
+  queues, npy = make_supercombo_input_queues(input_shapes, frame_skip, device)
+  compact = CompactInput({name: value for name, value in npy.items() if name not in WARP_INPUTS},
+                         (2, 6, *input_shapes['img'][2:]))
+  npy.update(compact.controls)
+  controls = compact.data[:compact.control_bytes].view(np.float32)
+  queues['packed_npy_inputs'] = Tensor(controls, device='NPY').realize()
+  return queues, npy, compact
+
+
+def make_compact_compile_queues(input_shapes: dict, frame_skip: int, device: str):
+  queues, npy, compact = make_host_warp_input_queues(input_shapes, frame_skip, device)
+  queues['host_input'] = Tensor(compact.data, device='NPY').realize()
+  queues['packed_npy_inputs'] = Tensor(np.zeros_like(compact.data), device=device).realize()
+  return queues, npy, {'warped': compact.images}
+
+
+def upload_compact_inputs(queues):
+  queues['packed_npy_inputs']._buffer().copy_from(queues['host_input']._buffer())
+
+
+def make_device_warp_queues(device):
+  queues, npy = make_warp_queues()
+  for name in WARP_INPUTS:
+    queues[f'host_{name}'] = queues[name]
+    queues[name] = Tensor(np.zeros_like(npy[name]), device=device).realize()
+  return queues, npy
+
+
+def upload_warp_transforms(queues):
+  for name in WARP_INPUTS:
+    queues[name]._buffer().copy_from(queues[f'host_{name}']._buffer())
+
+
 def make_random_images(keys, shape, device, rng=None):
   return {k: Tensor.randint(shape, low=0, high=256, dtype=dtypes.uint8, device=device).realize() for k in keys}
 
@@ -216,6 +237,7 @@ def make_run_policy(vision_runner, policy_runners: list, features_slice: slice, 
     if 'features_buffer' not in inputs:
       inputs['features_buffer'] = sample_skip_fn(feat_q).reshape(input_shapes['features_buffer'])
 
+    inputs = {name: inputs[name].cast(spec.dtype) for name, spec in policy_runners[0].graph_inputs.items()}
     policy_out = next(iter(policy_runners[0](inputs).values())).cast('float32').realize()
     if 'features_buffer' not in inputs and features_slice is not None:
       new_feat = policy_out[:, features_slice].reshape(1, -1).unsqueeze(0)
@@ -225,7 +247,7 @@ def make_run_policy(vision_runner, policy_runners: list, features_slice: slice, 
   return run_policy
 
 
-def compile_jit(jit, input_keys, make_queues, make_random_inputs=None, benchmark_runs: int = 1):
+def compile_jit(jit, input_keys, make_queues, make_random_inputs=None, benchmark_runs: int = 1, prepare_inputs=None):
   SEED = 42
   def random_inputs_run(fn, seed, n_runs, test_val=None, test_buffers=None, expect_match=True):
     queues_res = make_queues(Device.DEFAULT)
@@ -242,6 +264,8 @@ def compile_jit(jit, input_keys, make_queues, make_random_inputs=None, benchmark
       Device.default.synchronize()
       random_inputs = make_random_inputs(rng=rng) if make_random_inputs is not None else {}
       st = time.perf_counter()
+      if prepare_inputs is not None:
+        prepare_inputs(input_queues)
       outs = fn(**{k: input_queues[k] for k in input_keys if k in input_queues}, **random_inputs)
       mt = time.perf_counter()
       Device.default.synchronize()
@@ -337,6 +361,8 @@ if __name__ == "__main__":
   except ValueError as error:
     parser.error(str(error))
   if args.chestnut_host_warp:
+    if args.benchmark_runs < 1:
+      parser.error('host warp requires at least one benchmark replay per seed')
     output_dir = os.path.dirname(os.path.abspath(args.output))
     chunk_prefix = os.path.basename(args.output) + '.chunk'
     has_existing_chunks = any(entry.name.startswith(chunk_prefix) for entry in os.scandir(output_dir))
@@ -362,32 +388,48 @@ if __name__ == "__main__":
     model_runner = OnnxRunner(args.supercombo_onnx)
     run_policy = stock.make_run_policy(model_runner, model_metadata, derived_frame_skip)
     if args.chestnut_host_warp:
-      print(f"Compiling experimental AMD policy JIT (model_size={model_w}x{model_h}, frame_skip={derived_frame_skip})...")
-      run_policy_jit = TinyJit(run_policy, prune=True)
+      shapes = model_metadata['input_shapes']
+      expected_frame_skip = derive_frame_skip({}, shapes)
+      if args.frame_skip is not None and args.frame_skip != expected_frame_skip:
+        parser.error(f'host warp requires frame_skip={expected_frame_skip} for this model')
+      if shapes.get('img') != shapes.get('big_img') or tuple(shapes['img'][2:]) != (model_h // 2, model_w // 2):
+        parser.error('host warp model size must match both ONNX camera input shapes')
+      image_shape = (2, 6, model_h // 2, model_w // 2)
+      run_policy = make_run_policy(None, [model_runner], model_metadata['output_slices']['hidden_state'],
+                                   derived_frame_skip, shapes)
+      print(f"Compiling same-model AMD fallback policy (model_size={model_w}x{model_h}, frame_skip={derived_frame_skip})...")
       make_policy_queues = partial(generate_queues_and_npy, model_metadata['input_shapes'], derived_frame_skip,
                                    is_supercombo=True)
       make_random_policy_inputs = partial(
-        make_random_images, keys=['warped'], shape=(2, 6, model_h // 2, model_w // 2), device='CPU')
-      output_data['run_policy'] = compile_jit(
-        run_policy_jit, POLICY_INPUTS, make_policy_queues,
+        make_random_images, keys=['warped'], shape=image_shape, device=Device.DEFAULT)
+      output_data['run_policy_amd'] = compile_jit(
+        TinyJit(run_policy, prune=True), POLICY_INPUTS, make_policy_queues,
         make_random_inputs=make_random_policy_inputs, benchmark_runs=args.benchmark_runs)
-      output_data['input_devices']['warp'] = 'QCOM'
-      output_data['metadata']['camera_input_abi'] = CHESTNUT_HOST_WARP_ABI
+      _, sizes = get_policy_npy_shapes(shapes, is_supercombo=True)
+      compact_policy = make_compact_policy(run_policy, sum(sizes) * 4, image_shape)
+      print("Compiling compact pre-upload AMD policy...")
+      output_data['run_policy'] = compile_jit(
+        TinyJit(compact_policy, prune=True), POLICY_INPUTS,
+        partial(make_compact_compile_queues, shapes, derived_frame_skip),
+        benchmark_runs=args.benchmark_runs, prepare_inputs=upload_compact_inputs)
+      output_data['metadata']['camera_input_abi'] = CAMERA_INPUT_ABI
       output_data['metadata']['frame_skip'] = derived_frame_skip
-      output_data['metadata']['warp_dev'] = 'QCOM'
+      output_data['metadata']['warp_dev'] = 'AMD'
+      output_data['metadata']['warped_shape'] = image_shape
+      output_data['metadata']['warp_source_hash'] = warp_source_hash()
       output_data.pop('run_model')
 
       for cam_w, cam_h in args.camera_resolutions:
-        print(f"Compiling experimental QCOM camera warp JIT for {cam_w}x{cam_h}...")
+        print(f"Compiling reference/fallback AMD warp for {cam_w}x{cam_h}...")
         nv12 = stock.NV12Frame(cam_w, cam_h, *get_nv12_info(cam_w, cam_h))
         frame_copy_size = stock.nv12_copy_size(nv12.stride, nv12.y_height, nv12.uv_height)
         make_random_warp_inputs = partial(
-          make_random_images, keys=['frame', 'big_frame'], shape=frame_copy_size, device='QCOM')
+          make_random_images, keys=['frame', 'big_frame'], shape=frame_copy_size, device=Device.DEFAULT)
         warp = TinyJit(stock.make_warp(nv12, model_w, model_h), prune=True)
-        with Context(DEV='QCOM'):
-          output_data[(cam_w, cam_h)] = compile_jit(
-            warp, WARP_INPUTS, make_warp_queues,
-            make_random_inputs=make_random_warp_inputs, benchmark_runs=args.benchmark_runs)
+        output_data[(cam_w, cam_h)] = compile_jit(
+          warp, WARP_INPUTS, make_device_warp_queues,
+          make_random_inputs=make_random_warp_inputs, benchmark_runs=args.benchmark_runs,
+          prepare_inputs=upload_warp_transforms)
     else:
       for cam_w, cam_h in args.camera_resolutions:
         print(f"Compiling unified run_model JIT for {cam_w}x{cam_h}...")
