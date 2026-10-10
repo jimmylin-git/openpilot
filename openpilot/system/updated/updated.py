@@ -33,7 +33,7 @@ FINALIZED = os.path.join(STAGING_ROOT, "finalized")
 OVERLAY_INIT = Path(os.path.join(BASEDIR, ".overlay_init"))
 
 UPDATER_REMOTE_URL = os.getenv("UPDATER_REMOTE_URL", "https://github.com/jimmylin-git/openpilot.git")
-UPDATER_DEFAULT_BRANCH = os.getenv("UPDATER_DEFAULT_BRANCH", "mrone-v22-c3xl-dev-cluster")
+UPDATER_DEFAULT_BRANCH = os.getenv("UPDATER_DEFAULT_BRANCH", "mrone-c3xl-dev-cluster")
 
 # do not allow to engage after this many hours onroad and this many routes
 HOURS_NO_CONNECTIVITY_MAX = 27
