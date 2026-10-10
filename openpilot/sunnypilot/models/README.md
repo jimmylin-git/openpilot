@@ -61,3 +61,22 @@ Some clients may have intermittent access to updated JSONs. The runtime check en
 | JSON file renaming              | Isolates bundles by selector generation to handle full recompiles     |
 
 This layered strategy ensures safe evolution of the model selection system while maintaining backward compatibility and runtime protection against stale or incompatible bundles.
+
+## Chestnut runtime recovery
+
+The tinygrad model launcher runs a separate supervisor. Startup has a 120-second
+deadline; after startup, model publication must complete within 5 seconds.
+Camera/inference activity alone does not renew that deadline. The supervisor also
+detects native USB calls that never return, including calls embedded in downloaded
+compiled model bundles.
+
+On a stall or nonzero exit, the supervisor terminates and reaps the old model
+process before launching a fresh small-model-only process. Chestnut remains
+disabled until the supervisor is started again (normally the next drive). A failed
+small-model replacement is not restarted repeatedly. Manager shutdown stops both
+processes without triggering recovery.
+
+Recovery does not make an unhealthy USB bridge reliable or guarantee 20 Hz model
+performance. It does not bypass driver monitoring, calibration, or engagement
+checks. Missing/invalid model messages remain subject to existing safety checks;
+no stale predictions are published during recovery.

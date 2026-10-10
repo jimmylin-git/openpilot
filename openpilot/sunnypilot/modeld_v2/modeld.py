@@ -43,6 +43,7 @@ from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.modeld_v2.helpers import load_oob
 from openpilot.sunnypilot.modeld_v2.model_adapters import get_model_adapter
+from openpilot.sunnypilot.modeld_v2.runtime_guard import DISABLE_CHESTNUT_ENV, report_progress
 from openpilot.sunnypilot.models.helpers import get_active_bundle
 from openpilot.sunnypilot.selfdrive.controls.lib.relc import RoadEdgeLaneChangeController
 
@@ -269,10 +270,10 @@ class ModelState(ModelStateBase):
         finite = output[np.isfinite(output)]
         finite_range = (float(finite.min()), float(finite.max())) if finite.size else None
         raise RuntimeError(
-          f"model output not finite: stage={stage}, count={bad.shape[0]}, first_indices={bad[:5].tolist()}, "
-          f"shape={output.shape}, dtype={output.dtype}, finite_range={finite_range}, "
-          f"model={getattr(self, 'model_path', 'unknown')}, generation={self.generation}, device={self.DEV}, "
-          f"adapter={type(self.adapter).__name__}, model_type={self._combined_model_type}, "
+          f"model output not finite: stage={stage}, count={bad.shape[0]}, first_indices={bad[:5].tolist()}, " +
+          f"shape={output.shape}, dtype={output.dtype}, finite_range={finite_range}, " +
+          f"model={getattr(self, 'model_path', 'unknown')}, generation={self.generation}, device={self.DEV}, " +
+          f"adapter={type(self.adapter).__name__}, model_type={self._combined_model_type}, " +
           f"camera={getattr(self, 'camera_size', 'unknown')}, chestnut={self.chestnut}")
       return output.flatten()
 
@@ -358,7 +359,8 @@ def main(demo=False):
   setproctitle(PROCESS_NAME)
   config_realtime_process(7, 54)
 
-  CHESTNUT = chestnut_present()
+  report_progress(b"L")
+  CHESTNUT = chestnut_present() and os.getenv(DISABLE_CHESTNUT_ENV) != "1"
   if CHESTNUT:
     os.environ['HCQDEV_WAIT_TIMEOUT_MS'] = '3000'
 
@@ -448,6 +450,7 @@ def main(demo=False):
   RELC = RoadEdgeLaneChangeController()
 
   while True:
+    report_progress(b"I")
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
     while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
       buf_main = vipc_client_main.recv()
@@ -536,6 +539,7 @@ def main(demo=False):
       inputs['action_t'] = np.array([lat_action_t, long_action_t], dtype=np.float32)
 
     mt1 = time.perf_counter()
+    report_progress(b"R")
     try:
       send_chestnut = (chestnut_state is not None and
                        run_count % round(model.constants.MODEL_FREQ / SERVICE_LIST['chestnutGpuState'].frequency) == 0)
@@ -544,8 +548,8 @@ def main(demo=False):
       if not params.get_bool("ChestnutActive"):
         raise
       cloudlog.exception(
-        f"big model failed, fall back to small: frame={meta_main.frame_id}, run={run_count}, "
-        f"model={model.model_path}, generation={model.generation}, device={model.DEV}, "
+        f"big model failed, fall back to small: frame={meta_main.frame_id}, run={run_count}, " +
+        f"model={model.model_path}, generation={model.generation}, device={model.DEV}, " +
         f"adapter={type(model.adapter).__name__}, model_type={model._combined_model_type}")
       params.put_bool("ChestnutActive", False)
       assert small_model is not None
@@ -554,6 +558,7 @@ def main(demo=False):
         chestnut_state.big = False
       run_count = 0
       model_output = None
+    report_progress(b"I")
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
 
@@ -589,6 +594,7 @@ def main(demo=False):
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)
       pm.send('modelDataV2SP', mdv2sp_send)
+      report_progress(b"P")
     last_vipc_frame_id = meta_main.frame_id
 
 if __name__ == "__main__":
