@@ -36,12 +36,25 @@ import openpilot.selfdrive.modeld.compile_modeld as stock
 from tinygrad import dtypes
 from tinygrad.device import Device
 from tinygrad.engine.jit import TinyJit
+from tinygrad.helpers import Context
 from tinygrad.tensor import Tensor
 
 MODEL_TYPES = ('vision_policy', 'supercombo', 'vision_multi_policy')
 WARP_INPUTS = ['tfm', 'big_tfm']
 POLICY_INPUTS = ['img_q', 'big_img_q', 'feat_q', 'desire_q', 'packed_npy_inputs']
+CHESTNUT_HOST_WARP_ABI = 'warped_yuv_v1'
 nv12_copy_size = stock.nv12_copy_size
+
+
+def validate_chestnut_host_warp(model_type: str, enabled: bool, chestnut: bool,
+                                inference_device: str | None) -> None:
+  if not enabled:
+    return
+  if model_type != 'supercombo' or not chestnut:
+    raise ValueError("Chestnut host warp requires --model-type supercombo and CHESTNUT=1")
+  if inference_device is None or inference_device.split(':', 1)[0] != 'AMD':
+    raise ValueError("Chestnut host warp requires AMD inference (DEV=USB+AMD:LLVM)")
+
 
 def _detect_desire_key(shapes: dict) -> str | None:
   return next((key for key in shapes if key.startswith('desire')), None)
@@ -308,6 +321,8 @@ if __name__ == "__main__":
   parser.add_argument('--frame-skip', type=int, default=None, help='frame skip value (auto-derived if not provided)')
   parser.add_argument('--benchmark-runs', type=int, default=1, help='benchmark runs')
   parser.add_argument('--output', required=True)
+  parser.add_argument('--chestnut-host-warp', action='store_true',
+                      help='experimental ABI: QCOM camera warp, CPU staging, AMD inference; creates a separate model bundle')
 
   parser.add_argument('--vision-onnx', help='vision ONNX (for split models)')
   parser.add_argument('--policy-onnx', help='policy ONNX (for vision_policy)')
@@ -316,6 +331,18 @@ if __name__ == "__main__":
   parser.add_argument('--supercombo-onnx', help='supercombo ONNX (for supercombo)')
 
   args = parser.parse_args()
+  try:
+    inference_device = Device.DEFAULT if args.chestnut_host_warp else None
+    validate_chestnut_host_warp(args.model_type, args.chestnut_host_warp, bool(os.getenv('CHESTNUT')), inference_device)
+  except ValueError as error:
+    parser.error(str(error))
+  if args.chestnut_host_warp:
+    output_dir = os.path.dirname(os.path.abspath(args.output))
+    chunk_prefix = os.path.basename(args.output) + '.chunk'
+    has_existing_chunks = any(entry.name.startswith(chunk_prefix) for entry in os.scandir(output_dir))
+    if os.path.exists(args.output) or has_existing_chunks:
+      parser.error('--chestnut-host-warp requires a new output path; existing model artifacts are never overwritten')
+
   model_w, model_h = args.model_size
   output_data = {}
 
@@ -334,15 +361,44 @@ if __name__ == "__main__":
     derived_frame_skip = args.frame_skip or derive_frame_skip({}, model_metadata['input_shapes'])
     model_runner = OnnxRunner(args.supercombo_onnx)
     run_policy = stock.make_run_policy(model_runner, model_metadata, derived_frame_skip)
-    for cam_w, cam_h in args.camera_resolutions:
-      print(f"Compiling unified run_model JIT for {cam_w}x{cam_h}...")
-      nv12 = stock.NV12Frame(cam_w, cam_h, *get_nv12_info(cam_w, cam_h))
-      frame_copy_size = stock.nv12_copy_size(nv12.stride, nv12.y_height, nv12.uv_height)
-      make_model_queues = partial(stock.make_input_queues, model_metadata['input_shapes'], derived_frame_skip,
-                                  frame_copy_size=frame_copy_size)
-      warp = stock.make_warp(nv12, model_w, model_h)
-      run_model_jit = TinyJit(stock.make_run_model(warp, run_policy, model_metadata, frame_copy_size), prune=True)
-      output_data['run_model'][(cam_w, cam_h)] = compile_jit(run_model_jit, stock.MODELD_INPUTS, make_model_queues, benchmark_runs=args.benchmark_runs)
+    if args.chestnut_host_warp:
+      print(f"Compiling experimental AMD policy JIT (model_size={model_w}x{model_h}, frame_skip={derived_frame_skip})...")
+      run_policy_jit = TinyJit(run_policy, prune=True)
+      make_policy_queues = partial(generate_queues_and_npy, model_metadata['input_shapes'], derived_frame_skip,
+                                   is_supercombo=True)
+      make_random_policy_inputs = partial(
+        make_random_images, keys=['warped'], shape=(2, 6, model_h // 2, model_w // 2), device='CPU')
+      output_data['run_policy'] = compile_jit(
+        run_policy_jit, POLICY_INPUTS, make_policy_queues,
+        make_random_inputs=make_random_policy_inputs, benchmark_runs=args.benchmark_runs)
+      output_data['input_devices']['warp'] = 'QCOM'
+      output_data['metadata']['camera_input_abi'] = CHESTNUT_HOST_WARP_ABI
+      output_data['metadata']['frame_skip'] = derived_frame_skip
+      output_data['metadata']['warp_dev'] = 'QCOM'
+      output_data.pop('run_model')
+
+      for cam_w, cam_h in args.camera_resolutions:
+        print(f"Compiling experimental QCOM camera warp JIT for {cam_w}x{cam_h}...")
+        nv12 = stock.NV12Frame(cam_w, cam_h, *get_nv12_info(cam_w, cam_h))
+        frame_copy_size = stock.nv12_copy_size(nv12.stride, nv12.y_height, nv12.uv_height)
+        make_random_warp_inputs = partial(
+          make_random_images, keys=['frame', 'big_frame'], shape=frame_copy_size, device='QCOM')
+        warp = TinyJit(stock.make_warp(nv12, model_w, model_h), prune=True)
+        with Context(DEV='QCOM'):
+          output_data[(cam_w, cam_h)] = compile_jit(
+            warp, WARP_INPUTS, make_warp_queues,
+            make_random_inputs=make_random_warp_inputs, benchmark_runs=args.benchmark_runs)
+    else:
+      for cam_w, cam_h in args.camera_resolutions:
+        print(f"Compiling unified run_model JIT for {cam_w}x{cam_h}...")
+        nv12 = stock.NV12Frame(cam_w, cam_h, *get_nv12_info(cam_w, cam_h))
+        frame_copy_size = stock.nv12_copy_size(nv12.stride, nv12.y_height, nv12.uv_height)
+        make_model_queues = partial(stock.make_input_queues, model_metadata['input_shapes'], derived_frame_skip,
+                                    frame_copy_size=frame_copy_size)
+        warp = stock.make_warp(nv12, model_w, model_h)
+        run_model_jit = TinyJit(stock.make_run_model(warp, run_policy, model_metadata, frame_copy_size), prune=True)
+        output_data['run_model'][(cam_w, cam_h)] = compile_jit(
+          run_model_jit, stock.MODELD_INPUTS, make_model_queues, benchmark_runs=args.benchmark_runs)
   else:
     vision_runner = OnnxRunner(args.vision_onnx) if args.vision_onnx else None
     if args.model_type == 'vision_policy':

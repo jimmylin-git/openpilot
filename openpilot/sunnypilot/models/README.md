@@ -61,3 +61,47 @@ Some clients may have intermittent access to updated JSONs. The runtime check en
 | JSON file renaming              | Isolates bundles by selector generation to handle full recompiles     |
 
 This layered strategy ensures safe evolution of the model selection system while maintaining backward compatibility and runtime protection against stale or incompatible bundles.
+
+## Experimental Chestnut QCOM host warp
+
+`compile_modeld.py --chestnut-host-warp` builds a separate, explicitly marked
+supercombo artifact that warps camera frames on QCOM, stages the reduced YUV
+images through CPU memory, and runs policy inference on AMD. It requires
+`CHESTNUT=1`, AMD inference, and a new output path. The normal model compiler
+and active model bundles are unchanged.
+
+This path is experimental and must not be selected for driving based only on
+reduced transfer size. A prior isolated stock-model trial on the V23 branch
+averaged 91.2 ms over 100 warmed runs (P95 136.0 ms; 99/100 over the 50 ms
+frame budget). That was not a CTMV2 comparison or a camera-drop road test, but
+it is a strong reason to keep this ABI opt-in and unselected. The compiler
+performs its normal JIT replay checks; QCOM-versus-AMD image equivalence,
+the exact selected model's recurrent-state equivalence, and sustained on-device
+latency must still be validated before creating/selecting a production bundle.
+
+Build only while parked, with modeld stopped, the exact source ONNX and a new
+output path:
+
+```sh
+CHESTNUT=1 DEV=USB+AMD:LLVM GMMU=0 FLOAT16=1 JIT_BATCH_SIZE=0 \
+  python -m openpilot.sunnypilot.modeld_v2.compile_modeld \
+  --model-type supercombo --supercombo-onnx /path/to/source.onnx \
+  --model-size 512x256 --camera-resolutions 1928x1208 \
+  --chestnut-host-warp --benchmark-runs 3 --output /data/host-warp-test.pkl
+```
+
+Keep the test artifact separate from installed/downloaded bundles. First verify
+its compiler replay checks and artifact metadata; then compare the selected
+model against its unchanged baseline on the same device and camera input. The
+compiler also refuses an output path with an existing chunk manifest or chunks.
+The artifact is not selectable through the normal model bundle list; to test it,
+point `COMBINED_MODEL_PKL` at its chunked artifact only in an isolated, parked
+test process. Do not add it to the active model manifest until hardware checks
+pass.
+
+The marked runtime ABI is accepted only for Chestnut supercombo artifacts with
+a QCOM warp and matching camera resolution/frame-skip metadata. Model
+initialization or inference failures continue through the existing small-model
+fallback. While active, modeld periodically logs frame-drop percentage,
+end-to-end model execution time, QCOM warp time, CPU staging time, AMD policy
+time, and output-read time.

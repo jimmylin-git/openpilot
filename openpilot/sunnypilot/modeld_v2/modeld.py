@@ -84,6 +84,25 @@ def _find_driving_pkl(bundle, chestnut: bool = False):
   return None
 
 
+def _validate_camera_input_abi(metadata: dict, jits: dict, chestnut: bool, cam_w: int, cam_h: int) -> bool:
+  camera_input_abi = metadata.get('camera_input_abi')
+  if camera_input_abi is None:
+    return False
+  if camera_input_abi != 'warped_yuv_v1':
+    raise RuntimeError(f"Unsupported camera input ABI: {camera_input_abi}")
+  if not chestnut or 'model' not in metadata or 'run_model' in jits or 'run_policy' not in jits:
+    raise RuntimeError("QCOM host-warp bundles require Chestnut supercombo policy artifacts")
+  if metadata.get('warp_dev') != 'QCOM':
+    raise RuntimeError("QCOM host-warp bundle must declare warp_dev=QCOM")
+  if (cam_w, cam_h) not in jits:
+    raise RuntimeError(f"QCOM host-warp bundle has no warp for camera size {cam_w}x{cam_h}")
+  frame_skip = metadata.get('frame_skip')
+  model_shapes = metadata['model'].get('input_shapes', {})
+  if type(frame_skip) is not int or frame_skip != derive_frame_skip({}, model_shapes):
+    raise RuntimeError("QCOM host-warp bundle has an invalid frame_skip")
+  return True
+
+
 class FrameMeta:
   frame_id: int = 0
   timestamp_sof: int = 0
@@ -114,6 +133,8 @@ class ModelState(ModelStateBase):
     self.MIN_LAT_CONTROL_SPEED = 0.3
     self.PLANPLUS_CONTROL: float = 1.0
     self.chestnut = chestnut
+    self.host_warp = False
+    self.last_timings: dict[str, float] = {}
 
     pkl_path = _find_driving_pkl(model_bundle, chestnut=chestnut)
     assert pkl_path is not None, f"No driving pkl found for {'chestnut' if chestnut else 'small model'} — all models must be compiled with compile_modeld.py"
@@ -124,6 +145,7 @@ class ModelState(ModelStateBase):
     jits = load_oob(open_file_chunked(pkl_path))
 
     metadata = jits['metadata']
+    self.host_warp = _validate_camera_input_abi(metadata, jits, self.chestnut, cam_w, cam_h)
     self.WARP_DEV = metadata.get('warp_dev', 'QCOM') if COMMA_HARDWARE else 'CPU'
     self.DEV = ('AMD' if self.chestnut else 'QCOM') if COMMA_HARDWARE else 'CPU'
     self.QUEUE_DEV = self.DEV
@@ -143,7 +165,7 @@ class ModelState(ModelStateBase):
       self._policy_slices_list = []
       self._combined_model_type = 'supercombo'
       self._vision_input_names = [key for key in self.input_shapes if 'img' in key]
-      self.frame_skip = derive_frame_skip({}, self.input_shapes)
+      self.frame_skip = metadata['frame_skip'] if self.host_warp else derive_frame_skip({}, self.input_shapes)
       if self.is_run_model:
         self.input_queues, self.numpy_inputs, self.frame_buffers = make_stock_input_queues(
           self.input_shapes, self.frame_skip, device=self.DEV, frame_copy_size=self.frame_copy_size)
@@ -250,14 +272,25 @@ class ModelState(ModelStateBase):
       raw_outputs = outs
     else:
       assert self.warp is not None and self.run_policy is not None
+      warp_started = time.perf_counter()
       warped = self.warp(**{k: self.input_queues[k] for k in WARP_INPUTS}, frame=self.full_frames[self._road_key], big_frame=self.full_frames[self._wide_key])
+      warp_ms = (time.perf_counter() - warp_started) * 1000.0
+      staging_ms = 0.0
+      if self.host_warp:
+        staging_started = time.perf_counter()
+        warped = warped.to('CPU').realize()
+        staging_ms = (time.perf_counter() - staging_started) * 1000.0
+      policy_started = time.perf_counter()
       raw_outputs = self.run_policy(**{k: self.input_queues[k] for k in POLICY_INPUTS if k in self.input_queues}, warped=warped)
+      policy_ms = (time.perf_counter() - policy_started) * 1000.0
 
     if after_enqueue is not None:
       after_enqueue()
 
     if self._combined_model_type == 'supercombo':
+      output_read_started = time.perf_counter()
       model_output = raw_outputs.numpy().flatten()
+      output_read_ms = (time.perf_counter() - output_read_started) * 1000.0
       if self.chestnut and not np.all(np.isfinite(model_output)):
         raise RuntimeError("model output not finite")
       sliced = {k: model_output[np.newaxis, v] for k, v in self.vision_output_slices.items()}
@@ -286,6 +319,14 @@ class ModelState(ModelStateBase):
 
       if 'planplus' in outputs and 'plan' in outputs:
         outputs['plan'] = outputs['plan'] + outputs['planplus']
+
+    if self.host_warp:
+      self.last_timings = {
+        'qcom_warp_ms': warp_ms,
+        'cpu_staging_ms': staging_ms,
+        'amd_policy_ms': policy_ms,
+        'output_read_ms': output_read_ms,
+      }
 
     if 'desired_curvature' in outputs and 'prev_desired_curv' in self.numpy_inputs:
       buf = self.numpy_inputs['prev_desired_curv']
@@ -572,6 +613,10 @@ def main(demo=False):
       model_output = None
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
+    if model.host_warp and run_count % 100 == 0:
+      cloudlog.info(
+        "experimental Chestnut QCOM host warp: frame_drop_perc=%.2f model_execution_ms=%.2f stages_ms=%s",
+        frame_drop_ratio * 100.0, model_execution_time * 1000.0, model.last_timings)
 
     if model_output is not None:
       modelv2_send = messaging.new_message('modelV2')
