@@ -56,7 +56,6 @@ from openpilot.sunnypilot.modeld_v2.host_warp import CompactInput, HostWarpRunti
 from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.models.helpers import get_active_bundle
-from openpilot.sunnypilot.models.host_warp import reject_artifact, select_artifact
 from openpilot.sunnypilot.selfdrive.controls.lib.relc import RoadEdgeLaneChangeController
 
 PROCESS_NAME = "openpilot.selfdrive.modeld.modeld_tinygrad"
@@ -118,22 +117,7 @@ class ModelState(ModelStateBase):
     self.last_timings: dict[str, float | int | str] = {}
 
     pkl_path = _find_driving_pkl(model_bundle, chestnut=chestnut)
-    assert pkl_path is not None, f"No driving pkl found for {'chestnut' if chestnut else 'small model'} — all models must be compiled with compile_modeld.py"
-    automatic = select_artifact(model_bundle, cam_w, cam_h) if chestnut and not chestnut_override and not env_pkl else None
-    if automatic is not None:
-      try:
-        self._init_combined(str(automatic), cam_w, cam_h, model_bundle)
-        if self.host_warp_runtime is None or self.host_warp_runtime.local is None:
-          raise RuntimeError("Automatic artifact could not validate QCOM on this device")
-        return
-      except Exception as error:
-        cloudlog.exception(f"Automatic host-warp initialization failed; loading original model: {error}")
-        try:
-          reject_artifact(automatic, error)
-        except (OSError, ValueError) as rejection_error:
-          cloudlog.exception(f"Cannot revoke automatic host-warp receipt: {rejection_error}")
-        self.host_warp_runtime = None
-        self.last_timings = {}
+    assert pkl_path is not None, f"No driving pkl found for {'chestnut' if chestnut else 'small model'}; download a compatible model bundle"
     self._init_combined(pkl_path, cam_w, cam_h, model_bundle)
 
   def _init_combined(self, pkl_path, cam_w, cam_h, bundle):

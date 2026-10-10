@@ -25,16 +25,6 @@ def derive_frame_skip(vision_input_shapes: dict, policy_input_shapes: dict) -> i
   return 1 if not features_buffer or features_buffer[1] >= 99 else 4
 
 
-def validate_chestnut_host_warp(model_type: str, enabled: bool, chestnut: bool,
-                                inference_device: str | None) -> None:
-  if not enabled:
-    return
-  if model_type != 'supercombo' or not chestnut:
-    raise ValueError("Chestnut host warp requires --model-type supercombo and CHESTNUT=1")
-  if inference_device is None or inference_device.split(':', 1)[0] != 'AMD':
-    raise ValueError("Chestnut host warp requires AMD inference (DEV=USB+AMD:LLVM)")
-
-
 def validate_camera_input_abi(metadata: dict, jits: dict, chestnut: bool, cam_w: int, cam_h: int) -> bool:
   abi = metadata.get('camera_input_abi')
   if abi is None:

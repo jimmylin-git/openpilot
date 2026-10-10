@@ -71,17 +71,18 @@ adapted to modeld_v2's supercombo format. The upstream code is MIT licensed;
 see the repository's [license](../../../LICENSE).
 
 The mechanisms match, but the artifact formats are not interchangeable.
-Carrot wraps its generic precompiled runtime. Here,
-`compile_modeld.py --chestnut-host-warp` builds an opt-in `warped_yuv_v2`
-artifact from the exact ONNX: a compact-input AMD policy, a same-model AMD
-fallback policy, and the reference AMD warp. Both policies use the same weights,
-input dtypes, image/history queues and external hidden-state feedback. Old
-`warped_yuv_v1` experiments are rejected and must be rebuilt.
+Carrot wraps its generic precompiled runtime; modeld_v2 retains runtime support
+for the earlier opt-in `warped_yuv_v2` experiment. Old `warped_yuv_v1` artifacts
+are rejected. The experimental ONNX-to-host-warp compiler and automatic offroad
+preparation/receipt selection have been removed: the current Chestnut catalog
+provides precompiled PKLs without verified corresponding ONNX sources.
 
-The normal compiler and downloaded bundles are unchanged. This requires
-`CHESTNUT=1`, AMD inference and a new output path (including no existing
-chunk manifest/chunks). Installed bundles are never overwritten. Automatic preparation/selection below
-requires exact source provenance and a successful offroad hardware qualification.
+Downloaded PKL bundles remain the normal big-model path. No ONNX download or
+compilation is required to use them. The existing general ONNX compiler and
+small-model tooling remain available. Carrot generic artifacts are not yet
+supported by this loader; renaming a generic PKL or changing its metadata does
+not convert its ABI. A future adapter must use the artifact's matching runtime
+and validate its inputs, state and outputs before selection.
 
 ### Runtime contract
 
@@ -145,85 +146,18 @@ reduced transfer size. A prior isolated stock-model trial on the V23 branch
 averaged 91.2 ms over 100 warmed runs (P95 136.0 ms; 99/100 over the 50 ms
 frame budget). That was not a CTMV2 comparison or a camera-drop road test, but
 it is a strong reason to keep this ABI opt-in. Host/interpreter tests cover
-payload layout, state advancement/equivalence, compiler capture/replay/pickle,
+payload layout, state advancement/equivalence, JIT replay/pickle,
 validation, cache round trips and failure paths. They do not establish QCOM/AMD
-hardware equivalence, the real ONNX's output equivalence or sustained 20 Hz.
+hardware equivalence, real-model output equivalence or sustained 20 Hz.
 
-### Automatic offroad preparation
+Existing experimental artifacts can still be tested in an isolated parked
+process using `CHESTNUT_COMBINED_MODEL_PKL`. This override accepts chunked PKLs
+and applies only to Chestnut, preserving the selected bundle's generation,
+constants and overrides. It is not an automatic readiness check or support for
+carrot generic artifacts. A missing/incomplete override raises an initialization
+error. Do not use the global `COMBINED_MODEL_PKL` for a Chestnut-only test:
+it also applies to the small model.
 
-On C3/C3X the process manager runs `host_warp_manager` only offroad. It consumes
-the selected Chestnut bundle and its raw cached catalog's optional `host_warp`
-descriptor. The descriptor must bind the exact baseline PKL SHA-256 to a
-SHA-256-verified HTTPS ONNX source, supercombo model size and camera size:
-
-```json
-"host_warp": {
-  "baseline_sha256": "<selected PKL SHA-256>",
-  "model_type": "supercombo",
-  "onnx": {"url": "https://.../source.onnx", "sha256": "<source SHA-256>"},
-  "model_size": [512, 256],
-  "camera_size": [1928, 1208]
-}
-```
-
-Missing provenance leaves the original model in use and reports "waiting for
-verified ONNX source" in the C3 Models panel and preparation logs. URLs are not
-guessed from a model name. The current CTMV2 catalog provides only a PKL, so it
-cannot automatically become a qualified host-warp artifact until the publisher
-supplies this descriptor. The bundled small ONNX is not a substitute.
-
-An isolated worker downloads/verifies the source, checks baseline/source
-checkpoint and input/output metadata, compiles the v2 artifact, validates QCOM
-pixels and compares 30 sequential model outputs/hidden states against the
-unchanged baseline. The warmed measured P99 must be below 50 ms. Only then is a
-readiness receipt published atomically. A receipt includes the selected bundle's
-generation/overrides/artifact identity, source, hardware, runtime/compiler hashes
-and each artifact file's SHA-256, size and mtime. Offroad hashes are rechecked;
-startup checks identity and file stats rather than hashing gigabytes onroad.
-
-Changing model or entering onroad/driver-view/live-stream mode terminates the
-worker process group, including any compiler child, and removes only that
-attempt's partial files. Failed preparations are logged to
-`.host-warp/prepare.log` under the persistent model directory and retried after an
-hour; unavailable hardware waits without changing the selected model.
-Source/runtime changes get a new cache identity after the usual process restart.
-
-modeld_v2 selects only a matching ready receipt for its actual camera size.
-Explicit environment overrides retain precedence; no fixed override is needed
-for automatic use. Failed automatic initialization revokes readiness and loads
-the original selected model, preserving small-model fallback. C4 and stock
-modeld do not select these modeld_v2 artifacts. Synthetic parked qualification
-is not a road/thermal/contention certification; verify real camera performance
-and downstream validity separately. No onroad compilation or live-model switch
-is performed.
-
-Build only while parked, with modeld stopped, the exact source ONNX and a new
-output path:
-
-```sh
-CHESTNUT=1 DEV=USB+AMD:LLVM GMMU=0 FLOAT16=1 JIT_BATCH_SIZE=0 \
-  python -m openpilot.sunnypilot.modeld_v2.compile_modeld \
-  --model-type supercombo --supercombo-onnx /path/to/source.onnx \
-  --model-size 512x256 --camera-resolutions 1928x1208 \
-  --chestnut-host-warp --benchmark-runs 3 --output /data/host-warp-test.pkl
-```
-
-Keep the test artifact separate from installed/downloaded bundles. First verify
-its compiler replay checks and artifact metadata; then compare the selected
-model against its unchanged baseline on the same device and camera input.
-In an isolated, parked modeld test process, set
-`CHESTNUT_COMBINED_MODEL_PKL=/data/host-warp-test.pkl`. This override accepts
-chunked artifacts and applies only to Chestnut, preserving the selected bundle's
-generation, constants and overrides while leaving the small model available for
-fallback. Compile the exact ONNX corresponding to that selected bundle. A
-missing/incomplete override is an explicit initialization error. Do not use the
-global `COMBINED_MODEL_PKL` override for this test: it also applies to the small
-model.
-
-Require logs confirming `warp_backend=qcom`, the expected compact byte count and
-no fallback warning. Compare the same ONNX's image outputs, model outputs and
-recurrent state against the AMD baseline, then sustained end-to-end latency,
-P95/P99, real frame gaps, odometry validity and thermal/resource contention with
-Cluster. Compare C4 separately and verify it never initializes QCOM. A smaller
-transfer alone does not prove a 50 ms loop budget. Do not publish/select a
-production bundle until these hardware checks pass.
+Previously created `.host-warp` preparation caches are no longer read or selected.
+No installed model or cache is deleted by this removal. The host-warp status UI
+and offroad preparation process are no longer registered.

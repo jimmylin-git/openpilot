@@ -12,8 +12,7 @@ from tinygrad.engine.jit import TinyJit
 from openpilot.selfdrive.modeld import compile_modeld as stock
 from openpilot.selfdrive.modeld.helpers import dump_oob, load_oob
 from openpilot.sunnypilot.modeld_v2.compile_modeld import (
-  POLICY_INPUTS, WARP_INPUTS, compile_jit, make_compact_compile_queues, make_device_warp_queues,
-  make_host_warp_input_queues, make_random_images, make_run_policy, upload_compact_inputs, upload_warp_transforms,
+  POLICY_INPUTS, make_host_warp_input_queues, make_run_policy,
 )
 from openpilot.sunnypilot.modeld_v2.host_warp import (
   HostWarpRuntime, WarpBackend, load_local_warp, make_compact_policy, warp_source_hash,
@@ -167,38 +166,6 @@ class TestHostWarpCompile(unittest.TestCase):
           load_local_warp(np.zeros(120, np.uint8), 24, (4, 4), (4, 4, 2, 24),
                           (2, 6, 2, 2), '0' * 64, Path(cache))
         self.assertEqual(list(Path(cache).iterdir()), [])
-
-  def test_compiler_warp_capture_and_pickle_accept_runtime_views(self):
-    from functools import partial
-
-    with Context(DEV='PYTHON'):
-      warp = compile_jit(
-        TinyJit(stock.make_warp(stock.NV12Frame(4, 4, 4, 4, 2, 24), 4, 4), prune=True),
-        WARP_INPUTS, make_device_warp_queues,
-        partial(make_random_images, keys=['frame', 'big_frame'], shape=24, device='PYTHON'),
-        benchmark_runs=1, prepare_inputs=upload_warp_transforms)
-      raw = np.zeros(120, np.uint8)
-      raw[:72].view(np.float32).reshape(2, 3, 3)[:] = np.eye(3)
-      raw[72:] = 31
-      backend = WarpBackend(raw, 24, 'PYTHON', warp)
-      np.testing.assert_array_equal(backend.prepare().numpy(), 31)
-
-  def test_compiler_compact_capture_replay_and_pickle(self):
-    from functools import partial
-
-    with Context(DEV='PYTHON'):
-      policy = make_run_policy(None, [EchoModel()], slice(0, 2), 4, SHAPES)
-      queues, npy, compact = make_host_warp_input_queues(SHAPES, 4, 'PYTHON')
-      jit = compile_jit(
-        TinyJit(make_compact_policy(policy, compact.control_bytes, compact.images.shape), prune=True),
-        POLICY_INPUTS, partial(make_compact_compile_queues, SHAPES, 4),
-        benchmark_runs=1, prepare_inputs=upload_compact_inputs)
-      compact.images[:] = 17
-      npy['desire'][:] = 1
-      packed = Tensor(compact.data, device='PYTHON').realize()
-      result = jit(**{**{key: queues[key] for key in POLICY_INPUTS}, 'packed_npy_inputs': packed})
-      self.assertIsInstance(result, Tensor)
-      self.assertTrue(np.isfinite(result.numpy()).all())
 
   def test_local_warp_cache_round_trip_and_cleanup(self):
     real_context, real_backend = Context, WarpBackend

@@ -15,7 +15,7 @@ import numpy as np
 from openpilot.sunnypilot.modeld_v2 import host_warp
 from openpilot.sunnypilot.modeld_v2.host_warp import (
   CAMERA_INPUT_ABI, CompactInput, HostWarpRuntime, sampling_boundary_only,
-  use_local_warp, validate_camera_input_abi, validate_chestnut_host_warp, warp_difference,
+  use_local_warp, validate_camera_input_abi, warp_difference,
 )
 
 CAM_W, CAM_H = 1928, 1208
@@ -41,19 +41,6 @@ def host_warp_artifact():
 
 
 class TestChestnutHostWarp(unittest.TestCase):
-  def test_compiler_requires_chestnut_supercombo_on_amd(self):
-    validate_chestnut_host_warp('supercombo', True, True, 'AMD:LLVM')
-    for model_type, chestnut, device, message in (
-      ('vision_policy', True, 'AMD', 'supercombo and CHESTNUT'),
-      ('supercombo', False, 'AMD', 'supercombo and CHESTNUT'),
-      ('supercombo', True, 'QCOM', 'AMD inference'),
-      ('supercombo', True, None, 'AMD inference'),
-    ):
-      with self.subTest(model_type=model_type, chestnut=chestnut, device=device):
-        with self.assertRaisesRegex(ValueError, message):
-          validate_chestnut_host_warp(model_type, True, chestnut, device)
-    validate_chestnut_host_warp('supercombo', False, False, None)
-
   def test_runtime_accepts_matching_abi_and_preserves_legacy(self):
     artifact = host_warp_artifact()
     self.assertTrue(validate_camera_input_abi(artifact['metadata'], artifact, True, CAM_W, CAM_H))
