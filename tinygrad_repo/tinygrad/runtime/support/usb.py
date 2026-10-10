@@ -1,5 +1,5 @@
 from typing import Any, Sequence, cast
-import ctypes, struct, time, functools, itertools, sys, contextlib
+import ctypes, struct, time, functools, itertools, sys, contextlib, threading
 from openpilot.common.usbgpu_bus_lock import usbgpu_bus_lock
 from tinygrad.runtime.autogen import libusb, libc
 from tinygrad.helpers import DEBUG, DEV, to_mv, from_mv, round_up, ceildiv, to_tuple
@@ -328,6 +328,17 @@ class CustomASM24Controller:
 
   def scsi_read(self, size:int) -> memoryview: return self.usb.bulk_read(round_up(size, 512), timeout=10000)[:size]
 
+_host_sync_state = threading.local()
+
+def _synchronize_usb_host():
+  # Host synchronization polls GPU timelines through this same MMIO interface.
+  if getattr(_host_sync_state, "active", False): return
+  _host_sync_state.active = True
+  try:
+    Device[HCQ_RUNTIME_DEV.value].synchronize()
+  finally:
+    _host_sync_state.active = False
+
 class USBMMIOInterface(MMIOInterface):
   def __init__(self, usb, addr, size, fmt, pcimem=True): # pylint: disable=super-init-not-called
     self.usb, self.addr, self.nbytes, self.fmt, self.el_sz, self.pcimem = usb, addr, size, fmt, struct.calcsize(fmt), pcimem
@@ -337,7 +348,7 @@ class USBMMIOInterface(MMIOInterface):
     return (index * self.el_sz, self.el_sz)
 
   def __getitem__(self, index):
-    Device[HCQ_RUNTIME_DEV.value].synchronize()
+    _synchronize_usb_host()
     off, sz = self._off_from_index(index)
     if self.pcimem:
       assert sz % 4 == 0 and off % 4 == 0, f"pcie_mem_read requires 4-byte aligned access, got off={off}, sz={sz}"
@@ -346,7 +357,7 @@ class USBMMIOInterface(MMIOInterface):
     return data if isinstance(index, slice) else int.from_bytes(data, "little")
 
   def __setitem__(self, index, data):
-    Device[HCQ_RUNTIME_DEV.value].synchronize()
+    _synchronize_usb_host()
     off, _ = self._off_from_index(index)
     data = struct.pack(self.fmt, data) if isinstance(data, int) else bytes(data)
     if not self.pcimem: self.usb.scsi_write(data) if self.addr == 0xf000 else self.usb.write(self.addr + off, data)

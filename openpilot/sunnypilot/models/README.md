@@ -96,6 +96,10 @@ bytes, versus 9,609,216 bytes for two raw 1928x1208 buffers with the current
 allocation layout. This reduces image transport bytes, not necessarily total
 execution time.
 
+CPU staging also requires USB MMIO timeline reads to avoid recursively calling
+host synchronization. The runtime retains the outer synchronization and its
+timeouts, but does not re-enter it from its own nested GPU timeline poll.
+
 Compile only in a parked maintenance session with the normal model process
 stopped and reaped. Do not run the compiler concurrently with vehicle inference:
 

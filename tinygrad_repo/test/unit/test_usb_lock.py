@@ -12,6 +12,38 @@ from tinygrad.engine import realize
 from tinygrad.runtime.support import usb
 
 
+class TestUSBMMIOHostSynchronization(unittest.TestCase):
+  def setUp(self):
+    self.bridge = Mock()
+    self.bridge.pcie_mem_read.return_value = memoryview(b"\x01\x00\x00\x00")
+    self.mmio = usb.USBMMIOInterface(self.bridge, 0x1000, 4, "I")
+    self.host = Mock()
+
+  def test_host_timeline_poll_does_not_recursively_synchronize(self):
+    self.host.synchronize.side_effect = lambda: self.mmio[0]
+    with patch.object(usb, "Device", {usb.HCQ_RUNTIME_DEV.value: self.host}):
+      self.assertEqual(self.mmio[0], 1)
+    self.host.synchronize.assert_called_once()
+    self.assertEqual(self.bridge.pcie_mem_read.call_count, 2)
+
+  def test_write_still_waits_for_host_before_device_access(self):
+    events = []
+    self.host.synchronize.side_effect = lambda: events.append("sync")
+    self.bridge.pcie_mem_write.side_effect = lambda *args: events.append("write")
+    with patch.object(usb, "Device", {usb.HCQ_RUNTIME_DEV.value: self.host}):
+      self.mmio[0] = 2
+    self.assertEqual(events, ["sync", "write"])
+
+  def test_failed_synchronization_is_propagated_and_guard_is_reset(self):
+    self.host.synchronize.side_effect = [RuntimeError("timeline timeout"), None]
+    with patch.object(usb, "Device", {usb.HCQ_RUNTIME_DEV.value: self.host}):
+      with self.assertRaisesRegex(RuntimeError, "timeline timeout"):
+        self.mmio[0]
+      self.bridge.pcie_mem_read.assert_not_called()
+      self.assertEqual(self.mmio[0], 1)
+    self.assertEqual(self.host.synchronize.call_count, 2)
+
+
 class TestUSBConfiguration(unittest.TestCase):
   def test_all_initialization_failures_close_open_handle(self):
     stages = ("descriptor", "product", "kernel", "detach", "reset", "configure", "unsupported_product", None)
