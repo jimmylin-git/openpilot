@@ -161,3 +161,31 @@ it also applies to the small model.
 Previously created `.host-warp` preparation caches are no longer read or selected.
 No installed model or cache is deleted by this removal. The host-warp status UI
 and offroad preparation process are no longer registered.
+
+### CTMV2 captured-policy extraction research
+
+`openpilot.sunnypilot.modeld_v2.extract_policy.extract_ctmv2` constructs an
+**unqualified, in-memory candidate** from the inspected CTMV2 checkpoint. It is
+not imported by modeld, registered as a process, published as a ready artifact,
+or selected automatically. Existing TT/IDM and other model paths are unchanged.
+It does not modify the source artifact or replace installed PKLs.
+
+The candidate removes the six camera-plane kernels and their concatenation,
+retains the original model kernels/weights and scratch arena, and uploads a
+compact input once. An AMD-local copy fills the original warped-image view
+before the policy/history kernels execute. Original control offsets are
+preserved, including the transform header and CTMV2's 16,384-float previous
+feature. At 1928x1208 the input shrinks from 7,536,760 to 459,264 bytes; these
+are buffer sizes, not measured USB-wire traffic or a performance guarantee.
+
+Extraction rejects other checkpoints/layouts, unexpected graph wrappers,
+recurrent dependencies in the warp prefix, and policy programs whose packed
+input accesses cannot be statically bounded to the control region. It depends
+on this tinygrad captured-graph representation, not a universal PKL conversion.
+Static checks do not prove warp semantics, output equivalence or state safety.
+
+Before any runtime integration, require parked hardware checks of original
+versus extracted outputs and history across changing inputs, QCOM versus the
+original AMD warp, serialization/reload, same-model fallback, sustained latency
+and Cluster contention. No QCOM frontend or ready artifact has been installed
+for this candidate. Never use it for driving based only on static inspection.
