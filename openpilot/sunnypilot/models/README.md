@@ -230,6 +230,34 @@ qualification experiment rather than being accepted. `--roundtrip` reloads the
 candidate before a further compared frame and needs additional RAM/VRAM/disk.
 Errors stop the experiment; it does not silently switch models/backends.
 
+For recorded camera inputs, use the same isolated entry point:
+
+```sh
+python -m openpilot.sunnypilot.modeld_v2.verify_extracted_policy \
+  --model /absolute/path/to/driving_cinque_terre_model_v2_september_08_2026_tinygrad.pkl \
+  --segment /data/media/0/realdata/00000028--27eb0badf0--1 \
+  --start-frame 1607 --camera 1928x1208 --warmup 0 --runs 3
+```
+
+The segment must contain `rlog.zst`, `fcamera.hevc` and `ecamera.hevc`.
+The start ID is the narrow-camera ID, including warmup. Encoder `segmentId`
+maps each HEVC ordinal; camera-state list offsets are not reliable at segment
+boundaries. Cameras pair by recorded SOF with at most 20 ms skew and no reused
+wide frames. Missing IDs/ordinals, B-frame reordering, delayed decoding,
+dimension mismatch or absent preceding calibration stop the test.
+Currently only a recorded zero `CameraOffset` is supported; the tool does not
+guess nonzero offset smoothing. It streams selected frames from a preceding
+intra frame using the existing FFmpeg library decoder, without creating raw
+video files. Histories start at zero and controls remain synthetic: this tests
+two paths on identical recorded images/calibration, not reconstruction of
+logged driving outputs. Public outputs and all recurrent state still require
+exact equality, and any warp mismatch stops before advancing either policy.
+
+Chestnut readiness must be tested through tinygrad's actual AMD interface:
+its USB backend does not require a local `/dev/kfd` or Linux PCIe enumeration.
+The parked guard rejects both modeld module names and `modeld_tinygrad`.
+No process, selector, ready artifact or onroad entry point is added.
+
 Host tests execute the copy schedule on the tinygrad interpreter and cover
 payload size, feature offsets, changing frames, guards and timing thresholds.
 They are not evidence of real CTMV2/QCOM/AMD equivalence. Even successful parked

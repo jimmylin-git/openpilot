@@ -1,5 +1,6 @@
 """Explicit parked-only CTMV2 experiment. Never imported by modeld."""
 import argparse
+from contextlib import closing, nullcontext
 import hashlib
 import json
 import os
@@ -31,8 +32,9 @@ def require_parked() -> None:
       args = path.read_bytes().split(b'\0')
     except (FileNotFoundError, ProcessLookupError):
       continue
-    if any(arg.rsplit(b'/', 1)[-1] in (b'modeld', b'modeld_chestnut', b'modeld.py') or
-           arg in (b'openpilot.sunnypilot.modeld_v2.modeld', b'openpilot.selfdrive.modeld.modeld') for arg in args):
+    if any(arg.rsplit(b'/', 1)[-1] in (b'modeld', b'modeld_chestnut', b'modeld.py', b'modeld_tinygrad.py') or
+           arg in (b'openpilot.sunnypilot.modeld_v2.modeld', b'openpilot.selfdrive.modeld.modeld',
+                   b'openpilot.selfdrive.modeld.modeld_tinygrad') for arg in args):
       raise RuntimeError(f"Refusing to share GPU with modeld (PID {path.parent.name})")
   if not chestnut_present():
     raise RuntimeError("Chestnut USB device is absent; no power/settings will be changed")
@@ -54,11 +56,14 @@ def timing_summary(values: list[float]) -> dict:
           'p99_ms': float(np.percentile(values, 99)), 'over_50ms': sum(value > 50 for value in values)}
 
 
-def verify(model_path: Path, camera_size: tuple[int, int], runs: int, warmup: int, roundtrip: bool) -> dict:
+def verify(model_path: Path, camera_size: tuple[int, int], runs: int, warmup: int, roundtrip: bool,
+           segment: Path | None = None, start_frame: int | None = None) -> dict:
   if runs < 1 or warmup < 0:
     raise ValueError("runs must be positive and warmup nonnegative")
   if roundtrip and warmup + runs < 2:
     raise ValueError("Round-trip validation requires at least two total iterations")
+  if (segment is None) != (start_frame is None):
+    raise ValueError("--segment and --start-frame must be supplied together")
   require_parked()
   from tinygrad import Tensor
   from openpilot.common.file_chunker import open_file_chunked
@@ -69,6 +74,11 @@ def verify(model_path: Path, camera_size: tuple[int, int], runs: int, warmup: in
 
   if HARDWARE.get_device_type() not in ('tici', 'tizi'):
     raise RuntimeError("Only the existing C3 QCOM warp backend is supported")
+  frame_info = get_nv12_info(*camera_size)
+  replay = None
+  if segment is not None and start_frame is not None:
+    from openpilot.sunnypilot.modeld_v2.replay_inputs import RecordedInputs
+    replay = RecordedInputs(segment, start_frame, warmup + runs, camera_size, frame_info)
   with open_file_chunked(str(model_path)) as source:
     digest = hashlib.sha256()
     while block := source.read(1024 * 1024):
@@ -78,7 +88,6 @@ def verify(model_path: Path, camera_size: tuple[int, int], runs: int, warmup: in
   require_parked()
   with open_file_chunked(str(model_path)) as source:
     artifact = load_oob(source)
-  frame_info = get_nv12_info(*camera_size)
   frame_bytes = stock.nv12_copy_size(*frame_info[:3])
   candidate = extract_ctmv2(artifact, camera_size, frame_bytes, resident_state=True)
   shapes = artifact['metadata']['model']['input_shapes']
@@ -102,8 +111,10 @@ def verify(model_path: Path, camera_size: tuple[int, int], runs: int, warmup: in
   timings: dict[str, list[float]] = {'original': [], 'qcom_compact_resident': []}
   rng = np.random.default_rng(42)
   roundtrip_checked = False
+  replay_iterator = iter(replay) if replay is not None else None
   # All cache and round-trip files are isolated from the installed model/cache.
-  with tempfile.TemporaryDirectory(prefix='ctmv2-policy-') as temporary:
+  with closing(replay_iterator) if replay_iterator is not None else nullcontext(), \
+       tempfile.TemporaryDirectory(prefix='ctmv2-policy-') as temporary:
     directory = Path(temporary)
     local_warp = load_local_warp(raw, frame_bytes, camera_size, frame_info, IMAGE_SHAPE, source_hash, directory)
     for step in range(warmup + runs):
@@ -115,10 +126,11 @@ def verify(model_path: Path, camera_size: tuple[int, int], runs: int, warmup: in
         np.array([[2.3, .01, 20.2], [-.02, 2.1, 40.3], [.0001, -.0002, 1]], dtype=np.float32),
         np.array([[1, 0, -200], [0, 1, -100], [0, 0, 1]], dtype=np.float32),
       )[step % 3]
-      for name in ('tfm', 'big_tfm'):
-        reference_npy[name][:] = transform
+      recorded = next(replay_iterator) if replay_iterator is not None else None
+      for i, name in enumerate(('tfm', 'big_tfm')):
+        reference_npy[name][:] = recorded[0][i] if recorded is not None else transform
       for i, name in enumerate(('img', 'big_img')):
-        reference_frames[name][:] = rng.integers(0, 256, frame_bytes, dtype=np.uint8)
+        reference_frames[name][:] = recorded[1][i] if recorded is not None else rng.integers(0, 256, frame_bytes, dtype=np.uint8)
         frames[i][:] = reference_frames[name]
         matrices[i][:] = reference_npy[('tfm', 'big_tfm')[i]]
       for name, view in compact.controls.items():
@@ -129,11 +141,11 @@ def verify(model_path: Path, camera_size: tuple[int, int], runs: int, warmup: in
       start = time.perf_counter()
       actual_pixels = local_warp.prepare().numpy()
       np.copyto(compact.images, actual_pixels)
-      actual = candidate.run_policy(**{name: queues[name] for name in INPUT_NAMES})[0].numpy().copy()
-      candidate_ms = (time.perf_counter() - start) * 1000
       difference = warp_difference(actual_pixels, expected_pixels)
       if difference is not None:
         raise RuntimeError("QCOM/AMD pixels must match exactly for this qualification experiment: " + json.dumps(difference))
+      actual = candidate.run_policy(**{name: queues[name] for name in INPUT_NAMES})[0].numpy().copy()
+      candidate_ms = (time.perf_counter() - start) * 1000
 
       start = time.perf_counter()
       expected = original(**reference_inputs)[0].numpy().copy()
@@ -159,7 +171,10 @@ def verify(model_path: Path, camera_size: tuple[int, int], runs: int, warmup: in
           'candidate_input_bytes': compact.data.nbytes, 'resident_state_bytes': 65536,
           'readback_output_bytes': 2066 * 4, 'exact_output_and_history_match': True,
           'roundtrip_checked': roundtrip_checked, 'timings': {name: timing_summary(values) for name, values in timings.items()},
-          'scope': 'synthetic parked inputs only; no live camera frame-ID/drop measurement or production selection'}
+          'replay_frame_ids': [[road.frame_id, wide.frame_id] for road, wide in replay.pairs] if replay is not None else None,
+          'scope': ('recorded HEVC/calibration with synthetic controls and zero initial history; not logged-output replay'
+                    if replay is not None else 'synthetic parked inputs only') +
+                   '; no live camera frame-ID/drop measurement or production selection'}
 
 
 def main() -> None:
@@ -169,9 +184,12 @@ def main() -> None:
   parser.add_argument('--runs', type=int, default=100)
   parser.add_argument('--warmup', type=int, default=10)
   parser.add_argument('--roundtrip', action='store_true', help='Also serialize/reload candidate; needs additional RAM/VRAM/disk')
+  parser.add_argument('--segment', type=Path, help='Recorded segment containing rlog.zst, fcamera.hevc and ecamera.hevc')
+  parser.add_argument('--start-frame', type=int, help='First narrow-camera frame ID to replay, including warmup')
   args = parser.parse_args()
   width, height = (int(value) for value in args.camera.split('x'))
-  print(json.dumps(verify(args.model, (width, height), args.runs, args.warmup, args.roundtrip), indent=2))
+  print(json.dumps(verify(args.model, (width, height), args.runs, args.warmup, args.roundtrip,
+                          args.segment, args.start_frame), indent=2))
 
 
 if __name__ == '__main__':

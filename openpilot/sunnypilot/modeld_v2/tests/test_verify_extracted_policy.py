@@ -40,6 +40,13 @@ class TestVerificationChecks(unittest.TestCase):
         verify.verify(verify.Path('unused.pkl'), (1928, 1208), 1, 0, True)
       parked.assert_not_called()
 
+  def test_replay_requires_both_arguments_before_device_access(self):
+    for segment, start in ((verify.Path('segment'), None), (None, 1607)):
+      with mock.patch.object(verify, 'require_parked') as parked:
+        with self.assertRaisesRegex(ValueError, 'supplied together'):
+          verify.verify(verify.Path('unused.pkl'), (1928, 1208), 1, 0, False, segment, start)
+        parked.assert_not_called()
+
 
 class TestParkedGuard(unittest.TestCase):
   def check_guard(self, *, offroad=True, present=True, cmdline=None):
@@ -71,7 +78,9 @@ class TestParkedGuard(unittest.TestCase):
 
   def test_running_modeld_is_rejected(self):
     for cmdline in (b'./modeld\0', b'python\0/data/openpilot/openpilot/sunnypilot/modeld_v2/modeld.py\0',
-                    b'python\0-m\0openpilot.sunnypilot.modeld_v2.modeld\0'):
+                    b'python\0-m\0openpilot.sunnypilot.modeld_v2.modeld\0',
+                    b'openpilot.selfdrive.modeld.modeld_tinygrad\0',
+                    b'python\0/data/openpilot/openpilot/selfdrive/modeld/modeld_tinygrad.py\0'):
       with self.subTest(cmdline=cmdline):
         with self.assertRaisesRegex(RuntimeError, 'share GPU'):
           self.check_guard(cmdline=cmdline)
