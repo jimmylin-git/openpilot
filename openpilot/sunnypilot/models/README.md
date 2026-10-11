@@ -92,9 +92,13 @@ The process downloads/resumes/verifies the default carrot artifact and runtime
 automatically, independently of the existing selected models.
 
 On later offroad sessions it verifies and uses the saved files without
-requesting a remote manifest. When Chestnut is already powered and detected,
+requesting a remote manifest. When a supported eGPU USB ID (ADD1:0001 or
+3801:0001) is detected, regardless of its product name or firmware string,
 it automatically runs changing synthetic frames on both camera layouts,
 checks finite parsed outputs, resets state, and saves timing results.
+Unrelated USB devices and bootloader IDs do not trigger testing. USB absence
+means power status is unknown; USB presence permits a test attempt but does
+not guarantee that the GPU is ready. Initialization failures are reported.
 It never forces Chestnut power, changes ignition/vehicle parameters or runs
 alongside modeld. If Chestnut is not available offroad, the screen explicitly
 shows that it is waiting; **starting ignition does not bypass this condition**.

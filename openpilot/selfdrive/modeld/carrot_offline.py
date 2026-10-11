@@ -7,6 +7,11 @@ import time
 from openpilot.selfdrive.modeld.carrot_model import BigModelManifest, DEFAULT_MANIFEST_URL, fetch_manifest, model_cache_dir
 
 
+def offline_usb_present() -> bool:
+  from openpilot.common.hardware.usb import get_usb_state, is_chestnut_usb_id
+  return any(is_chestnut_usb_id(device['vendorId'], device['productId']) for device in get_usb_state())
+
+
 def write_json(path: Path, value: dict) -> None:
   path.parent.mkdir(parents=True, exist_ok=True)
   temporary = path.with_suffix(path.suffix + '.tmp')
@@ -109,7 +114,6 @@ def test_model(path: Path, report) -> dict:
 def main():
   from openpilot.common.params import Params
   from openpilot.common.swaglog import cloudlog
-  from openpilot.selfdrive.modeld.helpers import chestnut_present
   from openpilot.selfdrive.modeld.egpu_worker_progress import boot_identity
 
   cache = model_cache_dir()
@@ -131,8 +135,8 @@ def main():
       try:
         if path is None:
           path = prepare(cache, report)
-        if not chestnut_present():
-          report('waiting_chestnut', 'Offline files ready. Waiting for Chestnut power/USB while offroad; no settings changed.')
+        if not offline_usb_present():
+          report('waiting_chestnut', 'Offline files ready. No supported eGPU USB detected while offroad; power status unknown.')
           time.sleep(5)
           continue
         result = test_model(path, report)

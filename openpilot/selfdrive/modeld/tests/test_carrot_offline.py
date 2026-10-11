@@ -1,8 +1,41 @@
 import json
+import importlib.util
+from pathlib import Path
+import sys
 
 import pytest
 
 from openpilot.selfdrive.modeld import carrot_offline as offline
+
+
+@pytest.fixture
+def usb_module(monkeypatch):
+  # Load the real USB helper without importing platform-specific hardware.
+  name = 'openpilot.common.hardware.usb'
+  spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'common/hardware/usb.py')
+  module = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(module)
+  monkeypatch.setitem(sys.modules, name, module)
+  return module
+
+
+@pytest.mark.parametrize('vendor,product,name,expected', [
+  (0xADD1, 0x0001, 'custom other-firmware', True),
+  (0x3801, 0x0001, '', True),
+  (0x174C, 0x2464, 'bootloader', False),
+  (0x174C, 0x2463, 'bootloader', False),
+  (0x1D6B, 0x0003, 'USB hub', False),
+])
+def test_offline_usb_uses_supported_ids_not_product_name(monkeypatch, usb_module, vendor, product, name, expected):
+  monkeypatch.setattr(usb_module, 'get_usb_state', lambda: [
+    {'vendorId': vendor, 'productId': product, 'product': name},
+  ])
+  assert offline.offline_usb_present() is expected
+
+
+def test_offline_usb_waits_when_no_device_is_enumerated(monkeypatch, usb_module):
+  monkeypatch.setattr(usb_module, 'get_usb_state', list)
+  assert not offline.offline_usb_present()
 
 
 def test_complete_cache_never_uses_network(tmp_path, monkeypatch):
