@@ -42,6 +42,7 @@ class PrecompiledModelState:
       self.vision_input_names = [name for name in self.input_shapes if 'img' in name]
       self.frame_size = info['frame_size']
       self.checkpoint = info['checkpoint']
+      self.backend = info.get('warp_backend', 'unknown')
     except BaseException as exc:
       self.close()
       if isinstance(exc, Exception):

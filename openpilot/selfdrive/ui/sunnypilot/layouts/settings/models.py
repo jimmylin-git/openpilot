@@ -64,6 +64,8 @@ class ModelsLayout(Widget):
       action_item=ScrollingButtonAction(tr("SELECT")),
       callback=lambda: self._open_source_dialog("chestnut")
     )
+    self.carrot_status_item = ListItemSP(title=tr("Carrot Offline Test"), description="")
+    self._carrot_status_time = 0.0
 
     self.download_item = download_status_item(lambda: tr("Download") if self._downloading else tr("Model Status"))
 
@@ -106,7 +108,7 @@ class ModelsLayout(Widget):
                                         1, None, True, "", style.BUTTON_ACTION_WIDTH, None, True,
                                         lambda v: f"{v / 100:.2f} m")
 
-    self.items = [self.small_model_item, self.big_model_item, self.cancel_download_item,
+    self.items = [self.small_model_item, self.big_model_item, self.carrot_status_item, self.cancel_download_item,
                   self.download_item, self.refresh_item, self.clear_cache_item,
                   self.lane_turn_value_control, self.delay_control, self.camera_offset]
 
@@ -317,6 +319,11 @@ class ModelsLayout(Widget):
     return bundle.ref if bundle else "Default"
 
   def _update_state(self):
+    if time.monotonic() - self._carrot_status_time >= 1:
+      from openpilot.selfdrive.modeld.carrot_offline import read_status
+      status = read_status()
+      self._set_item_note(self.carrot_status_item, status['detail'])
+      self._carrot_status_time = time.monotonic()
     advanced_controls: bool = ui_state.params.get_bool("ShowAdvancedControls")
     turn_desire: bool = ui_state.params.get_bool("LaneTurnDesire")
     live_delay: bool = ui_state.params.get_bool("LagdToggle")

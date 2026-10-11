@@ -79,6 +79,39 @@ small-model failure fallback remain unchanged.
 
 ## Carrot generic Chestnut pipeline (experimental branch)
 
+### Automatic offline operation
+
+This branch registers `carrot_offline` as an offroad-only vehicle process.
+No laptop, SSH command or network is needed to run its parked smoke test
+after the model/runtime have been prepared. On the first installation, keep
+the vehicle device powered **offroad with Wi-Fi** until the Models page's
+**Carrot Offline Test** row says the local files are ready. A Git source
+installation cannot include the external 776 MB weights; initial preparation
+therefore still requires a network connection on the device itself.
+The process downloads/resumes/verifies the default carrot artifact and runtime
+automatically, independently of the existing selected models.
+
+On later offroad sessions it verifies and uses the saved files without
+requesting a remote manifest. When Chestnut is already powered and detected,
+it automatically runs changing synthetic frames on both camera layouts,
+checks finite parsed outputs, resets state, and saves timing results.
+It never forces Chestnut power, changes ignition/vehicle parameters or runs
+alongside modeld. If Chestnut is not available offroad, the screen explicitly
+shows that it is waiting; **starting ignition does not bypass this condition**.
+The manager stops this process when switching onroad, and the original
+selected model continues driving. This is not an automatic carrot road test.
+
+The Models page displays preparation, download, waiting, test progress,
+completion or failure. Completion means only that the synthetic parked smoke
+test ran, never that driving equivalence was proven. Results are saved under
+the independent carrot cache as `offline-status.json`, `offline-result.json`
+and, on failure, `offline-error.json`; no uploads are required.
+Latest results persist across reboot until replaced by the next completed
+test. GPU failures are not repeatedly retried in the same offroad session.
+Download failures are recorded and preparation retries after 60 seconds.
+Return the device to a network later to retrieve these files for diagnosis.
+Hardware testing of this automatic workflow is still required.
+
 The `carrot-chestnut-pipeline` branch ports the MIT-licensed generic model
 runtime, coherent QCOM warp, compact upload, AMD state feedback, isolated
 worker/client, verified artifact delivery and diagnostics from
@@ -91,8 +124,8 @@ This is a **parked-only, unqualified integration**, not a default driving
 backend. Without `CARROT_CHESTNUT_PKL`, existing TT/IDM/model selection and
 fallback behavior are unchanged. Small models ignore this variable. Vehicle
 controls, message publication, Cluster and the bounded camera pairing below
-are retained. No automatic downloads, model-selector changes, manager/build
-hooks or vehicle parameter changes are introduced.
+are retained. The offroad preparation/test process is automatic; there are no
+model-selector changes, onroad/build hooks or vehicle parameter changes.
 
 ### Downloading carrot's model and pinned runtime
 

@@ -122,6 +122,7 @@ def main():
               'input_shapes': metadata['input_shapes'],
               'output_slices': {k: [v.start, v.stop, v.step] for k, v in metadata['output_slices'].items()},
               'checkpoint': metadata['model_checkpoint'], 'frame_size': frame_size}
+      info['warp_backend'] = 'qcom' if generic and isinstance(adapter, LocalWarpRuntime) else 'amd'
       control.write(json.dumps(info).encode() + b'\n')
       control.flush()
       progress.mark('idle')
