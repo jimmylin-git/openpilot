@@ -37,12 +37,16 @@ def prepare(cache: Path, report) -> Path:
   selected = cache / 'offline-model.json'
   if selected.is_file():
     model = BigModelManifest.from_dict(json.loads(selected.read_text()), DEFAULT_MANIFEST_URL)
-    path = installed(model, cache)
+    path = installed(model, cache, allow_rejected=True)
     if path is not None:
       catalog = json.loads((path.parent / 'installed.json').read_text())
       if (catalog['format'] == 'comma-generic-onnx' and
           sha256(path) == catalog['pickle']['sha256'] and
           sha256(path.parent / 'runtime.tar.gz') == catalog['runtime']['sha256']):
+        path = ensure_precompiled(model, cache)
+        if path is None:
+          failure = json.loads((cache / 'precompiled' / model.sha256 / 'last_failure.json').read_text())
+          raise RuntimeError(f"Model remains rejected: {failure['error'].rstrip().splitlines()[-1]}")
         return path  # No manifest request or network call when locally complete.
       raise ValueError('Local generic model/runtime verification failed')
   report('downloading', 'Preparing model/runtime. Initial download needs Wi-Fi; later tests are offline.')

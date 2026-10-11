@@ -98,7 +98,7 @@ def download(artifact: dict, target: Path, progress=None) -> None:
   os.replace(partial, target)
 
 
-def installed(model=None, cache_dir: Path | None = None) -> Path | None:
+def installed(model=None, cache_dir: Path | None = None, *, allow_rejected: bool = False) -> Path | None:
   model = model or active_manifest()
   if model is None:
     return None
@@ -106,7 +106,7 @@ def installed(model=None, cache_dir: Path | None = None) -> Path | None:
   try:
     value = json.loads((root / 'installed.json').read_text())
     validate_catalog(value, model.sha256, value['catalog_url'])
-    if (root / 'rejected').exists():
+    if not allow_rejected and (root / 'rejected').exists():
       return None
     if (root / 'model.pkl').stat().st_size != value['pickle']['size']:
       return None
@@ -145,8 +145,15 @@ def gpu_transport_failure(detail: str) -> bool:
     detail.rstrip(), re.MULTILINE | re.IGNORECASE) is not None
 
 
+def gpu_smu_timeout(detail: str, phase: str) -> bool:
+  return (phase in ('load', 'boot_validation') and
+          re.search(r'^TimeoutError: SMU msg 0x[0-9a-f]+ timeout\. Timed out after [0-9]+ ms, ' +
+                    r'condition not met: [0-9]+ != [0-9]+\Z',
+                    detail.rstrip(), re.MULTILINE | re.IGNORECASE) is not None)
+
+
 def retry_usb_rejection(root: Path, pickle_sha256: str) -> bool:
-  """Migrate old USB-I/O/PSP startup misclassification after a device reboot.
+  """Migrate old USB-I/O/PSP/SMU startup misclassification after a device reboot.
 
   This grants another verified load attempt, never a validation receipt.
   Missing/mismatched diagnostics and actual model errors remain rejected.
@@ -162,7 +169,8 @@ def retry_usb_rejection(root: Path, pickle_sha256: str) -> bool:
             bool(current_boot) and failure['boot_id'] != current_boot and
             isinstance(failure.get('error'), str) and
             (gpu_transport_failure(failure['error']) or
-             gpu_bootloader_timeout(failure['error'], failure['phase'])))
+             gpu_bootloader_timeout(failure['error'], failure['phase']) or
+             gpu_smu_timeout(failure['error'], failure['phase'])))
   except (OSError, ValueError, TypeError):
     return False
 
@@ -172,10 +180,16 @@ def ensure_precompiled(model=None, cache_dir: Path | None = None, progress=None)
   if model is None:
     return None
   root = (cache_dir or model_cache_dir()) / 'precompiled' / model.sha256
-  existing = installed(model, cache_dir)
+  existing = installed(model, cache_dir, allow_rejected=True)
   if existing:
     value = json.loads((root / 'installed.json').read_text())
     if sha256(existing) == value['pickle']['sha256'] and sha256(root / 'runtime.tar.gz') == value['runtime']['sha256']:
+      if (root / 'rejected').exists():
+        if (root / 'rejected').read_text() != value['pickle']['sha256'] or not retry_usb_rejection(root, value['pickle']['sha256']):
+          return None
+        (root / 'boot_validation.json').unlink(missing_ok=True)
+        (root / 'rejected').unlink()
+        print('Retrying earlier-boot GPU initialization failure using verified local artifacts.')
       return existing
   catalog_url = urljoin(model.url, 'precompiled.json')
   with urlopen(Request(catalog_url, headers={'User-Agent': 'carrot-precompiled/1'}), timeout=8) as response:
@@ -235,6 +249,7 @@ def record_failure(path: Path, error: BaseException | str, phase: str) -> bool:
   transient = ('PCIe link not up (LTSSM=' in detail or isinstance(error, (TimeoutError, BrokenPipeError)) or
                gpu_transport_failure(detail) or
                gpu_bootloader_timeout(detail, phase) or
+               gpu_smu_timeout(detail, phase) or
                'precompiled eGPU worker timed out' in detail or 'precompiled eGPU worker exited' in detail)
   value = json.loads((path.parent / 'installed.json').read_text())
   from openpilot.selfdrive.modeld.egpu_worker_progress import boot_identity

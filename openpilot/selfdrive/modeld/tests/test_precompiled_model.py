@@ -18,6 +18,7 @@ class Response(io.BytesIO):
 
 
 BOOTLOADER_TIMEOUT = 'TimeoutError: BL not ready. Timed out after 10000 ms, condition not met: 0 != 2147483648\n'
+SMU_TIMEOUT = 'TimeoutError: SMU msg 0x1a timeout. Timed out after 10000 ms, condition not met: 436207616 != 1\n'
 
 
 def catalog():
@@ -120,7 +121,9 @@ def test_generic_catalog_is_bound_to_the_pickle_hash():
     pm.validate_catalog(value, value['model_sha256'], 'https://nas.example/precompiled.json')
 
 
-def test_generic_install_reuses_verified_download(tmp_path, monkeypatch):
+@pytest.mark.parametrize('failure_error,allowed', [(SMU_TIMEOUT, True), ('ValueError: checkpoint mismatch', False)])
+def test_generic_install_reuses_verified_download(tmp_path, monkeypatch, failure_error, allowed):
+  from openpilot.selfdrive.modeld import carrot_offline, egpu_worker_progress
   from openpilot.selfdrive.modeld.carrot_model import BigModelManifest, model_path
   value, data = catalog()
   value.update(format='comma-generic-onnx', model_sha256=value['pickle']['sha256'])
@@ -144,6 +147,22 @@ def test_generic_install_reuses_verified_download(tmp_path, monkeypatch):
   path = pm.ensure_precompiled(model, tmp_path)
   assert path.read_bytes() == data['pickle']
   assert pm.installed(model, tmp_path) == path
+  carrot_offline.write_json(tmp_path / 'offline-model.json', vars(model))
+  monkeypatch.setattr(carrot_offline, 'DEFAULT_MANIFEST_URL', 'https://nas.example/manifest.json')
+  failure = {'rejected': True, 'pickle_sha256': value['pickle']['sha256'], 'phase': 'load',
+             'boot_id': 'previous-boot', 'error': failure_error}
+  (path.parent / 'last_failure.json').write_text(json.dumps(failure))
+  pm.reject(path)
+  monkeypatch.setattr(egpu_worker_progress, 'boot_identity', lambda: 'this-boot')
+  monkeypatch.setattr(pm, 'urlopen', lambda *a, **kw: pytest.fail('cached preparation must stay offline'))
+  monkeypatch.setattr(carrot_offline, 'fetch_manifest', lambda: pytest.fail('no remote manifest'))
+  if allowed:
+    assert carrot_offline.prepare(tmp_path, lambda *a: None) == path
+  else:
+    with pytest.raises(RuntimeError, match='Model remains rejected: ValueError: checkpoint mismatch'):
+      carrot_offline.prepare(tmp_path, lambda *a: None)
+  assert (path.parent / 'rejected').exists() == (not allowed)
+  assert json.loads((path.parent / 'last_failure.json').read_text()) == failure
 
 
 @pytest.mark.parametrize('change,allowed', [
@@ -152,7 +171,7 @@ def test_generic_install_reuses_verified_download(tmp_path, monkeypatch):
   ({'error': 'ValueError: checkpoint mismatch'}, False), ({'rejected': False}, False),
   ({'error': 'OSError: Input/Output Error reading model.pkl'}, False),
 ])
-@pytest.mark.parametrize('error', ['RuntimeError: bulk OUT 0x02 failed: Input/Output Error', BOOTLOADER_TIMEOUT,
+@pytest.mark.parametrize('error', ['RuntimeError: bulk OUT 0x02 failed: Input/Output Error', BOOTLOADER_TIMEOUT, SMU_TIMEOUT,
                                  'RuntimeError: libusb_control_transfer: No such device (it may have been disconnected)'])
 def test_old_usb_rejection_requires_matching_previous_boot_evidence(tmp_path, monkeypatch, change, allowed, error):
   from openpilot.selfdrive.modeld import egpu_worker_progress
@@ -200,6 +219,41 @@ def test_bootloader_timeout_is_retryable_only_during_startup(tmp_path, phase, al
   assert pm.record_failure(path, RuntimeError(BOOTLOADER_TIMEOUT), phase) == (not allowed)
   assert (tmp_path / 'rejected').exists() == (not allowed)
   assert not (tmp_path / 'boot_validation.json').exists()
+
+
+@pytest.mark.parametrize('phase,allowed', [('load', True), ('boot_validation', True), ('inference', False)])
+def test_smu_timeout_is_retryable_only_during_startup(tmp_path, phase, allowed):
+  (tmp_path / 'installed.json').write_text(json.dumps({'pickle': {'sha256': 'a' * 64}}))
+  assert pm.record_failure(tmp_path / 'model.pkl', RuntimeError(SMU_TIMEOUT), phase) == (not allowed)
+  assert (tmp_path / 'rejected').exists() == (not allowed)
+
+
+@pytest.mark.parametrize('error', [SMU_TIMEOUT + 'ValueError: checkpoint mismatch',
+                                 'ValueError: quoted ' + SMU_TIMEOUT])
+def test_smu_match_does_not_hide_model_errors(error):
+  assert not pm.gpu_smu_timeout(error, 'load')
+
+
+@pytest.mark.parametrize('same_boot,allowed', [(False, True), (True, False)])
+def test_verified_rejected_cache_recovers_without_network(tmp_path, monkeypatch, same_boot, allowed):
+  from openpilot.selfdrive.modeld import egpu_worker_progress
+  value, data = catalog()
+  model = SimpleNamespace(sha256='a' * 64, url='https://nas.example/model.onnx')
+  def fetch(request, **kwargs):
+    name = request.full_url.rsplit('/', 1)[-1]
+    return Response(json.dumps(value).encode() if name == 'precompiled.json' else data[name])
+  monkeypatch.setattr(pm, 'urlopen', fetch)
+  path = pm.ensure_precompiled(model, tmp_path)
+  monkeypatch.setattr(egpu_worker_progress, 'boot_identity', lambda: 'old-boot')
+  pm.record_failure(path, RuntimeError('ValueError: model mismatch'), 'load')
+  failure = json.loads((path.parent / 'last_failure.json').read_text())
+  failure['error'] = SMU_TIMEOUT
+  (path.parent / 'last_failure.json').write_text(json.dumps(failure))
+  monkeypatch.setattr(egpu_worker_progress, 'boot_identity', lambda: 'old-boot' if same_boot else 'new-boot')
+  monkeypatch.setattr(pm, 'urlopen', lambda *a, **kw: pytest.fail('verified recovery must stay offline'))
+  assert (pm.ensure_precompiled(model, tmp_path) == path) == allowed
+  assert (path.parent / 'rejected').exists() == (not allowed)
+  assert json.loads((path.parent / 'last_failure.json').read_text()) == failure
 
 
 @pytest.mark.parametrize('phase', ['load', 'boot_validation', 'inference'])

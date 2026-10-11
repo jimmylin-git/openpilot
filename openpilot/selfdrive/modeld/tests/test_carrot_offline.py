@@ -47,10 +47,10 @@ def test_complete_cache_never_uses_network(tmp_path, monkeypatch):
   path.write_bytes(b'x')
   (tmp_path / 'installed.json').write_text(json.dumps(
     {'format': 'comma-generic-onnx', 'pickle': {'sha256': 'a' * 64}, 'runtime': {'sha256': 'b' * 64}}))
-  monkeypatch.setattr(precompiled_model, 'installed', lambda *args: path)
+  monkeypatch.setattr(precompiled_model, 'installed', lambda *args, **kwargs: path)
   monkeypatch.setattr(precompiled_model, 'sha256', lambda path: ('a' if path.name == 'model.pkl' else 'b') * 64)
   monkeypatch.setattr(offline, 'fetch_manifest', lambda: pytest.fail('offline cache must not fetch manifest'))
-  monkeypatch.setattr(precompiled_model, 'ensure_precompiled', lambda *args: pytest.fail('offline cache must not download'))
+  monkeypatch.setattr(precompiled_model, 'ensure_precompiled', lambda *args: path)
   assert offline.prepare(tmp_path, lambda *args: None) == path
 
 
@@ -61,7 +61,7 @@ def test_corrupt_cache_reports_error_without_silent_download(tmp_path, monkeypat
   path = tmp_path / 'model.pkl'
   (tmp_path / 'installed.json').write_text(json.dumps(
     {'format': 'comma-generic-onnx', 'pickle': {'sha256': 'a' * 64}, 'runtime': {'sha256': 'b' * 64}}))
-  monkeypatch.setattr(precompiled_model, 'installed', lambda *args: path)
+  monkeypatch.setattr(precompiled_model, 'installed', lambda *args, **kwargs: path)
   monkeypatch.setattr(precompiled_model, 'sha256', lambda path: 'c' * 64)
   with pytest.raises(ValueError, match='verification failed'):
     offline.prepare(tmp_path, lambda *args: None)

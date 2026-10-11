@@ -112,6 +112,11 @@ the independent carrot cache as `offline-status.json`, `offline-result.json`
 and, on failure, `offline-error.json`; no uploads are required.
 Latest results persist across reboot until replaced by the next completed
 test. GPU failures are not repeatedly retried in the same offroad session.
+USB transport, PSP bootloader and SMU initialization timeouts are device
+failures, not proof of model corruption. Old rejections for these startup
+failures can be recovered after reboot using hash-verified local files, without
+fetching a manifest or discarding the failure record. Model/format errors remain
+rejected, and recovery never grants driving qualification.
 Download failures are recorded and preparation retries after 60 seconds.
 Return the device to a network later to retrieve these files for diagnosis.
 Hardware testing of this automatic workflow is still required.
