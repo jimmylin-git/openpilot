@@ -31,11 +31,17 @@ def create_runtime(args, device_type, report_failure):
   return GenericModelRuntime(*args)
 
 
-def bind_runtime(adapter, args, packed, report_failure):
+def bind_runtime(adapter, args, packed, report_failure, *, sampling_boundary_diagnostic=False):
+  if sampling_boundary_diagnostic:
+    from openpilot.selfdrive.modeld.carrot_model import require_parked
+    require_parked()
+    if not isinstance(adapter, LocalWarpRuntime):
+      raise RuntimeError('Parked QCOM diagnostic requires the QCOM backend')
+    adapter.sampling_boundary_diagnostic = True
   try:
     adapter.bind_shared(packed)
   except Exception:
-    if not isinstance(adapter, LocalWarpRuntime):
+    if sampling_boundary_diagnostic or not isinstance(adapter, LocalWarpRuntime):
       raise
     report_failure('QCOM pre-upload warp validation failed; using AMD warp')
     adapter = GenericModelRuntime(*args)
@@ -179,7 +185,9 @@ class LocalWarpRuntime(GenericModelRuntime):
           difference['sampling_boundary_only'] = difference['repeat_matches_first'] and only_sampling_boundary_differences(
             actual, expected, self.raw, self.frames_offset, self.frame_size, self.frame_info, self.camera_size, matrices)
           differences.append(difference)
-      if differences:
+      self.warp_differences = differences
+      diagnostic = getattr(self, 'sampling_boundary_diagnostic', False)
+      if differences and not (diagnostic and all(d['sampling_boundary_only'] for d in differences)):
         raise RuntimeError('QCOM pre-upload warp differs from artifact AMD warp: ' + json.dumps(differences))
     finally:
       self.raw[:] = 0

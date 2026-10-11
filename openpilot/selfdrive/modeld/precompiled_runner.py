@@ -16,7 +16,9 @@ from openpilot.selfdrive.modeld.egpu_worker_progress import worker_snapshot
 
 
 class PrecompiledModelState:
-  def __init__(self, cam_w: int, cam_h: int, pkl_path: Path):
+  def __init__(self, cam_w: int, cam_h: int, pkl_path: Path, *, sampling_boundary_diagnostic=False):
+    self.sampling_boundary_diagnostic = sampling_boundary_diagnostic
+    self._require_diagnostic_parked()
     self.pkl_path = pkl_path
     self.process = None
     self.shared = None
@@ -30,7 +32,10 @@ class PrecompiledModelState:
     self.file = tempfile.NamedTemporaryFile(prefix='carrot-model-', delete=False)
     try:
       worker = Path(__file__).with_name('precompiled_worker.py')
-      self.process = subprocess.Popen([sys.executable, str(worker), str(pkl_path), self.file.name, str(cam_w), str(cam_h)],
+      command = [sys.executable, str(worker), str(pkl_path), self.file.name, str(cam_w), str(cam_h)]
+      if sampling_boundary_diagnostic:
+        command.append('--sampling-boundary-diagnostic')
+      self.process = subprocess.Popen(command,
                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
       info = json.loads(self._receive(110))
       self.shared = mmap.mmap(self.file.fileno(), info['size'])
@@ -43,6 +48,8 @@ class PrecompiledModelState:
       self.frame_size = info['frame_size']
       self.checkpoint = info['checkpoint']
       self.backend = info.get('warp_backend', 'unknown')
+      self.usb_input_bytes = info.get('usb_input_bytes')
+      self.warp_differences = info.get('warp_differences', [])
     except BaseException as exc:
       self.close()
       if isinstance(exc, Exception):
@@ -64,7 +71,13 @@ class PrecompiledModelState:
       raise RuntimeError(json.loads(value[6:]))
     return value
 
+  def _require_diagnostic_parked(self):
+    if getattr(self, 'sampling_boundary_diagnostic', False):
+      from openpilot.selfdrive.modeld.carrot_model import require_parked
+      require_parked()
+
   def run(self, bufs, transforms, inputs, prepare_only):
+    self._require_diagnostic_parked()
     for name in ('img', 'big_img'):
       data = np.frombuffer(bufs[name].data, dtype=np.uint8, count=self.frame_size)
       np.copyto(self.views[name], data)
@@ -104,6 +117,7 @@ class PrecompiledModelState:
     return outputs
 
   def reset(self):
+    self._require_diagnostic_parked()
     try:
       self.process.stdin.write(b'z')
       if self._receive(10) != b'1\n':

@@ -88,14 +88,18 @@ def test_manager_only_runs_offroad_and_ui_exposes_local_status():
   assert 'carrot_status_item' in ui and 'read_status' in ui
 
 
-def test_automatic_smoke_test_saves_both_layouts_and_closes_workers(tmp_path, monkeypatch):
+@pytest.mark.parametrize('diagnostic', [False, True])
+def test_automatic_smoke_test_saves_both_layouts_and_closes_workers(tmp_path, monkeypatch, diagnostic):
   from openpilot.selfdrive.modeld import carrot_model, precompiled_runner
   instances = []
   class Runtime:
     frame_size = 12
     backend = 'qcom'
     checkpoint = 'checked'
-    def __init__(self, width, height, path):
+    usb_input_bytes = 393728
+    warp_differences = []
+    def __init__(self, width, height, path, **options):
+      assert options == ({'sampling_boundary_diagnostic': True} if diagnostic else {})
       self.runs = 0
       self.closed = False
       self.reset_called = False
@@ -109,8 +113,11 @@ def test_automatic_smoke_test_saves_both_layouts_and_closes_workers(tmp_path, mo
       self.closed = True
   monkeypatch.setattr(carrot_model, 'require_parked', lambda: None)
   monkeypatch.setattr(precompiled_runner, 'PrecompiledModelState', Runtime)
-  result = offline.test_model(tmp_path / 'model.pkl', lambda *args: None)
+  result = offline.test_model(tmp_path / 'model.pkl', lambda *args: None, sampling_boundary_diagnostic=diagnostic)
   assert result['qualified'] is False
   assert [entry['samples'] for entry in result['results']] == [100, 100]
   assert [entry['camera'] for entry in result['results']] == [[1928, 1208], [1344, 760]]
   assert all(runtime.runs == 111 and runtime.reset_called and runtime.closed for runtime in instances)
+  assert result['sampling_boundary_diagnostic'] is diagnostic
+  if diagnostic:
+    assert all(entry['usb_input_bytes'] == 393728 for entry in result['results'])

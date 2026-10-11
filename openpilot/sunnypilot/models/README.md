@@ -199,6 +199,24 @@ initialization/validation failure, carrot's explicit logged same-model AMD
 warp fallback remains; check the reported backend before attributing any
 performance improvement to compact upload.
 
+For a one-shot **parked diagnostic only**, after the automatic test has completed
+and its GPU worker has exited:
+
+```sh
+python -m openpilot.selfdrive.modeld.carrot_offline --sampling-boundary-diagnostic
+```
+
+This explicit mode permits only repeatable, source-pixel-verified sampling-boundary
+differences in the existing warp probes. All other differences still fail, and
+AMD fallback cannot count as a successful QCOM diagnostic. Both client and worker
+check Offroad before execution. Results, upload size and probe differences are
+saved separately in `qcom-diagnostic-{status,result,error}.json`; the original
+automatic test records are preserved. Each layout uses 10 warmup frames and 100
+timing samples plus reset. `qualified` remains false: this is neither continuous
+output/state equivalence nor driving qualification. Default exact validation
+and model selection are unchanged. Do not run this alongside another GPU worker
+or repeat a failed GPU initialization within the same offroad session.
+
 Necessary deviations from carrot:
 
 * Keep our parser, generation-12/20-Hz constants and existing action/control

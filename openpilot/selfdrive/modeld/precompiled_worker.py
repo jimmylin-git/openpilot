@@ -27,6 +27,12 @@ def main():
   control = sys.stdout.buffer
   sys.stdout = sys.stderr  # tinygrad diagnostics must not enter the control protocol
   pkl, shared_path, width, height = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+  diagnostic = sys.argv[5:] == ['--sampling-boundary-diagnostic']
+  if sys.argv[5:] and not diagnostic:
+    raise ValueError('Unknown worker arguments')
+  if diagnostic:
+    from openpilot.selfdrive.modeld.carrot_model import require_parked
+    require_parked()
   # This entry point is executed by filename; keep early diagnostics stdlib-only.
   from egpu_worker_progress import WorkerProgress
   progress = WorkerProgress(Path(str(shared_path) + '.progress'))
@@ -112,7 +118,10 @@ def main():
       packed_shared[:] = 0
       output = np.ndarray((count,), np.float32, buffer=shared, offset=input_bytes)
       if generic:
-        adapter = bind_runtime(adapter, adapter_args, packed_shared, cloudlog.exception)
+        adapter = bind_runtime(adapter, adapter_args, packed_shared, cloudlog.exception,
+                               sampling_boundary_diagnostic=diagnostic)
+        if diagnostic:
+          cloudlog.event('parkedQcomDiagnostic', qualified=False, warp_differences=adapter.warp_differences)
         adapter.progress = progress.mark
         cloudlog.event('precompiledWarp', backend='qcom' if isinstance(adapter, LocalWarpRuntime) else 'amd',
                        input_bytes=input_bytes, usb_input_bytes=getattr(adapter, 'upload_bytes', input_bytes))
@@ -123,6 +132,8 @@ def main():
               'output_slices': {k: [v.start, v.stop, v.step] for k, v in metadata['output_slices'].items()},
               'checkpoint': metadata['model_checkpoint'], 'frame_size': frame_size}
       info['warp_backend'] = 'qcom' if generic and isinstance(adapter, LocalWarpRuntime) else 'amd'
+      info['usb_input_bytes'] = getattr(adapter, 'upload_bytes', input_bytes)
+      info['warp_differences'] = getattr(adapter, 'warp_differences', [])
       control.write(json.dumps(info).encode() + b'\n')
       control.flush()
       progress.mark('idle')
@@ -130,6 +141,8 @@ def main():
       while command := sys.stdin.buffer.read(1):
         if command == b'q':
           break
+        if diagnostic:
+          require_parked()
         if command == b'z':
           adapter.reset()
           packed_shared[:] = 0

@@ -133,8 +133,9 @@ def test_prepared_transfer_preserves_controls_and_recurrent_state():
   assert runtime.last_timings['input_upload_ms'] >= 0
 
 
-@pytest.mark.parametrize('fault', [None, 'pixel', 'dtype', 'shape', 'exception'])
-def test_device_validation_rejects_different_warp_and_clears_probe_input(monkeypatch, fault):
+@pytest.mark.parametrize('diagnostic,boundary', [(False, False), (True, False), (True, True)])
+@pytest.mark.parametrize('fault', [None, 'pixel', 'dtype', 'shape', 'exception', 'unstable'])
+def test_device_validation_rejects_different_warp_and_clears_probe_input(monkeypatch, fault, diagnostic, boundary):
   runtime = object.__new__(local.LocalWarpRuntime)
   runtime.raw = np.zeros(256, np.uint8)
   runtime.device = 'AMD'
@@ -142,6 +143,8 @@ def test_device_validation_rejects_different_warp_and_clears_probe_input(monkeyp
   runtime.camera_size, runtime.frame_info = (1928, 1208), (2048, 1216, 608)
   runtime.specs = {'new_img': ((2, 6, 128, 256), 'uint8', 'AMD')}
   runtime.local_host = object()
+  runtime.sampling_boundary_diagnostic = diagnostic
+  monkeypatch.setattr(local, 'only_sampling_boundary_differences', lambda *args: boundary and fault in ('pixel', 'unstable'))
   expected = np.zeros((2, 6, 128, 256), np.uint8)
   reference = SimpleNamespace(copy_from=lambda _: None)
   monkeypatch.setitem(sys.modules, 'tinygrad', SimpleNamespace(Tensor=lambda *a, **kw: SimpleNamespace(_buffer=lambda: reference)))
@@ -154,7 +157,7 @@ def test_device_validation_rejects_different_warp_and_clears_probe_input(monkeyp
     if fault == 'exception':
       raise RuntimeError('device failure')
     actual = expected.copy()
-    if fault == 'pixel':
+    if fault == 'pixel' or fault == 'unstable' and len(probes) % 2:
       actual[1, 5, 127, 255] = 1
     if fault == 'dtype':
       actual = actual.astype(np.float32)
@@ -162,11 +165,26 @@ def test_device_validation_rejects_different_warp_and_clears_probe_input(monkeyp
       actual = actual.reshape(-1)
     return actual
   runtime.prepare_images = prepare
-  if fault:
+  if fault and not (fault == 'pixel' and diagnostic and boundary):
     with pytest.raises(RuntimeError):
       runtime.validate_warp()
   else:
     runtime.validate_warp()
-    assert len(probes) == 3
-    assert not np.array_equal(probes[0], probes[1])
+    assert len(probes) == (6 if fault else 3)
+    assert not np.array_equal(probes[0], probes[2 if fault else 1])
   assert not np.any(runtime.raw)
+
+
+def test_diagnostic_binding_refuses_amd_and_does_not_hide_validation_failure(monkeypatch):
+  from openpilot.selfdrive.modeld import carrot_model
+  monkeypatch.setattr(carrot_model, 'require_parked', lambda: None)
+  with pytest.raises(RuntimeError, match='requires the QCOM'):
+    local.bind_runtime(object(), (), object(), lambda _: pytest.fail('unexpected fallback'),
+                       sampling_boundary_diagnostic=True)
+  runtime = object.__new__(local.LocalWarpRuntime)
+  def fail(_):
+    raise RuntimeError('non-boundary pixel mismatch')
+  runtime.bind_shared = fail
+  with pytest.raises(RuntimeError, match='non-boundary'):
+    local.bind_runtime(runtime, (), object(), lambda _: pytest.fail('unexpected fallback'),
+                       sampling_boundary_diagnostic=True)

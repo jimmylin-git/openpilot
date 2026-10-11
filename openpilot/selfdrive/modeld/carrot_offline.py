@@ -64,7 +64,7 @@ def prepare(cache: Path, report) -> Path:
   return path
 
 
-def test_model(path: Path, report) -> dict:
+def test_model(path: Path, report, *, sampling_boundary_diagnostic=False) -> dict:
   import numpy as np
   from types import SimpleNamespace
   from openpilot.selfdrive.modeld.carrot_model import require_parked
@@ -77,15 +77,18 @@ def test_model(path: Path, report) -> dict:
       args = cmdline.read_bytes().split(b'\0')
     except (FileNotFoundError, ProcessLookupError):
       continue
-    if any(arg.rsplit(b'/', 1)[-1] in (b'modeld', b'modeld.py') or
+    if any(arg.rsplit(b'/', 1)[-1] in (b'modeld', b'modeld.py', b'modeld_tinygrad', b'precompiled_worker.py') or
            arg in (b'openpilot.sunnypilot.modeld_v2.modeld', b'openpilot.selfdrive.modeld.modeld') for arg in args):
-      raise RuntimeError('Refusing to share GPU with modeld')
+      raise RuntimeError('Refusing to share GPU with modeld or another worker')
   results = []
   for width, height in ((1928, 1208), (1344, 760)):
     require_parked()
     report('testing', f'Parked synthetic test {width}x{height}; do not start driving until it stops.')
-    runtime = PrecompiledModelState(width, height, path)
+    options = {'sampling_boundary_diagnostic': True} if sampling_boundary_diagnostic else {}
+    runtime = PrecompiledModelState(width, height, path, **options)
     try:
+      if sampling_boundary_diagnostic and runtime.backend != 'qcom':
+        raise RuntimeError('Parked diagnostic did not select QCOM')
       rng = np.random.default_rng(42)
       frames = {name: SimpleNamespace(data=np.zeros(runtime.frame_size, np.uint8)) for name in ('img', 'big_img')}
       transforms = {name: np.eye(3, dtype=np.float32) for name in frames}
@@ -109,10 +112,39 @@ def test_model(path: Path, report) -> dict:
                       'mean_ms': float(np.mean(timings)), 'p95_ms': float(np.percentile(timings, 95)),
                       'p99_ms': float(np.percentile(timings, 99)), 'over_50ms': sum(value > 50 for value in timings),
                       'samples': len(timings), 'reset_checked': True})
+      if sampling_boundary_diagnostic:
+        results[-1].update(usb_input_bytes=runtime.usb_input_bytes, warp_differences=runtime.warp_differences)
     finally:
       runtime.close()
-  return {'qualified': False, 'scope': 'synthetic parked smoke test, not equivalence or driving qualification',
+  return {'qualified': False, 'sampling_boundary_diagnostic': sampling_boundary_diagnostic,
+          'scope': 'synthetic parked smoke test, not equivalence or driving qualification',
           'results': results}
+
+
+def diagnostic_main():
+  from openpilot.selfdrive.modeld.carrot_model import require_parked
+  from openpilot.selfdrive.modeld.egpu_worker_progress import boot_identity
+  from openpilot.common.swaglog import cloudlog
+  import traceback
+
+  require_parked()
+  cache, boot = model_cache_dir(), boot_identity()
+  def report(state, detail):
+    write_json(cache / 'qcom-diagnostic-status.json',
+               {'state': state, 'detail': detail, 'boot_id': boot, 'qualified': False})
+  try:
+    path = prepare(cache, report)
+    if not offline_usb_present():
+      raise RuntimeError('No supported eGPU USB detected')
+    result = test_model(path, report, sampling_boundary_diagnostic=True)
+    write_json(cache / 'qcom-diagnostic-result.json', {**result, 'boot_id': boot, 'model': str(path)})
+    report('complete', 'Parked QCOM diagnostic complete; NOT equivalent or driving-qualified.')
+  except Exception:
+    cloudlog.exception('Parked QCOM diagnostic failed; no automatic retry')
+    write_json(cache / 'qcom-diagnostic-error.json',
+               {'boot_id': boot, 'error': traceback.format_exc(), 'qualified': False})
+    report('error', 'Parked QCOM diagnostic failed; no automatic retry. Inspect diagnostic error.')
+    raise
 
 
 def main():
@@ -164,4 +196,12 @@ def main():
 
 
 if __name__ == '__main__':
-  main()
+  import argparse
+  parser = argparse.ArgumentParser(description=__doc__)
+  parser.add_argument('--sampling-boundary-diagnostic', action='store_true',
+                      help='One-shot parked QCOM diagnostic; never changes the default exact guard')
+  args = parser.parse_args()
+  if args.sampling_boundary_diagnostic:
+    diagnostic_main()
+  else:
+    main()
