@@ -9,6 +9,7 @@ See the LICENSE.md file in the root directory for more details.
 from collections.abc import Callable
 import os
 os.environ['GMMU'] = '0'
+from pathlib import Path
 import numpy as np
 import threading
 import time
@@ -91,6 +92,10 @@ class ModelState(ModelStateBase):
 
   def __init__(self, cam_w: int, cam_h: int, chestnut: bool = False):
     ModelStateBase.__init__(self)
+    self.carrot_runtime = None
+    if chestnut and (carrot_path := os.environ.get('CARROT_CHESTNUT_PKL')):
+      self._init_carrot(cam_w, cam_h, Path(carrot_path))
+      return
 
     env_pkl = os.environ.get('COMBINED_MODEL_PKL')
     if env_pkl and model_file_exists(env_pkl):
@@ -110,7 +115,29 @@ class ModelState(ModelStateBase):
     assert pkl_path is not None, f"No driving pkl found for {'chestnut' if chestnut else 'small model'}; download a compatible model bundle"
     self._init_combined(pkl_path, cam_w, cam_h, model_bundle)
 
+  def _init_carrot(self, cam_w: int, cam_h: int, path: Path) -> None:
+    from openpilot.selfdrive.modeld.carrot_model import require_parked
+    from openpilot.selfdrive.modeld.precompiled_runner import PrecompiledModelState
+    from openpilot.sunnypilot.models.split_model_constants import SplitModelConstants
+    require_parked()
+    if not path.is_absolute():
+      raise ValueError("CARROT_CHESTNUT_PKL must be an absolute installed model path")
+    if not path.is_file() or not (path.parent / 'installed.json').is_file():
+      raise FileNotFoundError("Carrot model must be installed with its verified runtime and installed.json")
+    self.carrot_runtime = PrecompiledModelState(cam_w, cam_h, path)
+    self.chestnut = True
+    self.generation = 12
+    self.constants = SplitModelConstants()
+    self.LAT_SMOOTH_SECONDS, self.LONG_SMOOTH_SECONDS = .1, .3
+    self.MIN_LAT_CONTROL_SPEED, self.PLANPLUS_CONTROL = .3, 1.0
+    self._vision_input_names = self.carrot_runtime.vision_input_names
+    self._desire_key = 'desire_pulse'
+    self.numpy_inputs = {'desire_pulse': np.zeros(self.constants.DESIRE_LEN, np.float32),
+                         'traffic_convention': np.zeros((1, 2), np.float32), 'action_t': np.zeros((1, 2), np.float32)}
+    cloudlog.warning("Parked-only carrot generic runtime selected: %s checkpoint=%s", path, self.carrot_runtime.checkpoint)
+
   def _init_combined(self, pkl_path, cam_w, cam_h, bundle):
+    self.carrot_runtime = None
     cloudlog.warning(f"loading combined pkl: {pkl_path}")
     jits = load_oob(open_file_chunked(pkl_path))
 
@@ -182,6 +209,14 @@ class ModelState(ModelStateBase):
       self.warp(**{k: self.input_queues[k] for k in WARP_INPUTS}, frame=self.full_frames[self._road_key], big_frame=self.full_frames[self._wide_key])
 
   def warmup(self) -> None:
+    if self.carrot_runtime is not None:
+      from types import SimpleNamespace
+      runtime = self.carrot_runtime
+      frames = {name: SimpleNamespace(data=np.zeros(runtime.frame_size, dtype=np.uint8)) for name in runtime.vision_input_names}
+      transforms = {name: np.eye(3, dtype=np.float32) for name in frames}
+      self.run(frames, transforms, {name: value.copy() for name, value in self.numpy_inputs.items()})
+      runtime.reset()
+      return
     dummy_size = self.frame_copy_size if self.is_run_model else self.frame_buf_params[self._road_key][3]
     dummy_frames = {k: np.zeros(dummy_size, dtype=np.uint8) for k in self._vision_input_names}
     transforms = {k: np.eye(3, dtype=np.float32) for k in [self._road_key, self._wide_key] if k}
@@ -214,6 +249,13 @@ class ModelState(ModelStateBase):
   def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
           inputs: dict[str, np.ndarray],
           after_enqueue: Callable[[], None] | None = None) -> dict[str, np.ndarray] | None:
+    if self.carrot_runtime is not None:
+      from openpilot.selfdrive.modeld.carrot_model import require_parked
+      require_parked()
+      outputs = self.carrot_runtime.run(bufs, transforms, inputs, False)
+      if after_enqueue is not None:
+        after_enqueue()
+      return outputs
     if self.is_run_model:
       for key, buf in bufs.items():
         data = buf.data if hasattr(buf, 'data') else buf
