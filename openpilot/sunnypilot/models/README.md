@@ -62,206 +62,36 @@ Some clients may have intermittent access to updated JSONs. The runtime check en
 
 This layered strategy ensures safe evolution of the model selection system while maintaining backward compatibility and runtime protection against stale or incompatible bundles.
 
-## Experimental Chestnut QCOM host warp
+## Chestnut PKL inference
 
-This implements the guarded pre-upload workflow from carrot-wip
-[`local_gpu_warp.py`](https://github.com/ajouatom/openpilot/blob/c60cde06cb10908da5e559732a6a0b2b1ff1d0d3/openpilot/selfdrive/modeld/local_gpu_warp.py)
-and its [validation notes](https://github.com/ajouatom/openpilot/blob/c60cde06cb10908da5e559732a6a0b2b1ff1d0d3/docs/c3_preupload_warp.md),
-adapted to modeld_v2's supercombo format. The upstream code is MIT licensed;
-see the repository's [license](../../../LICENSE).
+Downloaded PKL bundles remain the normal big-model path, including TT/IDM and
+CTMV2's original PKL. No ONNX download or compilation is required to use them.
+The existing general ONNX compiler and small-model tooling remain available.
 
-The mechanisms match, but the artifact formats are not interchangeable.
-Carrot wraps its generic precompiled runtime; modeld_v2 retains runtime support
-for the earlier opt-in `warped_yuv_v2` experiment. Old `warped_yuv_v1` artifacts
-are rejected. The experimental ONNX-to-host-warp compiler and automatic offroad
-preparation/receipt selection have been removed: the current Chestnut catalog
-provides precompiled PKLs without verified corresponding ONNX sources.
+The CTMV2 captured-policy extractor, recorded/synthetic verifier, compact upload,
+AMD-resident feature experiment and pre-upload QCOM warp runtime have been
+removed. Experimental camera-input ABI artifacts are rejected explicitly;
+select an original PKL instead. The Chestnut-only experimental model override,
+preparation process and status UI are no longer supported. Installed models,
+recordings and caches are not deleted or selected by this cleanup. Model bundle
+selection, generation settings, original recurrent state and the existing
+small-model failure fallback remain unchanged.
 
-Downloaded PKL bundles remain the normal big-model path. No ONNX download or
-compilation is required to use them. The existing general ONNX compiler and
-small-model tooling remain available. Carrot generic artifacts are not yet
-supported by this loader; renaming a generic PKL or changing its metadata does
-not convert its ABI. A future adapter must use the artifact's matching runtime
-and validate its inputs, state and outputs before selection.
+## Bounded camera pairing
 
-### Runtime contract
+Stock modeld and modeld_v2 retain the shared `camera_sync.py` implementation
+adapted from carrot's MIT-licensed implementation at commit
+`c60cde06cb10908da5e559732a6a0b2b1ff1d0d3`, independently of the removed warp
+experiment. Each call receives fresh frames, compares their current SOF
+timestamps, and accepts skew up to and including 20 ms in either direction.
+Only the older camera advances during resynchronization, with the original
+ten-iteration bound. Timeouts or unsuccessful resync skip model dispatch;
+stale buffers are not reused. Single-camera operation uses each fresh frame
+for both inputs.
 
-* Only C3/C3X (`tici`/`tizi`) attempts QCOM preparation. C4 (`mici`) and other
-  devices stay on the artifact's AMD path.
-* Raw NV12 frames and transforms are copied into a persistent local QCOM buffer
-  **on every frame**. A cached `from_blob` mapping is not used as a substitute
-  for CPU/GPU cache coherence.
-* The local warp uses the same implementation as the compiled AMD reference.
-  Its source and the full tinygrad Python source tree are hashed at build
-  time. A mismatch disables QCOM and logs a same-model AMD fallback. The local
-  JIT cache is separate, source/version/layout keyed, and atomically written.
-* Before accepting QCOM, initialization compares random NV12 inputs under
-  identity, projective and border-clamped transforms against the actual AMD
-  warp. Any pixel mismatch, including nearest-neighbour differences within
-  **0.00025 source pixels** of a half-pixel boundary, rejects QCOM and retains
-  the same-model AMD warp. Boundary proximity is diagnostic only; it does not
-  qualify as pixel equivalence. No image-error percentage or arbitrary
-  intensity tolerance is used.
-* Probes run no model inference and clear their host inputs afterward.
-  QCOM initialization/validation/frame-preparation failures retain the same
-  model, recurrent queues and AMD warp. Policy inference errors are not retried
-  after potentially advancing state; they use the existing small-model failure
-  handling. Warmup clears the experiment's inputs and recurrent queues.
-* QCOM results are read into a compact host buffer, then explicitly uploaded
-  once to AMD before policy dispatch. At 512x256, image data is 393,216 bytes;
-  the total is this plus the actual float32 controls/previous-feature payload,
-  padded to 512 bytes. **393,728 is not assumed for every supercombo**: models
-  with larger hidden features need larger control payloads.
-* Logs include `warp_backend`, calculated `usb_input_bytes`, `local_prepare_ms`,
-  `input_upload_ms`, `model_call_ms`, `output_read_ms`, total model execution
-  and frame-drop percentage. These are host-call timings, not pure GPU kernel
-  or USB-wire measurements. AMD fallback upload timing includes reference warp
-  dispatch; its control upload remains inside policy dispatch.
-
-### Bounded camera pairing
-
-Stock modeld and modeld_v2 share carrot's `camera_sync.py` implementation from
-commit `c60cde06cb10908da5e559732a6a0b2b1ff1d0d3`, independently of host warp.
-Each call receives fresh frames, compares their current SOF timestamps, and
-accepts skew up to and including 20 ms in either direction. Only the older
-camera advances during resynchronization, with the original ten-iteration
-bound. Timeouts or an unsuccessful resync skip model dispatch; stale buffers
-are not reused. Single-camera operation uses each fresh frame for both inputs.
-
-This replaces the previous-exposure-plus-25-ms rule, preserving valid
-23/77-ms alternating exposure intervals. Unlike carrot's old strict 10 ms
-limit, our previous final skew check only logged and proceeded, so the EV9
-frame-drop improvement cannot be assumed here. Real frame gaps still reach the
-existing dropped-frame and cameraOdometry validity checks. No camera driver,
-pose-validity, downstream fault check or Cluster renderer is changed.
-Both Chestnut and small models use this pairing rule without rebuilding their
-artifacts. Host tests reproduce carrot's EV9 timing cases, boundary rejection,
-missing frames and resync behavior; on-device timing and driving validation
-remain required.
-
-### Building and testing
-
-This path is experimental and must not be selected for driving based only on
-reduced transfer size. A prior isolated stock-model trial on the V23 branch
-averaged 91.2 ms over 100 warmed runs (P95 136.0 ms; 99/100 over the 50 ms
-frame budget). That was not a CTMV2 comparison or a camera-drop road test, but
-it is a strong reason to keep this ABI opt-in. Host/interpreter tests cover
-payload layout, state advancement/equivalence, JIT replay/pickle,
-validation, cache round trips and failure paths. They do not establish QCOM/AMD
-hardware equivalence, real-model output equivalence or sustained 20 Hz.
-
-Existing experimental artifacts can still be tested in an isolated parked
-process using `CHESTNUT_COMBINED_MODEL_PKL`. This override accepts chunked PKLs
-and applies only to Chestnut, preserving the selected bundle's generation,
-constants and overrides. It is not an automatic readiness check or support for
-carrot generic artifacts. A missing/incomplete override raises an initialization
-error. Do not use the global `COMBINED_MODEL_PKL` for a Chestnut-only test:
-it also applies to the small model.
-
-Previously created `.host-warp` preparation caches are no longer read or selected.
-No installed model or cache is deleted by this removal. The host-warp status UI
-and offroad preparation process are no longer registered.
-
-### CTMV2 captured-policy extraction research
-
-`openpilot.sunnypilot.modeld_v2.extract_policy.extract_ctmv2` constructs an
-**unqualified, in-memory candidate** from the inspected CTMV2 checkpoint. It is
-not imported by modeld, registered as a process, published as a ready artifact,
-or selected automatically. Existing TT/IDM and other model paths are unchanged.
-It does not modify the source artifact or replace installed PKLs.
-
-The candidate removes the six camera-plane kernels and their concatenation,
-retains the original model kernels/weights and scratch arena, and uploads a
-compact input once. An AMD-local copy fills the original warped-image view
-before the policy/history kernels execute. Original control offsets are
-preserved, including the transform header and CTMV2's 16,384-float previous
-feature. At 1928x1208 the input shrinks from 7,536,760 to 459,264 bytes; these
-are buffer sizes, not measured USB-wire traffic or a performance guarantee.
-
-Extraction rejects other checkpoints/layouts, unexpected graph wrappers,
-recurrent dependencies in the warp prefix, and policy programs whose packed
-input accesses cannot be statically bounded to the control region. It depends
-on this tinygrad captured-graph representation, not a universal PKL conversion.
-Static checks do not prove warp semantics, output equivalence or state safety.
-
-Before any runtime integration, require parked hardware checks of original
-versus extracted outputs and history across changing inputs, QCOM versus the
-original AMD warp, serialization/reload, same-model fallback, sustained latency
-and Cluster contention. No QCOM frontend or ready artifact has been installed
-for this candidate. Never use it for driving based only on static inspection.
-
-#### Compact upload and AMD-resident feature feedback
-
-The explicit research option `extract_ctmv2(..., resident_state=True)` removes
-the previous feature from the host payload. It retains the original history
-kernels and their state queues; it does not substitute another model or change
-their sampling semantics. Each call uploads a 120-byte transform/control header
-and 393,216 image bytes in a 393,728-byte aligned buffer. AMD-local copies fill
-the original control layout and warp-output view. A dedicated 65,536-byte AMD
-buffer feeds the prior hidden feature into the next call and receives output
-floats `[2066:18450]` after the model finishes. Initialize it to zero before the
-first call. The returned public output is `(1, 2066)` float32 (8,264 bytes),
-excluding hidden state and trailing padding; this return contract is for the
-isolated experiment, not the production parser.
-
-This follows carrot's data-movement/state-residency approach without assuming
-its generic artifact or state ABI is compatible with CTMV2. The default
-extractor still returns the original output and accepts host previous features.
-Both candidates remain unqualified and unselected by modeld.
-
-`openpilot.sunnypilot.modeld_v2.verify_extracted_policy` connects this candidate
-to the existing coherent-copy QCOM warp backend in a parked-only process:
-
-```sh
-python -m openpilot.sunnypilot.modeld_v2.verify_extracted_policy \
-  --model /absolute/path/to/driving_cinque_terre_model_v2_september_08_2026_tinygrad.pkl \
-  --camera 1928x1208 --warmup 10 --runs 100 --roundtrip
-```
-
-Use the vehicle's existing Python environment. The path can be the base path
-of a complete chunked model. The tool pins the inspected v25 source SHA, rejects
-onroad operation, concurrent modeld and absent Chestnut, and changes no vehicle
-parameters or installed artifacts. Do not run against an untrusted pickle.
-It builds QCOM warp in a temporary cache, demands exact QCOM/AMD pixels, compares
-public outputs, resident features and all four history queues across changing
-inputs, and reports mean/P95/P99 plus counts exceeding the 50 ms budget.
-Unlike the older host-warp path, sampling-boundary differences fail this
-qualification experiment rather than being accepted. `--roundtrip` reloads the
-candidate before a further compared frame and needs additional RAM/VRAM/disk.
-Errors stop the experiment; it does not silently switch models/backends.
-
-For recorded camera inputs, use the same isolated entry point:
-
-```sh
-python -m openpilot.sunnypilot.modeld_v2.verify_extracted_policy \
-  --model /absolute/path/to/driving_cinque_terre_model_v2_september_08_2026_tinygrad.pkl \
-  --segment /data/media/0/realdata/00000028--27eb0badf0--1 \
-  --start-frame 1607 --camera 1928x1208 --warmup 0 --runs 3
-```
-
-The segment must contain `rlog.zst`, `fcamera.hevc` and `ecamera.hevc`.
-The start ID is the narrow-camera ID, including warmup. Encoder `segmentId`
-maps each HEVC ordinal; camera-state list offsets are not reliable at segment
-boundaries. Cameras pair by recorded SOF with at most 20 ms skew and no reused
-wide frames. Missing IDs/ordinals, B-frame reordering, delayed decoding,
-dimension mismatch or absent preceding calibration stop the test.
-Currently only a recorded zero `CameraOffset` is supported; the tool does not
-guess nonzero offset smoothing. It streams selected frames from a preceding
-intra frame using the existing FFmpeg library decoder, without creating raw
-video files. Histories start at zero and controls remain synthetic: this tests
-two paths on identical recorded images/calibration, not reconstruction of
-logged driving outputs. Public outputs and all recurrent state still require
-exact equality, and any warp mismatch stops before advancing either policy.
-
-Chestnut readiness must be tested through tinygrad's actual AMD interface:
-its USB backend does not require a local `/dev/kfd` or Linux PCIe enumeration.
-The parked guard rejects both modeld module names and `modeld_tinygrad`.
-No process, selector, ready artifact or onroad entry point is added.
-
-Host tests execute the copy schedule on the tinygrad interpreter and cover
-payload size, feature offsets, changing frames, guards and timing thresholds.
-They are not evidence of real CTMV2/QCOM/AMD equivalence. Even successful parked
-results report `qualified: false`: live frame IDs/Chestnut dropped frames,
-representative camera/calibration inputs, sustained performance, same-model
-fallback and production selection still need validation. TT/IDM, original PKLs
-and Cluster remain on their existing paths.
+Real frame gaps still reach the existing dropped-frame and cameraOdometry
+validity checks. No camera driver, downstream fault check or Cluster renderer
+is changed. Both Chestnut and small models use this pairing rule without
+rebuilding their artifacts. Host tests cover exposure timing, skew boundaries,
+missing frames and resync behavior; this does not establish driving performance
+or eliminate Chestnut execution-time overruns.

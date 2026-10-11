@@ -37,12 +37,16 @@ from tinygrad import dtypes
 from tinygrad.device import Device
 from tinygrad.engine.jit import TinyJit
 from tinygrad.tensor import Tensor
-from openpilot.sunnypilot.modeld_v2.host_warp import CompactInput, derive_frame_skip
 
 MODEL_TYPES = ('vision_policy', 'supercombo', 'vision_multi_policy')
 WARP_INPUTS = ['tfm', 'big_tfm']
 POLICY_INPUTS = ['img_q', 'big_img_q', 'feat_q', 'desire_q', 'packed_npy_inputs']
 nv12_copy_size = stock.nv12_copy_size
+
+
+def derive_frame_skip(vision_input_shapes: dict, policy_input_shapes: dict) -> int:
+  features_buffer = policy_input_shapes.get('features_buffer')
+  return 1 if not features_buffer or features_buffer[1] >= 99 else 4
 
 
 def _detect_desire_key(shapes: dict) -> str | None:
@@ -136,16 +140,6 @@ def make_split_input_queues(vision_input_shapes: dict, policy_input_shapes: dict
 def make_supercombo_input_queues(input_shapes: dict, frame_skip: int,
                                  device: str | None = None) -> tuple[dict, dict]:
   return generate_queues_and_npy(input_shapes, frame_skip, device, is_supercombo=True)
-
-
-def make_host_warp_input_queues(input_shapes: dict, frame_skip: int, device: str):
-  queues, npy = make_supercombo_input_queues(input_shapes, frame_skip, device)
-  compact = CompactInput({name: value for name, value in npy.items() if name not in WARP_INPUTS},
-                         (2, 6, *input_shapes['img'][2:]))
-  npy.update(compact.controls)
-  controls = compact.data[:compact.control_bytes].view(np.float32)
-  queues['packed_npy_inputs'] = Tensor(controls, device='NPY').realize()
-  return queues, npy, compact
 
 
 def make_random_images(keys, shape, device, rng=None):

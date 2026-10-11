@@ -26,19 +26,6 @@ ModelState = modeld_module.ModelState
 # Pkl discovery
 
 class TestFindDrivingPkl(OpenpilotTestCase):
-  def test_chestnut_override_does_not_replace_small_model(self, monkeypatch):
-    monkeypatch.setenv("CHESTNUT_COMBINED_MODEL_PKL", "host-warp-test.pkl")
-    monkeypatch.setenv("COMBINED_MODEL_PKL", "small-model.pkl")
-    monkeypatch.setattr(modeld_module, "model_file_exists", lambda path: True)
-    assert _find_driving_pkl(None, chestnut=True) == "host-warp-test.pkl"
-    assert _find_driving_pkl(None, chestnut=False) == "small-model.pkl"
-
-  def test_missing_chestnut_override_is_not_silently_ignored(self, monkeypatch):
-    monkeypatch.setenv("CHESTNUT_COMBINED_MODEL_PKL", "missing-experiment.pkl")
-    monkeypatch.setattr(modeld_module, "model_file_exists", lambda path: False)
-    with self.assertRaisesRegex(FileNotFoundError, "missing or incomplete"):
-      _find_driving_pkl(None, chestnut=True)
-
   def test_returns_none_when_no_bundle_and_no_bundled_model(self, monkeypatch):
     monkeypatch.delenv("COMBINED_MODEL_PKL", raising=False)
     monkeypatch.setattr(modeld_module, "model_file_exists", lambda path: False)
@@ -82,7 +69,6 @@ class TestModelStateCombinedInit(OpenpilotTestCase):
   def test_chestnut_loads_selected_pkl_without_onnx_preparation(self, monkeypatch):
     bundle = DummyBundle(generation=12, is_20hz=True)
     loaded = []
-    monkeypatch.delenv("CHESTNUT_COMBINED_MODEL_PKL", raising=False)
     monkeypatch.delenv("COMBINED_MODEL_PKL", raising=False)
     monkeypatch.setattr(modeld_module, "get_active_bundle", lambda **kwargs: bundle)
     monkeypatch.setattr(modeld_module, "_find_driving_pkl", lambda *args, **kwargs: "baseline.pkl")
@@ -95,7 +81,6 @@ class TestModelStateCombinedInit(OpenpilotTestCase):
 
   def test_small_model_loads_selected_pkl(self, monkeypatch):
     loaded = []
-    monkeypatch.delenv("CHESTNUT_COMBINED_MODEL_PKL", raising=False)
     monkeypatch.delenv("COMBINED_MODEL_PKL", raising=False)
     monkeypatch.setattr(modeld_module, "get_active_bundle", lambda **kwargs: DummyBundle())
     monkeypatch.setattr(modeld_module, "_find_driving_pkl", lambda *args, **kwargs: "small.pkl")
@@ -103,21 +88,15 @@ class TestModelStateCombinedInit(OpenpilotTestCase):
     ModelState(CAM_W, CAM_H, chestnut=False)
     assert loaded == ["small.pkl"]
 
-  def test_chestnut_override_preserves_selected_bundle_settings(self, monkeypatch):
-    bundle = DummyBundle(generation=12, is_20hz=True)
-    loaded = []
-    monkeypatch.setenv("CHESTNUT_COMBINED_MODEL_PKL", "host-warp-test.pkl")
-    monkeypatch.delenv("COMBINED_MODEL_PKL", raising=False)
-    monkeypatch.setattr(modeld_module, "get_active_bundle", lambda **kwargs: bundle)
-    monkeypatch.setattr(modeld_module, "model_file_exists", lambda path: True)
-    monkeypatch.setattr(ModelState, "_init_combined",
-                        lambda self, path, cam_w, cam_h, selected: loaded.append((path, selected)))
-    state = ModelState(CAM_W, CAM_H, chestnut=True)
-    assert state.generation == 12
-    assert state.LAT_SMOOTH_SECONDS == .1
-    assert state.LONG_SMOOTH_SECONDS == .3
-    assert loaded == [("host-warp-test.pkl", bundle)]
-
+  def test_removed_camera_abi_is_rejected_before_queue_initialization(self, monkeypatch):
+    from unittest import mock
+    state = object.__new__(ModelState)
+    monkeypatch.setattr(modeld_module, 'open_file_chunked', lambda path: None)
+    monkeypatch.setattr(modeld_module, 'load_oob', lambda source: {'metadata': {'camera_input_abi': 'warped_yuv_v2'}})
+    with mock.patch.object(modeld_module, 'make_stock_input_queues') as queues:
+      with self.assertRaisesRegex(RuntimeError, 'no longer supported'):
+        state._init_combined('removed-experiment.pkl', CAM_W, CAM_H, None)
+      queues.assert_not_called()
   def test_asserts_when_no_pkl(self, monkeypatch):
     bundle = DummyBundle(models=[], is_20hz=True)
     monkeypatch.setattr(helpers, 'get_active_bundle', lambda params=None, *, chestnut=None: bundle)

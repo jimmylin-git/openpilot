@@ -9,7 +9,6 @@ See the LICENSE.md file in the root directory for more details.
 from collections.abc import Callable
 import os
 os.environ['GMMU'] = '0'
-from pathlib import Path
 import numpy as np
 import threading
 import time
@@ -17,7 +16,7 @@ from setproctitle import setproctitle
 from tinygrad.tensor import Tensor
 
 import openpilot.cereal.messaging as messaging
-from openpilot.common.hardware import COMMA_HARDWARE, HARDWARE
+from openpilot.common.hardware import COMMA_HARDWARE
 from openpilot.selfdrive.modeld.helpers import chestnut_compiled, chestnut_present, model_file_exists, load_oob
 from openpilot.cereal import log
 from opendbc.car.structs import car
@@ -50,9 +49,8 @@ from openpilot.sunnypilot.modeld_v2.constants import ModelConstants, Plan
 from openpilot.sunnypilot.modeld_v2.meta_helper import load_meta_constants
 from openpilot.sunnypilot.modeld_v2.camera_offset_helper import CameraOffsetHelper
 from openpilot.sunnypilot.modeld_v2.compile_modeld import (derive_frame_skip, make_split_input_queues,
-                                                           make_supercombo_input_queues, make_host_warp_input_queues, nv12_copy_size,
+                                                           make_supercombo_input_queues, nv12_copy_size,
                                                            WARP_INPUTS, POLICY_INPUTS)
-from openpilot.sunnypilot.modeld_v2.host_warp import CompactInput, HostWarpRuntime, validate_camera_input_abi as _validate_camera_input_abi
 from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.models.helpers import get_active_bundle
@@ -65,10 +63,6 @@ CHESTNUT_INIT_RETRY_INTERVAL = 1.0
 
 
 def _find_driving_pkl(bundle, chestnut: bool = False):
-  if chestnut and (override := os.environ.get('CHESTNUT_COMBINED_MODEL_PKL')):
-    if not model_file_exists(override):
-      raise FileNotFoundError(f"Chestnut model override is missing or incomplete: {override}")
-    return override
   if (override := os.environ.get('COMBINED_MODEL_PKL')) and model_file_exists(override):
     return override
   if bundle is None:
@@ -99,8 +93,7 @@ class ModelState(ModelStateBase):
     ModelStateBase.__init__(self)
 
     env_pkl = os.environ.get('COMBINED_MODEL_PKL')
-    chestnut_override = chestnut and os.environ.get('CHESTNUT_COMBINED_MODEL_PKL')
-    if not chestnut_override and env_pkl and model_file_exists(env_pkl):
+    if env_pkl and model_file_exists(env_pkl):
       model_bundle = None
     else:
       model_bundle = get_active_bundle(chestnut=chestnut)
@@ -112,9 +105,6 @@ class ModelState(ModelStateBase):
     self.MIN_LAT_CONTROL_SPEED = 0.3
     self.PLANPLUS_CONTROL: float = 1.0
     self.chestnut = chestnut
-    self.host_warp = False
-    self.host_warp_runtime: HostWarpRuntime | None = None
-    self.last_timings: dict[str, float | int | str] = {}
 
     pkl_path = _find_driving_pkl(model_bundle, chestnut=chestnut)
     assert pkl_path is not None, f"No driving pkl found for {'chestnut' if chestnut else 'small model'}; download a compatible model bundle"
@@ -125,7 +115,8 @@ class ModelState(ModelStateBase):
     jits = load_oob(open_file_chunked(pkl_path))
 
     metadata = jits['metadata']
-    self.host_warp = _validate_camera_input_abi(metadata, jits, self.chestnut, cam_w, cam_h)
+    if metadata.get('camera_input_abi') is not None:
+      raise RuntimeError("Experimental pre-upload camera artifacts are no longer supported; select an original PKL")
     self.WARP_DEV = metadata.get('warp_dev', 'QCOM') if COMMA_HARDWARE else 'CPU'
     self.DEV = ('AMD' if self.chestnut else 'QCOM') if COMMA_HARDWARE else 'CPU'
     self.QUEUE_DEV = self.DEV
@@ -136,7 +127,6 @@ class ModelState(ModelStateBase):
     self.full_frames: dict = {}
     self._blob_cache: dict = {}
     self.frame_buffers: dict = {}
-    compact: CompactInput | None = None
 
     if self.is_run_model or 'model' in metadata:
       model_metadata = metadata.get('model', metadata)
@@ -146,18 +136,14 @@ class ModelState(ModelStateBase):
       self._policy_slices_list = []
       self._combined_model_type = 'supercombo'
       self._vision_input_names = [key for key in self.input_shapes if 'img' in key]
-      self.frame_skip = metadata['frame_skip'] if self.host_warp else derive_frame_skip({}, self.input_shapes)
+      self.frame_skip = derive_frame_skip({}, self.input_shapes)
       if self.is_run_model:
         self.input_queues, self.numpy_inputs, self.frame_buffers = make_stock_input_queues(
           self.input_shapes, self.frame_skip, device=self.DEV, frame_copy_size=self.frame_copy_size)
         self.frame_views, self.npy = self.frame_buffers, self.numpy_inputs
         self.run_model, self.run_policy, self.warp = jits['run_model'][(cam_w, cam_h)], None, None
       else:
-        if self.host_warp:
-          self.input_queues, self.numpy_inputs, compact = make_host_warp_input_queues(
-            self.input_shapes, self.frame_skip, device=self.QUEUE_DEV)
-        else:
-          self.input_queues, self.numpy_inputs = make_supercombo_input_queues(self.input_shapes, self.frame_skip, device=self.QUEUE_DEV)
+        self.input_queues, self.numpy_inputs = make_supercombo_input_queues(self.input_shapes, self.frame_skip, device=self.QUEUE_DEV)
         self.run_model, self.run_policy, self.warp = None, jits['run_policy'], jits[(cam_w, cam_h)]
     else:
       self.run_model, self.run_policy, self.warp = None, jits['run_policy'], jits[(cam_w, cam_h)]
@@ -191,15 +177,7 @@ class ModelState(ModelStateBase):
     self.parser = Parser()
     self.prev_desire = np.zeros(self.constants.DESIRE_LEN, dtype=np.float32)
 
-    if self.host_warp:
-      from openpilot.common.hardware.hw import Paths
-      assert compact is not None
-      self.run_policy_amd = jits['run_policy_amd']
-      self.host_warp_runtime = HostWarpRuntime(
-        compact, self.frame_copy_size, (cam_w, cam_h), nv12_info, self.warp, self.DEV,
-        HARDWARE.get_device_type() if COMMA_HARDWARE else 'pc', metadata['warp_source_hash'],
-        Path(Paths.download_cache_root()) / 'modeld-qcom-warp', cloudlog)
-    elif self.warp is not None:
+    if self.warp is not None:
       self.full_frames = {k: Tensor(np.zeros(nv12_info[3], dtype=np.uint8), device=self.WARP_DEV).contiguous().realize() for k in self._vision_input_names}
       self.warp(**{k: self.input_queues[k] for k in WARP_INPUTS}, frame=self.full_frames[self._road_key], big_frame=self.full_frames[self._wide_key])
 
@@ -217,11 +195,6 @@ class ModelState(ModelStateBase):
     else:
       for v in self.numpy_inputs.values():
         v[:] = 0
-      if self.host_warp_runtime is not None:
-        self.host_warp_runtime.clear_inputs()
-        for key in ('img_q', 'big_img_q', 'feat_q', 'desire_q'):
-          queue = self.input_queues[key]
-          queue.assign(Tensor.zeros(*queue.shape, dtype=queue.dtype, device=queue.device)).realize()
       self.full_frames.clear()
       self._blob_cache.clear()
     self.prev_desire[:] = 0
@@ -241,12 +214,7 @@ class ModelState(ModelStateBase):
   def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
           inputs: dict[str, np.ndarray],
           after_enqueue: Callable[[], None] | None = None) -> dict[str, np.ndarray] | None:
-    if self.host_warp_runtime is not None:
-      for index, key in enumerate((self._road_key, self._wide_key)):
-        buf = bufs[key]
-        data = buf.data if hasattr(buf, 'data') else buf
-        np.copyto(self.host_warp_runtime.frames[index], np.frombuffer(data, dtype=np.uint8, count=self.frame_copy_size))
-    elif self.is_run_model:
+    if self.is_run_model:
       for key, buf in bufs.items():
         data = buf.data if hasattr(buf, 'data') else buf
         np.copyto(self.frame_buffers[key], np.frombuffer(data, dtype=np.uint8, count=self.frame_copy_size))
@@ -270,12 +238,7 @@ class ModelState(ModelStateBase):
     self.numpy_inputs['tfm'][:, :] = transforms[self._road_key].reshape(3, 3)
     self.numpy_inputs['big_tfm'][:, :] = transforms[self._wide_key].reshape(3, 3)
 
-    if self.host_warp_runtime is not None:
-      self.host_warp_runtime.matrices[0] = self.numpy_inputs['tfm']
-      self.host_warp_runtime.matrices[1] = self.numpy_inputs['big_tfm']
-      raw_outputs = self.host_warp_runtime.run(
-        self.run_policy, self.run_policy_amd, {k: self.input_queues[k] for k in POLICY_INPUTS if k in self.input_queues})
-    elif self.run_model is not None:
+    if self.run_model is not None:
       outs, = self.run_model(**{k: self.input_queues[k] for k in MODELD_INPUTS})
       raw_outputs = outs
     else:
@@ -287,11 +250,7 @@ class ModelState(ModelStateBase):
       after_enqueue()
 
     if self._combined_model_type == 'supercombo':
-      output_read_started = time.perf_counter()
       model_output = raw_outputs.numpy().flatten()
-      output_read_ms = (time.perf_counter() - output_read_started) * 1000.0
-      if self.host_warp_runtime is not None:
-        self.last_timings = {**self.host_warp_runtime.last_timings, 'output_read_ms': output_read_ms}
       if self.chestnut and not np.all(np.isfinite(model_output)):
         raise RuntimeError("model output not finite")
       sliced = {k: model_output[np.newaxis, v] for k, v in self.vision_output_slices.items()}
@@ -404,8 +363,7 @@ def main(demo=False):
 
   params = Params()
   CHESTNUT = chestnut_present()
-  chestnut_override = os.environ.get('CHESTNUT_COMBINED_MODEL_PKL')
-  chestnut_model_available = chestnut_compiled() or bool(chestnut_override and model_file_exists(chestnut_override))
+  chestnut_model_available = chestnut_compiled()
   if CHESTNUT:
     os.environ['HCQDEV_WAIT_TIMEOUT_MS'] = '3000'
 
@@ -578,10 +536,6 @@ def main(demo=False):
       model_output = None
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
-    if model.host_warp and run_count % 100 == 0:
-      cloudlog.info(
-        "experimental Chestnut pre-upload warp: frame_drop_perc=%.2f model_execution_ms=%.2f stages=%s",
-        frame_drop_ratio * 100.0, model_execution_time * 1000.0, model.last_timings)
 
     if model_output is not None:
       modelv2_send = messaging.new_message('modelV2')
