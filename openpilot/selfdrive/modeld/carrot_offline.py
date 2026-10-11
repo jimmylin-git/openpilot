@@ -64,7 +64,29 @@ def prepare(cache: Path, report) -> Path:
   return path
 
 
+class ParkedTestBusy(RuntimeError):
+  pass
+
+
 def test_model(path: Path, report, *, sampling_boundary_diagnostic=False) -> dict:
+  import fcntl
+  from openpilot.selfdrive.modeld.carrot_model import require_parked
+
+  require_parked()
+  # Never unlink a flock file: replacing its inode would admit a second owner.
+  with (path.parent.parent / 'parked-test.lock').open('a') as lock:
+    try:
+      fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+      raise ParkedTestBusy('Another carrot parked test owns the GPU test session') from error
+    try:
+      require_parked()
+      return _test_model(path, report, sampling_boundary_diagnostic=sampling_boundary_diagnostic)
+    finally:
+      fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _test_model(path: Path, report, *, sampling_boundary_diagnostic=False) -> dict:
   import numpy as np
   from types import SimpleNamespace
   from openpilot.selfdrive.modeld.carrot_model import require_parked
@@ -95,6 +117,7 @@ def test_model(path: Path, report, *, sampling_boundary_diagnostic=False) -> dic
       inputs = {'desire_pulse': np.zeros(8, np.float32), 'traffic_convention': np.array([[1, 0]], np.float32),
                 'action_t': np.zeros((1, 2), np.float32)}
       timings = []
+      timing_samples = []
       for step in range(110):
         require_parked()
         for frame in frames.values():
@@ -104,6 +127,8 @@ def test_model(path: Path, report, *, sampling_boundary_diagnostic=False) -> dic
         elapsed = (time.monotonic() - started) * 1000
         if step >= 10:
           timings.append(elapsed)
+          if sampling_boundary_diagnostic:
+            timing_samples.append({'sample': step - 10, 'elapsed_ms': elapsed, **runtime.last_timings})
         if step % 10 == 0:
           report('testing', f'Parked synthetic test {width}x{height}: {step + 1}/110 frames')
       runtime.reset()
@@ -113,7 +138,20 @@ def test_model(path: Path, report, *, sampling_boundary_diagnostic=False) -> dic
                       'p99_ms': float(np.percentile(timings, 99)), 'over_50ms': sum(value > 50 for value in timings),
                       'samples': len(timings), 'reset_checked': True})
       if sampling_boundary_diagnostic:
-        results[-1].update(usb_input_bytes=runtime.usb_input_bytes, warp_differences=runtime.warp_differences)
+        summary = {}
+        for name in timing_samples[0]:
+          if name == 'sample':
+            continue
+          values = [sample[name] for sample in timing_samples]
+          slow = [sample[name] for sample in timing_samples if sample['elapsed_ms'] > 50]
+          fast = [sample[name] for sample in timing_samples if sample['elapsed_ms'] <= 50]
+          summary[name] = {'mean_ms': float(np.mean(values)), 'p95_ms': float(np.percentile(values, 95)),
+                           'p99_ms': float(np.percentile(values, 99)), 'max_ms': max(values),
+                           'slow_mean_ms': float(np.mean(slow)) if slow else None,
+                           'fast_mean_ms': float(np.mean(fast)) if fast else None}
+        results[-1].update(usb_input_bytes=runtime.usb_input_bytes, warp_differences=runtime.warp_differences,
+                          timing_samples=timing_samples, stage_summary=summary,
+                          slowest_samples=sorted(timing_samples, key=lambda row: row['elapsed_ms'], reverse=True)[:10])
     finally:
       runtime.close()
   return {'qualified': False, 'sampling_boundary_diagnostic': sampling_boundary_diagnostic,
@@ -139,6 +177,9 @@ def diagnostic_main():
     result = test_model(path, report, sampling_boundary_diagnostic=True)
     write_json(cache / 'qcom-diagnostic-result.json', {**result, 'boot_id': boot, 'model': str(path)})
     report('complete', 'Parked QCOM diagnostic complete; NOT equivalent or driving-qualified.')
+  except ParkedTestBusy as error:
+    report('waiting_gpu', str(error) + '; no GPU load attempted.')
+    time.sleep(5)
   except Exception:
     cloudlog.exception('Parked QCOM diagnostic failed; no automatic retry')
     write_json(cache / 'qcom-diagnostic-error.json',

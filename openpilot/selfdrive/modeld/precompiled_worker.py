@@ -169,7 +169,12 @@ def main():
         progress.mark('publish')
         output[:] = result
         finished, cpu_finished = time.monotonic(), time.thread_time()
-        control.write(b'1\n')
+        if diagnostic:
+          control.write(json.dumps({'timings': {**adapter.last_timings,
+                                                'worker_work_ms': (finished - started) * 1000,
+                                                'worker_cpu_ms': (cpu_finished - cpu_started) * 1000}}).encode() + b'\n')
+        else:
+          control.write(b'1\n')
         control.flush()
         progress.mark('idle')
         # Timings include transfers/synchronization; these are not pure GPU

@@ -11,6 +11,35 @@ import pytest
 from openpilot.selfdrive.modeld import precompiled_runner as runner
 
 
+@pytest.mark.parametrize('diagnostic', [False, True])
+def test_run_timing_protocol_preserves_default_response(monkeypatch, diagnostic):
+  from openpilot.selfdrive.modeld import carrot_model
+  monkeypatch.setattr(carrot_model, 'require_parked', lambda: None)
+  model = object.__new__(runner.PrecompiledModelState)
+  model.sampling_boundary_diagnostic = diagnostic
+  model.process = SimpleNamespace(stdin=io.BytesIO())
+  model.first_run = False
+  model.frame_size = 16
+  model.prev_desire = np.zeros(8, np.float32)
+  model.views = {key: np.zeros(shape, np.float32) for key, shape in
+                 {'img': 16, 'big_img': 16, 'desire': 8, 'traffic_convention': 2, 'action_t': 2,
+                  'tfm': (3, 3), 'big_tfm': (3, 3)}.items()}
+  model.output = np.zeros(4, np.float32)
+  model.output_slices = {'test': slice(0, 4)}
+  model.parser = SimpleNamespace(parse_outputs=lambda outputs: outputs)
+  timing = dict.fromkeys(('local_prepare_ms', 'input_upload_ms', 'model_call_ms', 'output_read_ms', 'worker_work_ms'), 0.0)
+  response = json.dumps({'timings': timing}).encode() if diagnostic else b'1\n'
+  monkeypatch.setattr(model, '_receive', lambda timeout: response)
+  frames = {key: SimpleNamespace(data=np.zeros(16, np.uint8)) for key in ('img', 'big_img')}
+  inputs = {'desire_pulse': np.zeros(8, np.float32), 'traffic_convention': np.zeros(2), 'action_t': np.zeros(2)}
+  model.run(frames, {key: np.eye(3, dtype=np.float32) for key in frames}, inputs, False)
+  assert model.process.stdin.getvalue() == b'r'
+  assert hasattr(model, 'last_timings') is diagnostic
+  if diagnostic:
+    assert model.last_timings['client_total_ms'] >= 0
+  model.process = None
+
+
 def test_diagnostic_refuses_onroad_before_starting_worker(monkeypatch, tmp_path):
   from openpilot.selfdrive.modeld import carrot_model
   def refuse():

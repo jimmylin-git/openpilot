@@ -118,6 +118,22 @@ failures can be recovered after reboot using hash-verified local files, without
 fetching a manifest or discarding the failure record. Model/format errors remain
 rejected, and recovery never grants driving qualification.
 Download failures are recorded and preparation retries after 60 seconds.
+
+Automatic and explicit diagnostic tests share a nonblocking parked-session
+file lock across both camera layouts. A busy automatic test waits without
+loading the GPU; an explicit diagnostic reports failure without retrying.
+The runtime's own GPU lock remains authoritative for other users such as
+modeld. Startup contention on that USB GPU lock is not model corruption.
+Older misclassified lock failures can recover after reboot with verified
+local artifacts; the original failure record is retained.
+
+The explicit QCOM diagnostic saves 100 per-frame timing samples, stage
+mean/P95/P99/max, slow/fast means and the ten slowest frames. Its response
+contains timing JSON; normal inference and reset retain the original pipe
+response. QCOM input copy, warp submission and warp readback are measured
+separately without introducing an extra synchronization. Warp readback and
+model output readback still include waiting for outstanding GPU work; these
+are not pure kernel or USB bulk-transfer measurements.
 Return the device to a network later to retrieve these files for diagnosis.
 Hardware testing of this automatic workflow is still required.
 

@@ -154,6 +154,18 @@ class LocalWarpRuntime(GenericModelRuntime):
     self.validate_warp()
 
   def prepare_images(self):
+    if getattr(self, 'sampling_boundary_diagnostic', False):
+      started = time.monotonic()
+      self.local_buffer.copy_from(self.local_host)
+      copied = time.monotonic()
+      output = self.run_warp(input_frame=self.frames, M_inv=self.transforms)
+      submitted = time.monotonic()
+      images = output.numpy()
+      finished = time.monotonic()
+      self.image_timings = {'qcom_input_copy_ms': (copied - started) * 1000,
+                            'qcom_warp_submit_ms': (submitted - copied) * 1000,
+                            'qcom_warp_read_ms': (finished - submitted) * 1000}
+      return images
     self.local_buffer.copy_from(self.local_host)
     return self.run_warp(input_frame=self.frames, M_inv=self.transforms).numpy()
 
@@ -221,4 +233,6 @@ class LocalWarpRuntime(GenericModelRuntime):
       'output_read_ms': (finished - dispatched) * 1000,
       'output_read_cpu_ms': (cpu_finished - cpu_dispatched) * 1000,
     }
+    if getattr(self, 'sampling_boundary_diagnostic', False):
+      self.last_timings.update(self.image_timings)
     return result

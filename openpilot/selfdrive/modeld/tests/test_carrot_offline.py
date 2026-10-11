@@ -98,6 +98,7 @@ def test_automatic_smoke_test_saves_both_layouts_and_closes_workers(tmp_path, mo
     checkpoint = 'checked'
     usb_input_bytes = 393728
     warp_differences = []
+    last_timings = {'local_prepare_ms': 1.0, 'input_upload_ms': 2.0, 'model_call_ms': 3.0, 'output_read_ms': 4.0}
     def __init__(self, width, height, path, **options):
       assert options == ({'sampling_boundary_diagnostic': True} if diagnostic else {})
       self.runs = 0
@@ -113,7 +114,7 @@ def test_automatic_smoke_test_saves_both_layouts_and_closes_workers(tmp_path, mo
       self.closed = True
   monkeypatch.setattr(carrot_model, 'require_parked', lambda: None)
   monkeypatch.setattr(precompiled_runner, 'PrecompiledModelState', Runtime)
-  result = offline.test_model(tmp_path / 'model.pkl', lambda *args: None, sampling_boundary_diagnostic=diagnostic)
+  result = offline._test_model(tmp_path / 'model.pkl', lambda *args: None, sampling_boundary_diagnostic=diagnostic)
   assert result['qualified'] is False
   assert [entry['samples'] for entry in result['results']] == [100, 100]
   assert [entry['camera'] for entry in result['results']] == [[1928, 1208], [1344, 760]]
@@ -121,3 +122,65 @@ def test_automatic_smoke_test_saves_both_layouts_and_closes_workers(tmp_path, mo
   assert result['sampling_boundary_diagnostic'] is diagnostic
   if diagnostic:
     assert all(entry['usb_input_bytes'] == 393728 for entry in result['results'])
+    assert all(len(entry['timing_samples']) == 100 and len(entry['slowest_samples']) == 10 for entry in result['results'])
+    assert result['results'][0]['stage_summary']['input_upload_ms']['mean_ms'] == 2.0
+
+
+@pytest.mark.parametrize('fails', [False, True])
+def test_parked_session_lock_released_on_success_and_failure(tmp_path, monkeypatch, fails):
+  from types import SimpleNamespace
+  from openpilot.selfdrive.modeld import carrot_model
+  calls = []
+  monkeypatch.setitem(sys.modules, 'fcntl', SimpleNamespace(LOCK_EX=1, LOCK_NB=2, LOCK_UN=4,
+                                                          flock=lambda fd, flags: calls.append(flags)))
+  monkeypatch.setattr(carrot_model, 'require_parked', lambda: None)
+  def run(*args, **kwargs):
+    assert calls == [3]
+    assert kwargs == {'sampling_boundary_diagnostic': True}
+    if fails:
+      raise RuntimeError('GPU failed')
+    return {'qualified': False}
+  monkeypatch.setattr(offline, '_test_model', run)
+  path = tmp_path / 'artifact' / 'model.pkl'
+  path.parent.mkdir()
+  if fails:
+    with pytest.raises(RuntimeError, match='GPU failed'):
+      offline.test_model(path, lambda *a: None, sampling_boundary_diagnostic=True)
+  else:
+    assert offline.test_model(path, lambda *a: None, sampling_boundary_diagnostic=True) == {'qualified': False}
+  assert calls == [3, 4]
+  assert (tmp_path / 'parked-test.lock').exists()
+
+
+def test_busy_parked_session_never_starts_gpu(tmp_path, monkeypatch):
+  from types import SimpleNamespace
+  from openpilot.selfdrive.modeld import carrot_model
+  def busy(fd, flags):
+    raise BlockingIOError('locked')
+  monkeypatch.setitem(sys.modules, 'fcntl', SimpleNamespace(LOCK_EX=1, LOCK_NB=2, flock=busy))
+  monkeypatch.setattr(carrot_model, 'require_parked', lambda: None)
+  monkeypatch.setattr(offline, '_test_model', lambda *a, **kw: pytest.fail('must not start a GPU worker'))
+  path = tmp_path / 'artifact' / 'model.pkl'
+  path.parent.mkdir()
+  with pytest.raises(offline.ParkedTestBusy):
+    offline.test_model(path, lambda *a: None)
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='Requires Linux flock')
+def test_real_parked_session_excludes_another_process(tmp_path, monkeypatch):
+  import subprocess
+  from openpilot.selfdrive.modeld import carrot_model
+  monkeypatch.setattr(carrot_model, 'require_parked', lambda: None)
+  path = tmp_path / 'artifact' / 'model.pkl'
+  path.parent.mkdir()
+  def run(*args, **kwargs):
+    probe = subprocess.run([sys.executable, '-c',
+                            'import fcntl,sys; f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)',
+                            str(tmp_path / 'parked-test.lock')], capture_output=True, text=True)
+    assert probe.returncode != 0 and 'BlockingIOError' in probe.stderr
+    return {'qualified': False}
+  monkeypatch.setattr(offline, '_test_model', run)
+  assert offline.test_model(path, lambda *a: None) == {'qualified': False}
+  import fcntl
+  with (tmp_path / 'parked-test.lock').open('a') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

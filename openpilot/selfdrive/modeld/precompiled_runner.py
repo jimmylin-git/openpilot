@@ -7,6 +7,7 @@ import selectors
 import subprocess
 import sys
 import tempfile
+import time
 
 import numpy as np
 
@@ -78,6 +79,7 @@ class PrecompiledModelState:
 
   def run(self, bufs, transforms, inputs, prepare_only):
     self._require_diagnostic_parked()
+    started = time.monotonic()
     for name in ('img', 'big_img'):
       data = np.frombuffer(bufs[name].data, dtype=np.uint8, count=self.frame_size)
       np.copyto(self.views[name], data)
@@ -88,9 +90,20 @@ class PrecompiledModelState:
       self.views[name][:] = inputs[name]
     self.views['tfm'][:] = transforms['img']
     self.views['big_tfm'][:] = transforms['big_img']
+    copied = time.monotonic()
     try:
       self.process.stdin.write(b'r')
-      if self._receive(20 if self.first_run else 1) != b'1\n':
+      response = self._receive(20 if self.first_run else 1)
+      received = time.monotonic()
+      timing = {}
+      if getattr(self, 'sampling_boundary_diagnostic', False):
+        timing = json.loads(response)['timings']
+        required = {'local_prepare_ms', 'input_upload_ms', 'model_call_ms', 'output_read_ms', 'worker_work_ms'}
+        if not required <= timing.keys() or not all(
+          type(value) in (int, float) and np.isfinite(value) and value >= 0 for value in timing.values()
+        ):
+          raise ValueError('invalid diagnostic timing response')
+      elif response != b'1\n':
         raise RuntimeError('invalid model worker response')
       self.first_run = False
       result = self.output.copy()
@@ -114,6 +127,13 @@ class PrecompiledModelState:
     outputs = self.parser.parse_outputs({k: result[np.newaxis, section] for k, section in self.output_slices.items()})
     if os.getenv('SEND_RAW_PRED'):
       outputs['raw_pred'] = result
+    if getattr(self, 'sampling_boundary_diagnostic', False):
+      finished = time.monotonic()
+      self.last_timings = {**timing, 'client_input_ms': (copied - started) * 1000,
+                           'client_wait_ms': (received - copied) * 1000,
+                           'client_output_parse_ms': (finished - received) * 1000,
+                           'client_total_ms': (finished - started) * 1000,
+                           'client_wait_minus_worker_ms': (received - copied) * 1000 - timing['worker_work_ms']}
     return outputs
 
   def reset(self):

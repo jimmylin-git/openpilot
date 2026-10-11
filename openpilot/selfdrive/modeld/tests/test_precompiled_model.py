@@ -19,6 +19,8 @@ class Response(io.BytesIO):
 
 BOOTLOADER_TIMEOUT = 'TimeoutError: BL not ready. Timed out after 10000 ms, condition not met: 0 != 2147483648\n'
 SMU_TIMEOUT = 'TimeoutError: SMU msg 0x1a timeout. Timed out after 10000 ms, condition not met: 436207616 != 1\n'
+GPU_LOCK_BUSY = ('RuntimeError: Failed to acquire lock file am_usb:4-3.lock. ' +
+                 '`sudo lsof /tmp/am_usb:4-3.lock` may help identify the process holding the lock.\n')
 
 
 def catalog():
@@ -171,7 +173,7 @@ def test_generic_install_reuses_verified_download(tmp_path, monkeypatch, failure
   ({'error': 'ValueError: checkpoint mismatch'}, False), ({'rejected': False}, False),
   ({'error': 'OSError: Input/Output Error reading model.pkl'}, False),
 ])
-@pytest.mark.parametrize('error', ['RuntimeError: bulk OUT 0x02 failed: Input/Output Error', BOOTLOADER_TIMEOUT, SMU_TIMEOUT,
+@pytest.mark.parametrize('error', ['RuntimeError: bulk OUT 0x02 failed: Input/Output Error', BOOTLOADER_TIMEOUT, SMU_TIMEOUT, GPU_LOCK_BUSY,
                                  'RuntimeError: libusb_control_transfer: No such device (it may have been disconnected)'])
 def test_old_usb_rejection_requires_matching_previous_boot_evidence(tmp_path, monkeypatch, change, allowed, error):
   from openpilot.selfdrive.modeld import egpu_worker_progress
@@ -235,7 +237,8 @@ def test_smu_match_does_not_hide_model_errors(error):
 
 
 @pytest.mark.parametrize('same_boot,allowed', [(False, True), (True, False)])
-def test_verified_rejected_cache_recovers_without_network(tmp_path, monkeypatch, same_boot, allowed):
+@pytest.mark.parametrize('error', [SMU_TIMEOUT, GPU_LOCK_BUSY])
+def test_verified_rejected_cache_recovers_without_network(tmp_path, monkeypatch, same_boot, allowed, error):
   from openpilot.selfdrive.modeld import egpu_worker_progress
   value, data = catalog()
   model = SimpleNamespace(sha256='a' * 64, url='https://nas.example/model.onnx')
@@ -247,13 +250,27 @@ def test_verified_rejected_cache_recovers_without_network(tmp_path, monkeypatch,
   monkeypatch.setattr(egpu_worker_progress, 'boot_identity', lambda: 'old-boot')
   pm.record_failure(path, RuntimeError('ValueError: model mismatch'), 'load')
   failure = json.loads((path.parent / 'last_failure.json').read_text())
-  failure['error'] = SMU_TIMEOUT
+  failure['error'] = error
   (path.parent / 'last_failure.json').write_text(json.dumps(failure))
   monkeypatch.setattr(egpu_worker_progress, 'boot_identity', lambda: 'old-boot' if same_boot else 'new-boot')
   monkeypatch.setattr(pm, 'urlopen', lambda *a, **kw: pytest.fail('verified recovery must stay offline'))
   assert (pm.ensure_precompiled(model, tmp_path) == path) == allowed
   assert (path.parent / 'rejected').exists() == (not allowed)
   assert json.loads((path.parent / 'last_failure.json').read_text()) == failure
+
+
+@pytest.mark.parametrize('phase,transient', [('load', True), ('boot_validation', True), ('inference', False)])
+def test_gpu_lock_classification(tmp_path, phase, transient):
+  (tmp_path / 'installed.json').write_text(json.dumps({'pickle': {'sha256': 'a' * 64}}))
+  assert pm.record_failure(tmp_path / 'model.pkl', RuntimeError(GPU_LOCK_BUSY), phase) == (not transient)
+  assert (tmp_path / 'rejected').exists() == (not transient)
+
+
+@pytest.mark.parametrize('error', [GPU_LOCK_BUSY + 'ValueError: checkpoint mismatch',
+                                 GPU_LOCK_BUSY.replace('/tmp/am_usb:4-3', '/tmp/am_usb:4-4'),
+                                 GPU_LOCK_BUSY.replace('am_usb:', 'other_usb:')])
+def test_gpu_lock_match_does_not_hide_other_errors(error):
+  assert not pm.gpu_lock_busy(error, 'load')
 
 
 @pytest.mark.parametrize('phase', ['load', 'boot_validation', 'inference'])

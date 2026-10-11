@@ -152,6 +152,13 @@ def gpu_smu_timeout(detail: str, phase: str) -> bool:
                     detail.rstrip(), re.MULTILINE | re.IGNORECASE) is not None)
 
 
+def gpu_lock_busy(detail: str, phase: str) -> bool:
+  return (phase in ('load', 'boot_validation') and
+          re.search(r'^RuntimeError: Failed to acquire lock file (am_usb:[0-9]+-[0-9]+(?:\.[0-9]+)*\.lock)\. ' +
+                    r'`sudo lsof /tmp/\1` may help identify the process holding the lock\.\Z',
+                    detail.rstrip(), re.MULTILINE) is not None)
+
+
 def retry_usb_rejection(root: Path, pickle_sha256: str) -> bool:
   """Migrate old USB-I/O/PSP/SMU startup misclassification after a device reboot.
 
@@ -170,7 +177,8 @@ def retry_usb_rejection(root: Path, pickle_sha256: str) -> bool:
             isinstance(failure.get('error'), str) and
             (gpu_transport_failure(failure['error']) or
              gpu_bootloader_timeout(failure['error'], failure['phase']) or
-             gpu_smu_timeout(failure['error'], failure['phase'])))
+             gpu_smu_timeout(failure['error'], failure['phase']) or
+             gpu_lock_busy(failure['error'], failure['phase'])))
   except (OSError, ValueError, TypeError):
     return False
 
@@ -250,6 +258,7 @@ def record_failure(path: Path, error: BaseException | str, phase: str) -> bool:
                gpu_transport_failure(detail) or
                gpu_bootloader_timeout(detail, phase) or
                gpu_smu_timeout(detail, phase) or
+               gpu_lock_busy(detail, phase) or
                'precompiled eGPU worker timed out' in detail or 'precompiled eGPU worker exited' in detail)
   value = json.loads((path.parent / 'installed.json').read_text())
   from openpilot.selfdrive.modeld.egpu_worker_progress import boot_identity
