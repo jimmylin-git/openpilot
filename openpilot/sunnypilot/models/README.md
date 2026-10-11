@@ -97,11 +97,11 @@ and validate its inputs, state and outputs before selection.
   JIT cache is separate, source/version/layout keyed, and atomically written.
 * Before accepting QCOM, initialization compares random NV12 inputs under
   identity, projective and border-clamped transforms against the actual AMD
-  warp. Shape, dtype, repeat instability or unexplained pixels reject QCOM.
-  Only nearest-neighbour differences within **0.00025 source pixels** of a
-  half-pixel boundary are accepted, and every differing value must be one of
-  the correct camera/plane's adjacent source pixels. No image-error percentage
-  or arbitrary intensity tolerance is used.
+  warp. Any pixel mismatch, including nearest-neighbour differences within
+  **0.00025 source pixels** of a half-pixel boundary, rejects QCOM and retains
+  the same-model AMD warp. Boundary proximity is diagnostic only; it does not
+  qualify as pixel equivalence. No image-error percentage or arbitrary
+  intensity tolerance is used.
 * Probes run no model inference and clear their host inputs afterward.
   QCOM initialization/validation/frame-preparation failures retain the same
   model, recurrent queues and AMD warp. Policy inference errors are not retried

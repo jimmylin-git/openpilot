@@ -273,12 +273,9 @@ class HostWarpRuntime:
           explained = detail['repeat_matches_first'] and sampling_boundary_only(
             actual, expected, self.frames, self.matrices, self.camera_size, self.frame_info, self.compact.images.shape)
           detail['sampling_boundary_only'] = explained
-          if explained:
-            self.logger.info("QCOM warp sampling-boundary equivalence: %s", json.dumps(detail))
-          else:
-            failures.append(detail)
+          failures.append(detail)
       if failures:
-        raise RuntimeError("QCOM pre-upload warp differs from artifact AMD warp: " + json.dumps(failures))
+        raise RuntimeError("QCOM pre-upload warp is not pixel-identical to artifact AMD warp: " + json.dumps(failures))
     finally:
       self.clear_inputs()
 

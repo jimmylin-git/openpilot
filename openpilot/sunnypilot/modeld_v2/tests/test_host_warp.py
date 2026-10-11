@@ -244,6 +244,13 @@ class TestHostWarpRuntime(unittest.TestCase):
     self.logger.exception.assert_called_once()
     np.testing.assert_array_equal(runtime.raw, 0)
 
+  def test_sampling_boundary_mismatch_rejects_qcom_and_falls_back(self):
+    with mock.patch.object(host_warp, 'warp_difference', return_value={'mismatched_pixels': 1}), \
+         mock.patch.object(host_warp, 'sampling_boundary_only', return_value=True):
+      runtime = self.runtime()
+    self.assertEqual(runtime.backend, 'amd')
+    self.logger.exception.assert_called_once()
+
   def test_repeat_unstable_warp_is_rejected_even_if_first_matches(self):
     runtime = self.runtime()
     calls = iter((0, 1, 0, 1, 0, 1))
