@@ -8,6 +8,8 @@ moumou758/openpilot's `dev261007XL-onemiless` at
 controls, model runtime, registration and AGNOS 19.7 requirement. The updater
 uses the current checkout branch when `UpdaterTargetBranch` is unset; no
 MR.ONE branch override is installed.
+LFS downloads retain the upstream Hugging Face endpoint; uploads target
+`jimmylin-git/openpilot` on GitHub rather than the upstream storage repository.
 
 Cluster is ported from `mrone-c3xl-dev-cluster` at
 `94920ebab7741b9d9fce007230fa0b2db84b31be`, including USB output, native H.264
