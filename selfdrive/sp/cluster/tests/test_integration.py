@@ -11,6 +11,15 @@ CLUSTER_DIR = ROOT / "selfdrive" / "sp" / "cluster"
 
 
 class ClusterIntegrationTests(unittest.TestCase):
+    def test_direct_openpilot_imports_exist(self):
+        for source in CLUSTER_DIR.glob("*.py"):
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+            for node in tree.body:
+                if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("openpilot."):
+                    module = ROOT.joinpath(*node.module.split("."))
+                    with self.subTest(source=source.name, module=node.module):
+                        self.assertTrue(module.with_suffix(".py").is_file() or (module / "__init__.py").is_file())
+
     def test_manager_starts_cluster_supervisor(self):
         tree = ast.parse((ROOT / "openpilot/system/manager/process_config.py").read_text())
         calls = [
