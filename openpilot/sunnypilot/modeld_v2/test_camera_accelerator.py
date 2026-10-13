@@ -115,8 +115,10 @@ class TestCameraAccelerator(unittest.TestCase):
       os.environ['ACCELERATE_CAMERA'] = '1'
       self.assertTrue(is_accelerator_enabled())
       os.environ['ACCELERATE_CAMERA'] = '0'
-      # Assuming Params might not be set or defaults to False in test env
       self.assertFalse(is_accelerator_enabled())
+      del os.environ['ACCELERATE_CAMERA']
+      # Default is True without env or param
+      self.assertTrue(is_accelerator_enabled())
     finally:
       if orig_env is not None:
         os.environ['ACCELERATE_CAMERA'] = orig_env

@@ -15,16 +15,22 @@ from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 
 def is_accelerator_enabled() -> bool:
   """
-  Check if camera accelerator is enabled via environment variable or persistent param.
-  Default is disabled (0) unless ACCELERATE_CAMERA=1 or param AccelerateCamera is set.
+  Check if camera accelerator is enabled.
+  Enabled by default (1) for C3XL / USB eGPU downscaled frame acceleration,
+  unless explicitly disabled via ACCELERATE_CAMERA=0 or param AccelerateCamera=0.
   """
-  if os.getenv('ACCELERATE_CAMERA', '0') in ('1', 'true', 'True'):
+  if os.getenv('ACCELERATE_CAMERA') in ('0', 'false', 'False'):
+    return False
+  if os.getenv('ACCELERATE_CAMERA') in ('1', 'true', 'True'):
     return True
   try:
     from openpilot.common.params import Params
-    return Params().get_bool("AccelerateCamera")
+    param_val = Params().get("AccelerateCamera")
+    if param_val is not None:
+      return param_val.strip() in (b'1', b'true', b'True')
   except Exception:
-    return False
+    pass
+  return True
 
 
 def get_downsampled_dims(cam_w: int, cam_h: int) -> Tuple[int, int]:
