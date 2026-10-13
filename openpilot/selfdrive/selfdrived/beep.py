@@ -126,8 +126,8 @@ class Beepd:
       rk.keep_time()
 
 def main():
-  s = Beepd()
-  s.beepd_thread(test=False)  # 改成 True 可启用模拟测试数据
+  # beep daemon disabled
+  return
 
 if __name__ == "__main__":
   main()
