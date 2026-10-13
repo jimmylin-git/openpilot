@@ -19,28 +19,11 @@ UI_DIR = files("openpilot.selfdrive.ui")
 TRANSLATIONS_DIR = UI_DIR.joinpath("translations")
 LANGUAGES_FILE = TRANSLATIONS_DIR.joinpath("languages.json")
 
-UNIFONT_LANGUAGES = [
-  "th",
-  "zh-CHT",
-  "zh-CHS",
-  "ko",
-  "ja",
-]
+UNIFONT_LANGUAGES: list[str] = []
 
 # Plural form selectors for supported languages
 PLURAL_SELECTORS = {
   'en': lambda n: 0 if n == 1 else 1,
-  'de': lambda n: 0 if n == 1 else 1,
-  'fr': lambda n: 0 if n <= 1 else 1,
-  'pt-BR': lambda n: 0 if n <= 1 else 1,
-  'es': lambda n: 0 if n == 1 else 1,
-  'tr': lambda n: 0 if n == 1 else 1,
-  'uk': lambda n: 0 if n % 10 == 1 and n % 100 != 11 else (1 if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else 2),
-  'th': lambda n: 0,
-  'zh-CHT': lambda n: 0,
-  'zh-CHS': lambda n: 0,
-  'ko': lambda n: 0,
-  'ja': lambda n: 0,
 }
 
 
@@ -205,6 +188,9 @@ class Multilang:
       lang = str(self._params.get("LanguageSetting")).removeprefix("main_")
       if lang in self.codes:
         self._language = lang
+      else:
+        self._language = "en"
+        self._params.put("LanguageSetting", "en", block=True)
 
 
 multilang = Multilang()

@@ -117,8 +117,6 @@ class DeviceLayoutSP(DeviceLayout):
       LineSeparator(),
       self._reset_calib_btn,
       LineSeparator(),
-      button_item_sp(lambda: tr("Change Language"), lambda: tr("CHANGE"), callback=self._show_language_dialog),
-      LineSeparator(),
       self._device_wake_mode,
       LineSeparator(),
       self._max_time_offroad,
