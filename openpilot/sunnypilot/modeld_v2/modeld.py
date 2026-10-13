@@ -174,10 +174,18 @@ class ModelState(ModelStateBase):
     if self.adapter.is_native:
       for i, key in enumerate(self._vision_input_names):
         if key in transforms:
-          self.numpy_inputs['tfm'][i] = transforms[key].reshape(3, 3)
+          tfm = transforms[key].reshape(3, 3)
+          if getattr(self.adapter, 'accelerate_camera', False) and self.adapter.downscaler is not None:
+            tfm = self.adapter.downscaler.adjust_transform(tfm)
+          self.numpy_inputs['tfm'][i] = tfm
     else:
-      self.numpy_inputs['tfm'][:, :] = transforms[self._road_key].reshape(3, 3)
-      self.numpy_inputs['big_tfm'][:, :] = transforms[self._wide_key].reshape(3, 3)
+      tfm_road = transforms[self._road_key].reshape(3, 3)
+      tfm_wide = transforms[self._wide_key].reshape(3, 3)
+      if getattr(self.adapter, 'accelerate_camera', False) and self.adapter.downscaler is not None:
+        tfm_road = self.adapter.downscaler.adjust_transform(tfm_road)
+        tfm_wide = self.adapter.downscaler.adjust_transform(tfm_wide)
+      self.numpy_inputs['tfm'][:, :] = tfm_road
+      self.numpy_inputs['big_tfm'][:, :] = tfm_wide
 
     raw_outputs = self.adapter.run()
 

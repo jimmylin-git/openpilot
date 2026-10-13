@@ -11,6 +11,7 @@ import pickle
 import numpy as np
 
 from openpilot.common.basedir import BASEDIR
+from openpilot.sunnypilot.modeld_v2.camera_accelerator import NV12Downscaler, is_accelerator_enabled
 from openpilot.sunnypilot.modeld_v2.compile_modeld import (POLICY_INPUTS, derive_frame_skip,
                                                            make_split_input_queues, make_supercombo_input_queues)
 from openpilot.sunnypilot.modeld_v2.stock_dependencies import make_input_queues as stock_make_input_queues, nv12_copy_size
@@ -45,6 +46,8 @@ class BaseModelAdapter:
     self._blob_cache = {}
     self.nv12_info = get_nv12_info(cam_w, cam_h)
     self.is_native = False
+    self.accelerate_camera = False
+    self.downscaler = None
 
   def _init_common(self):
     self._desire_key = next((key for key in getattr(self, 'numpy_inputs', {}) if key.startswith('desire')), 'desire')
@@ -176,7 +179,15 @@ class NativeTinygradAdapter(BaseModelAdapter):
     self._init_common()
     self.run_model = self.jits['run']
 
-    warp_frame_size = getattr(self, 'warp_frame_size', self.nv12_info[3])
+    self.accelerate_camera = is_accelerator_enabled()
+    self.downscaler = NV12Downscaler(self.cam_w, self.cam_h) if self.accelerate_camera else None
+
+    if self.accelerate_camera and self.downscaler is not None:
+      warp_frame_size = self.downscaler.dst_frame_size
+    else:
+      warp_frame_size = getattr(self, 'warp_frame_size', self.nv12_info[3])
+    self.warp_frame_size = warp_frame_size
+
     self.input_queues = {name: Tensor(np.zeros(shape, dtype=dtype), device=self.model_device).realize()
                          for name, (shape, dtype) in self.input_shapes.items() if name in self.state_pairs}
     shapes = {'tfm': (2, 3, 3)} | {name: shape for name, (shape, _) in self.input_shapes.items()
@@ -203,7 +214,10 @@ class NativeTinygradAdapter(BaseModelAdapter):
     for i, key in enumerate(self._vision_input_names):
       if key in bufs:
         data = bufs[key].data if hasattr(bufs[key], 'data') else bufs[key]
-        np.copyto(self.frames[i], np.frombuffer(data, dtype=np.uint8, count=self.warp_frame_size))
+        if self.accelerate_camera and self.downscaler is not None:
+          self.downscaler.downsample_into(data, self.frames[i])
+        else:
+          np.copyto(self.frames[i], np.frombuffer(data, dtype=np.uint8, count=self.warp_frame_size))
 
   def reset_warmup_buffers(self) -> None:
     self.packed_input[:] = 0
