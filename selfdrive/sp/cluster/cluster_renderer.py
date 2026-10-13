@@ -3039,10 +3039,15 @@ class ClusterUiRenderer:
         theme = self._current_theme()
         b_standby = self._b_gear_standby(state)
         tint = self._top_row_tint(state, amber_on_standby=True)
-        icon_size = LFA_STATUS_ICON_SIZE
+        height = LFA_STATUS_ICON_SIZE
+        width = (
+            height * self._acc_status_texture.width / max(1, self._acc_status_texture.height)
+            if self._acc_status_texture is not None
+            else height
+        )
         self._draw_bottom_aligned_texture_icon(
             self._acc_status_texture, ACC_STATUS_CENTER_X,
-            TURN_SIGNAL_CENTER_Y + icon_size * 0.5, icon_size, icon_size, tint,
+            TURN_SIGNAL_CENTER_Y + height * 0.5, width, height, tint,
         )
         speed_text = self._cruise_set_speed_text(state)
         if speed_text:

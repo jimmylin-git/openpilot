@@ -299,11 +299,16 @@ class StatusLabelTests(unittest.TestCase):
         self.hud._b_gear_standby = Mock(return_value=False)
         self.hud._top_row_tint = Mock(return_value=(0, 255, 0))
         self.hud._cruise_set_color = Mock(return_value=(0, 255, 0))
-        self.hud._acc_status_texture = None
+        self.hud._acc_status_texture = SimpleNamespace(width=146, height=128)
         self.hud._draw_bottom_aligned_texture_icon = Mock(return_value=True)
         for speed in ("--", "100"):
             self.hud._cruise_set_speed_text = Mock(return_value=speed)
             self.hud._draw_acc_status_icon(SimpleNamespace())
+            draw_icon_args = self.hud._draw_bottom_aligned_texture_icon.call_args.args
+            expected_height = self.ns["LFA_STATUS_ICON_SIZE"]
+            expected_width = expected_height * 146 / 128
+            self.assertEqual(draw_icon_args[4], expected_height)
+            self.assertAlmostEqual(draw_icon_args[3], expected_width)
             args = self.hud._draw_text.call_args.args
             self.assertEqual(args[2], self.ns["TOP_STATUS_DETAIL_CENTER_Y"])
             self.assertEqual(args[3], self.ns["TOP_STATUS_LABEL_FONT_SIZE"])
