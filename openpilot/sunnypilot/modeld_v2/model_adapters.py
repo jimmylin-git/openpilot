@@ -12,7 +12,8 @@ import pickle
 import numpy as np
 
 from openpilot.common.basedir import BASEDIR
-from openpilot.sunnypilot.modeld_v2.camera_accelerator import NV12Downscaler, is_accelerator_enabled
+from openpilot.common.swaglog import cloudlog
+from openpilot.sunnypilot.modeld_v2.camera_accelerator import NV12Downscaler, is_accelerator_enabled, select_legacy_camera_dims
 from openpilot.sunnypilot.modeld_v2.compile_modeld import (POLICY_INPUTS, derive_frame_skip,
                                                            make_split_input_queues, make_supercombo_input_queues)
 from openpilot.sunnypilot.modeld_v2.stock_dependencies import (NV12Frame, make_input_queues as stock_make_input_queues,
@@ -65,7 +66,8 @@ class BaseModelAdapter:
     self.nv12_info = get_nv12_info(cam_w, cam_h)
     self.is_native = False
     self.accelerate_camera = False
-    self.downscaler = None
+    self.downscaler: NV12Downscaler | None = None
+    self._downscale_pool: ThreadPoolExecutor | None = None
 
   def _init_common(self):
     self._desire_key = next((key for key in getattr(self, 'numpy_inputs', {}) if key.startswith('desire')), 'desire')
@@ -75,13 +77,37 @@ class BaseModelAdapter:
 
   def get_dummy_inputs(self):
     if getattr(self, 'downscaler', None) is not None:
-      dummy_size = self.frame_copy_size
+      dummy_size = nv12_copy_size(*self.nv12_info[:3])
     else:
       dummy_size = getattr(self, 'warp_frame_size', self.frame_copy_size if self.is_native else self.frame_buf_params[self._road_key][3])
     dummy_frames = {k: np.zeros(dummy_size, dtype=np.uint8) for k in self._vision_input_names}
     transforms = {k: np.eye(3, dtype=np.float32) for k in [self._road_key, self._wide_key] if k}
     dummy_inputs = {k: np.zeros(v.shape, dtype=v.dtype) for k, v in self.numpy_inputs.items() if k not in ['tfm', 'big_tfm', 'prev_feat']}
     return dummy_frames, transforms, dummy_inputs
+
+  def _copy_downscaled_frames(self, bufs, frames):
+    pool, downscaler = self._downscale_pool, self.downscaler
+    if pool is None or downscaler is None:
+      raise RuntimeError("Downscaled frame copy requires an initialized accelerator")
+    jobs = []
+    for key, frame in frames.items():
+      if key in bufs:
+        data = bufs[key].data if hasattr(bufs[key], 'data') else bufs[key]
+        jobs.append(pool.submit(downscaler.downsample_into, data, frame))
+    # Wait for both writers even if one fails, before buffers can be reused.
+    errors = []
+    for job in jobs:
+      try:
+        job.result()
+      except Exception as error:
+        errors.append(error)
+    if errors:
+      raise errors[0]
+
+  def log_camera_accelerator(self):
+    dims = (self.downscaler.dst_w, self.downscaler.dst_h) if self.downscaler is not None else (self.cam_w, self.cam_h)
+    cloudlog.warning("camera accelerator: adapter=%s, chestnut=%s, accel=%s, source=%dx%d, input=%dx%d, warp_device=%s",
+                     type(self).__name__, self.chestnut, self.accelerate_camera, self.cam_w, self.cam_h, *dims, self.WARP_DEV)
 
   def _load_warp(self):
     if (self.cam_w, self.cam_h) in self.jits:
@@ -106,6 +132,20 @@ class LegacyModelAdapter(BaseModelAdapter):
 
     metadata = self.jits['metadata']
     self.frame_copy_size = nv12_copy_size(*self.nv12_info[:3])
+    camera_dims = (self.cam_w, self.cam_h)
+    if self.chestnut and is_accelerator_enabled():
+      if 'model' in metadata and 'run_policy' not in self.jits:
+        smaller_dims = select_legacy_camera_dims(self.jits, self.cam_w, self.cam_h)
+        if smaller_dims is not None:
+          camera_dims = smaller_dims
+          self.downscaler = NV12Downscaler(self.cam_w, self.cam_h, camera_dims)
+          self.frame_copy_size = self.downscaler.dst_copy_size
+          self.accelerate_camera = True
+          self._downscale_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='downscale')
+        else:
+          cloudlog.warning("camera accelerator unavailable: legacy model has no smaller camera JIT; retaining original input")
+      else:
+        cloudlog.warning("camera accelerator unavailable for this legacy policy ABI; retaining original input")
 
     if self.chestnut:
       self.WARP_DEV = self.DEV
@@ -121,7 +161,7 @@ class LegacyModelAdapter(BaseModelAdapter):
           self.input_shapes, self.frame_skip, device=self.QUEUE_DEV, frame_copy_size=self.frame_copy_size)
       else:
         self.input_queues, self.numpy_inputs = make_supercombo_input_queues(self.input_shapes, self.frame_skip, device=self.QUEUE_DEV)
-      self.run_policy = self.jits['run_policy'] if 'run_policy' in self.jits else self.jits[(self.cam_w, self.cam_h)]
+      self.run_policy = self.jits['run_policy'] if 'run_policy' in self.jits else self.jits[camera_dims]
     else:
       self.run_policy = self.jits['run_policy']
       vision_metadata = metadata['vision']
@@ -138,7 +178,7 @@ class LegacyModelAdapter(BaseModelAdapter):
       self.input_queues, self.numpy_inputs = make_split_input_queues(vision_metadata['input_shapes'], first_policy_meta['input_shapes'],
                                                                      self.frame_skip, device=self.QUEUE_DEV)
 
-    self.run_warp = self._load_warp()
+    self.run_warp = self.run_policy if self.accelerate_camera else self._load_warp()
     self._init_common()
     if not self.chestnut:
       yuv_size = self.frame_buf_params[self._road_key][3]
@@ -149,6 +189,9 @@ class LegacyModelAdapter(BaseModelAdapter):
 
   def copy_frames(self, bufs):
     if self.chestnut:
+      if self.accelerate_camera:
+        self._copy_downscaled_frames(bufs, self.frame_slots)
+        return
       for key in self._vision_input_names:
         if key in bufs:
           data = bufs[key].data if hasattr(bufs[key], 'data') else bufs[key]
@@ -241,16 +284,13 @@ class NativeTinygradAdapter(BaseModelAdapter):
       self.outputs[next_name] = input_view(state._buffer(), state.shape, state.dtype, 0)
 
   def copy_frames(self, bufs):
-    jobs = []
+    if self.accelerate_camera:
+      self._copy_downscaled_frames(bufs, {key: self.frames[i] for i, key in enumerate(self._vision_input_names)})
+      return
     for i, key in enumerate(self._vision_input_names):
       if key in bufs:
         data = bufs[key].data if hasattr(bufs[key], 'data') else bufs[key]
-        if self._downscale_pool is not None:
-          jobs.append(self._downscale_pool.submit(self.downscaler.downsample_into, data, self.frames[i]))
-        else:
-          np.copyto(self.frames[i], np.frombuffer(data, dtype=np.uint8, count=self.warp_frame_size))
-    for job in jobs:
-      job.result()
+        np.copyto(self.frames[i], np.frombuffer(data, dtype=np.uint8, count=self.warp_frame_size))
 
   def reset_warmup_buffers(self) -> None:
     self.packed_input[:] = 0
@@ -266,6 +306,8 @@ class NativeTinygradAdapter(BaseModelAdapter):
 
 def get_model_adapter(jits, cam_w, cam_h, model_device, queue_device, warp_device, chestnut=False):
   if 'input_specs' in jits:
-    return NativeTinygradAdapter(jits, cam_w, cam_h, model_device, queue_device, warp_device, chestnut=chestnut)
+    adapter = NativeTinygradAdapter(jits, cam_w, cam_h, model_device, queue_device, warp_device, chestnut=chestnut)
   else:
-    return LegacyModelAdapter(jits, cam_w, cam_h, model_device, queue_device, warp_device, chestnut=chestnut)
+    adapter = LegacyModelAdapter(jits, cam_w, cam_h, model_device, queue_device, warp_device, chestnut=chestnut)
+  adapter.log_camera_accelerator()
+  return adapter
