@@ -73,19 +73,16 @@ class NV12Downscaler:
     """
     src_flat = np.frombuffer(src_buf, dtype=np.uint8)
     dst_flat = np.frombuffer(dst_buf, dtype=np.uint8)
-    dw, dh = self.dst_w, self.dst_h
+    dw, dh, ss, ds = self.dst_w, self.dst_h, self.src_stride, self.dst_stride
 
-    # Y plane: group source into 3x3 blocks and keep the top-left 2x2 of each.
-    src_y = src_flat[:self.src_y_size].reshape(self.src_yh, self.src_stride)[:dh * 3 // 2, :dw * 3 // 2]
-    dst_y = dst_flat[:self.dst_y_size].reshape(self.dst_yh, self.dst_stride)[:dh, :dw]
-    np.copyto(dst_y.reshape(dh // 2, 2, dw // 2, 2), src_y.reshape(dh // 2, 3, dw // 2, 3)[:, :2, :, :2])
+    # Keep rows 0,1 of every 3 and pixels 0,1 of every 3. Each kept pixel pair is read as one
+    # (unaligned) uint16 at a 3-byte stride, which is ~5x faster on the device than per-byte gathers.
+    np.copyto(np.ndarray((dh // 2, 2, dw // 2), np.uint16, buffer=dst_flat, offset=0, strides=(2 * ds, ds, 2)),
+              np.ndarray((dh // 2, 2, dw // 2), np.uint16, buffer=src_flat, offset=0, strides=(3 * ss, ss, 3)))
 
-    # UV plane: same pattern on interleaved (U, V) pairs.
-    src_uv = src_flat[self.src_y_size:self.src_y_size + self.src_stride * self.src_uvh].reshape(
-      self.src_uvh, self.src_stride)[:dh * 3 // 4, :dw * 3 // 2]
-    dst_uv = dst_flat[self.dst_y_size:self.dst_y_size + self.dst_stride * self.dst_uvh].reshape(
-      self.dst_uvh, self.dst_stride)[:dh // 2, :dw]
-    np.copyto(dst_uv.reshape(dh // 4, 2, dw // 4, 2, 2), src_uv.reshape(dh // 4, 3, dw // 4, 3, 2)[:, :2, :, :2])
+    # UV plane: same pattern on interleaved (U, V) pairs, so two kept pairs form one uint32 at a 6-byte stride.
+    np.copyto(np.ndarray((dh // 4, 2, dw // 4), np.uint32, buffer=dst_flat, offset=self.dst_y_size, strides=(2 * ds, ds, 4)),
+              np.ndarray((dh // 4, 2, dw // 4), np.uint32, buffer=src_flat, offset=self.src_y_size, strides=(3 * ss, ss, 6)))
 
   def adjust_transform(self, tfm: np.ndarray) -> np.ndarray:
     """Adjust M_inv (3x3) for the actual downsampled width and height."""
