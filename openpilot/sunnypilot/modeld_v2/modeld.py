@@ -44,6 +44,7 @@ from openpilot.sunnypilot.livedelay.helpers import get_lat_delay
 from openpilot.sunnypilot.modeld_v2.modeld_base import ModelStateBase
 from openpilot.sunnypilot.modeld_v2.helpers import load_oob
 from openpilot.sunnypilot.modeld_v2.model_adapters import get_model_adapter
+from openpilot.sunnypilot.modeld_v2.stall_diagnostics import ModelStallDiagnostics
 from openpilot.sunnypilot.models.helpers import get_active_bundle
 from openpilot.sunnypilot.selfdrive.controls.lib.relc import RoadEdgeLaneChangeController
 
@@ -101,6 +102,7 @@ class ModelState(ModelStateBase):
     self.MIN_LAT_CONTROL_SPEED = 0.3
     self.PLANPLUS_CONTROL: float = 1.0
     self.chestnut = chestnut
+    self.diagnostics: ModelStallDiagnostics | None = None
 
     pkl_path = _find_driving_pkl(model_bundle)
     assert pkl_path is not None, f"No driving pkl found for {'chestnut' if chestnut else 'small model'} — all models must be compiled with compile_modeld.py"
@@ -160,8 +162,12 @@ class ModelState(ModelStateBase):
           inputs: dict[str, np.ndarray],
           after_enqueue: Callable[[], None] | None = None) -> dict[str, np.ndarray] | None:
     t_start = time.perf_counter()
+    if self.diagnostics is not None:
+      self.diagnostics.mark("frame_copy")
     self.adapter.copy_frames(bufs)
     t_copied = time.perf_counter()
+    if self.diagnostics is not None:
+      self.diagnostics.mark("prepare_inputs")
 
     desire_key = self.desire_key
     inputs[desire_key][0] = 0
@@ -189,14 +195,22 @@ class ModelState(ModelStateBase):
       self.numpy_inputs['tfm'][:, :] = tfm_road
       self.numpy_inputs['big_tfm'][:, :] = tfm_wide
 
+    if self.diagnostics is not None:
+      self.diagnostics.mark("adapter_run_usb_enqueue")
     raw_outputs = self.adapter.run()
     t_enqueued = time.perf_counter()
 
     if after_enqueue is not None:
+      if self.diagnostics is not None:
+        self.diagnostics.mark("chestnut_gpu_metrics")
       after_enqueue()
 
+    if self.diagnostics is not None:
+      self.diagnostics.mark("gpu_output_read")
     if self._combined_model_type == 'supercombo':
       model_output = raw_outputs.numpy().flatten()
+      if self.diagnostics is not None:
+        self.diagnostics.mark("parse_model_output")
       if self.chestnut and not np.all(np.isfinite(model_output)):
         raise RuntimeError("model output not finite")
       sliced = {k: model_output[np.newaxis, v] for k, v in self.vision_output_slices.items()}
@@ -206,6 +220,8 @@ class ModelState(ModelStateBase):
           model_output[self.vision_output_slices['hidden_state']]
     else:
       vision_output = raw_outputs[0].numpy().flatten()
+      if self.diagnostics is not None:
+        self.diagnostics.mark("parse_vision_output")
       vision_sliced = {k: vision_output[np.newaxis, v] for k, v in self.vision_output_slices.items()}
       outputs = self.parser.parse_vision_outputs(vision_sliced)
 
@@ -214,7 +230,11 @@ class ModelState(ModelStateBase):
           vision_output[self.vision_output_slices['hidden_state']]
 
       for i, policy_slices in enumerate(self._policy_slices_list):
+        if self.diagnostics is not None:
+          self.diagnostics.mark(f"gpu_policy_output_read_{i}")
         policy_output = raw_outputs[i + 1].numpy().flatten()
+        if self.diagnostics is not None:
+          self.diagnostics.mark(f"parse_policy_output_{i}")
         policy_sliced = {k: policy_output[np.newaxis, v] for k, v in policy_slices.items()}
         parsed = self.parser.parse_policy_outputs(policy_sliced)
         if 'off' in self._policy_keys[i] and self._has_on_policy:
@@ -275,6 +295,20 @@ class ModelState(ModelStateBase):
 
 
 def main(demo=False):
+  diagnostics = None
+  if chestnut_present():
+    try:
+      diagnostics = ModelStallDiagnostics()
+    except OSError:
+      cloudlog.exception("modeld stall diagnostics file unavailable")
+  try:
+    _main(demo, diagnostics)
+  finally:
+    if diagnostics is not None:
+      diagnostics.close()
+
+
+def _main(demo, diagnostics):
   cloudlog.warning("modeld init")
 
   cloudlog.bind(daemon=PROCESS_NAME)
@@ -376,7 +410,15 @@ def main(demo=False):
   meta_constants = load_meta_constants()
   RELC = RoadEdgeLaneChangeController()
 
+  if diagnostics is not None:
+    model.diagnostics = diagnostics
+    if small_model is not None:
+      small_model.diagnostics = diagnostics
+    diagnostics.start()
+
   while True:
+    if diagnostics is not None:
+      diagnostics.mark("camera_main_receive")
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
     while meta_main.timestamp_sof < meta_extra.timestamp_sof + 25000000:
       buf_main = vipc_client_main.recv()
@@ -389,6 +431,8 @@ def main(demo=False):
       continue
 
     if use_extra_client:
+      if diagnostics is not None:
+        diagnostics.mark("camera_extra_receive_pair")
       # Keep receiving extra frames until frame id matches main camera
       while True:
         buf_extra = vipc_client_extra.recv()
@@ -409,6 +453,9 @@ def main(demo=False):
       buf_extra = buf_main
       meta_extra = meta_main
 
+    if diagnostics is not None:
+      diagnostics.frame(meta_main.frame_id, meta_extra.frame_id)
+      diagnostics.mark("state_update_prepare")
     sm.update(0)
     desire = DH.desire
     is_rhd = sm["driverMonitoringState"].isRHD
@@ -470,6 +517,8 @@ def main(demo=False):
                        run_count % round(model.constants.MODEL_FREQ / SERVICE_LIST['chestnutGpuState'].frequency) == 0)
       model_output = model.run(bufs, transforms, inputs, chestnut_state.send if send_chestnut else None)
     except Exception:
+      if diagnostics is not None:
+        cloudlog.warning(f"modeld failed at stage={diagnostics.stage}, frames={diagnostics.frames}")
       if not params.get_bool("ChestnutActive"):
         raise
       cloudlog.exception("big model failed, fall back to small")
@@ -484,6 +533,8 @@ def main(demo=False):
     model_execution_time = mt2 - mt1
 
     if model_output is not None:
+      if diagnostics is not None:
+        diagnostics.mark("build_publish_messages")
       modelv2_send = messaging.new_message('modelV2')
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
@@ -510,10 +561,14 @@ def main(demo=False):
       drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
 
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
+      if diagnostics is not None:
+        diagnostics.mark("publish_model_messages")
       pm.send('modelV2', modelv2_send)
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)
       pm.send('modelDataV2SP', mdv2sp_send)
+      if diagnostics is not None:
+        diagnostics.published()
     last_vipc_frame_id = meta_main.frame_id
 
 if __name__ == "__main__":
