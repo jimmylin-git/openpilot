@@ -32,19 +32,19 @@ def is_accelerator_enabled() -> bool:
 
 
 def get_downsampled_dims(cam_w: int, cam_h: int) -> Tuple[int, int]:
-  """Return approximately 1.5x downsampled dimensions aligned for NV12."""
+  """Return exact 1.5x downsampled dimensions (of a cropped source) aligned for NV12."""
   dst_w = (cam_w * 2 // 3 // 128) * 128
   dst_h = (cam_h * 2 // 3 // 32) * 32
-  if dst_w < 2 or dst_h < 2:
+  if dst_w < 4 or dst_h < 4:
     raise ValueError(f"Camera dimensions are too small to downsample: {cam_w}x{cam_h}")
   return dst_w, dst_h
 
 
 class NV12Downscaler:
   """
-  Approximately 1.5x downscaler for NV12 camera frames.
-  For a 1928x1208 camera frame, produces a 1280x800 image with 128-byte
-  stride alignment and a 32-line luma alignment.
+  Exact 1.5x nearest-neighbour downscaler for NV12 camera frames.
+  Keeps 2 of every 3 pixels/rows, so a 1928x1208 frame (cropped to 1920x1200)
+  becomes 1280x800 with a single strided copy per plane (no index gathers).
   """
   def __init__(self, src_w: int, src_h: int):
     self.src_w = src_w
@@ -56,15 +56,15 @@ class NV12Downscaler:
     self.dst_stride, self.dst_yh, self.dst_uvh, self.dst_yuv_size = get_nv12_info(self.dst_w, self.dst_h)
     self.dst_y_size = self.dst_stride * self.dst_yh
     self.dst_copy_size = self.dst_stride * (self.dst_yh + self.dst_uvh)
-    self.dst_frame_size = self.dst_yuv_size
-    self.dst_x_indices = np.arange(self.dst_w, dtype=np.intp) * src_w // self.dst_w
-    self.dst_y_indices = np.arange(self.dst_h, dtype=np.intp) * src_h // self.dst_h
-    self.dst_uv_x_indices = np.arange(self.dst_w // 2, dtype=np.intp) * (src_w // 2) // (self.dst_w // 2)
-    self.dst_uv_y_indices = np.arange(self.dst_h // 2, dtype=np.intp) * (src_h // 2) // (self.dst_h // 2)
-    self._y_scratch = np.empty((self.dst_h, self.src_w), dtype=np.uint8)
-    self._uv_scratch = np.empty((self.dst_h // 2, self.src_w // 2, 2), dtype=np.uint8)
+    # The warp only reads the Y and UV planes, so skip get_nv12_info's trailing padding to cut USB upload size.
+    self.dst_frame_size = self.dst_copy_size
+    # Nearest-neighbour source index for each output pixel: floor(1.5 * i) -> 0, 1, 3, 4, 6, 7, ...
+    self.dst_x_indices = np.arange(self.dst_w, dtype=np.intp) * 3 // 2
+    self.dst_y_indices = np.arange(self.dst_h, dtype=np.intp) * 3 // 2
+    self.dst_uv_x_indices = np.arange(self.dst_w // 2, dtype=np.intp) * 3 // 2
+    self.dst_uv_y_indices = np.arange(self.dst_h // 2, dtype=np.intp) * 3 // 2
 
-    self.scale_matrix = np.diag([self.dst_w / src_w, self.dst_h / src_h, 1.0]).astype(np.float32)
+    self.scale_matrix = np.diag([2.0 / 3.0, 2.0 / 3.0, 1.0]).astype(np.float32)
 
   def downsample_into(self, src_buf: np.ndarray, dst_buf: np.ndarray) -> None:
     """
@@ -73,25 +73,19 @@ class NV12Downscaler:
     """
     src_flat = np.frombuffer(src_buf, dtype=np.uint8)
     dst_flat = np.frombuffer(dst_buf, dtype=np.uint8)
+    dw, dh = self.dst_w, self.dst_h
 
-    # 1. Y plane
-    src_y = src_flat[:self.src_y_size].reshape(self.src_yh, self.src_stride)[:self.src_h, :self.src_w]
-    dst_y = dst_flat[:self.dst_y_size].reshape(self.dst_yh, self.dst_stride)
-    np.take(src_y, self.dst_y_indices, axis=0, out=self._y_scratch)
-    np.take(self._y_scratch, self.dst_x_indices, axis=1, out=dst_y[:self.dst_h, :self.dst_w])
+    # Y plane: group source into 3x3 blocks and keep the top-left 2x2 of each.
+    src_y = src_flat[:self.src_y_size].reshape(self.src_yh, self.src_stride)[:dh * 3 // 2, :dw * 3 // 2]
+    dst_y = dst_flat[:self.dst_y_size].reshape(self.dst_yh, self.dst_stride)[:dh, :dw]
+    np.copyto(dst_y.reshape(dh // 2, 2, dw // 2, 2), src_y.reshape(dh // 2, 3, dw // 2, 3)[:, :2, :, :2])
 
-    # 2. UV plane (interleaved U, V pairs)
+    # UV plane: same pattern on interleaved (U, V) pairs.
     src_uv = src_flat[self.src_y_size:self.src_y_size + self.src_stride * self.src_uvh].reshape(
-      self.src_uvh, self.src_stride
-    )[:self.src_h // 2, :self.src_w]
+      self.src_uvh, self.src_stride)[:dh * 3 // 4, :dw * 3 // 2]
     dst_uv = dst_flat[self.dst_y_size:self.dst_y_size + self.dst_stride * self.dst_uvh].reshape(
-      self.dst_uvh, self.dst_stride
-    )
-
-    src_uv_pairs = src_uv.reshape(self.src_h // 2, self.src_w // 2, 2)
-    dst_uv_pairs = dst_uv[:self.dst_h // 2, :self.dst_w].reshape(self.dst_h // 2, self.dst_w // 2, 2)
-    np.take(src_uv_pairs, self.dst_uv_y_indices, axis=0, out=self._uv_scratch)
-    np.take(self._uv_scratch, self.dst_uv_x_indices, axis=1, out=dst_uv_pairs)
+      self.dst_uvh, self.dst_stride)[:dh // 2, :dw]
+    np.copyto(dst_uv.reshape(dh // 4, 2, dw // 4, 2, 2), src_uv.reshape(dh // 4, 3, dw // 4, 3, 2)[:, :2, :, :2])
 
   def adjust_transform(self, tfm: np.ndarray) -> np.ndarray:
     """Adjust M_inv (3x3) for the actual downsampled width and height."""

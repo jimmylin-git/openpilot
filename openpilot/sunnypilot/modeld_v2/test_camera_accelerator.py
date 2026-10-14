@@ -99,8 +99,7 @@ class TestCameraAccelerator(unittest.TestCase):
 
     adjusted = self.downscaler.adjust_transform(tfm)
 
-    scale_x = self.downscaler.dst_w / self.cam_w
-    scale_y = self.downscaler.dst_h / self.cam_h
+    scale_x = scale_y = 2.0 / 3.0
     np.testing.assert_allclose(adjusted[0], tfm[0] * scale_x)
     np.testing.assert_allclose(adjusted[1], tfm[1] * scale_y)
     np.testing.assert_allclose(adjusted[2], tfm[2])

@@ -6,6 +6,7 @@ See the LICENSE.md file in the root directory for more details.
 """
 import codecs
 import math
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import pickle
 import numpy as np
@@ -200,13 +201,15 @@ class NativeTinygradAdapter(BaseModelAdapter):
 
     self.accelerate_camera = is_accelerator_enabled()
     self.downscaler = NV12Downscaler(self.cam_w, self.cam_h) if self.accelerate_camera else None
+    # numpy copies release the GIL, so road and wide frames can be downscaled in parallel.
+    self._downscale_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='downscale') if self.downscaler is not None else None
     if self.downscaler is None:
       self.run_warp = self._load_warp()
     else:
       model_input_shape = self.input_shapes['new_img'][0]
       model_w, model_h = model_input_shape[-1] * 2, model_input_shape[-2] * 2
-      dst_nv12 = NV12Frame(self.downscaler.dst_w, self.downscaler.dst_h,
-                           *get_nv12_info(self.downscaler.dst_w, self.downscaler.dst_h))
+      dst_nv12 = NV12Frame(self.downscaler.dst_w, self.downscaler.dst_h, self.downscaler.dst_stride,
+                           self.downscaler.dst_yh, self.downscaler.dst_uvh, self.downscaler.dst_frame_size)
       self.run_warp = TinyJit(make_native_warp(dst_nv12, model_w, model_h, self.WARP_DEV), prune=True)
 
     if self.accelerate_camera and self.downscaler is not None:
@@ -238,13 +241,16 @@ class NativeTinygradAdapter(BaseModelAdapter):
       self.outputs[next_name] = input_view(state._buffer(), state.shape, state.dtype, 0)
 
   def copy_frames(self, bufs):
+    jobs = []
     for i, key in enumerate(self._vision_input_names):
       if key in bufs:
         data = bufs[key].data if hasattr(bufs[key], 'data') else bufs[key]
-        if self.accelerate_camera and self.downscaler is not None:
-          self.downscaler.downsample_into(data, self.frames[i])
+        if self._downscale_pool is not None:
+          jobs.append(self._downscale_pool.submit(self.downscaler.downsample_into, data, self.frames[i]))
         else:
           np.copyto(self.frames[i], np.frombuffer(data, dtype=np.uint8, count=self.warp_frame_size))
+    for job in jobs:
+      job.result()
 
   def reset_warmup_buffers(self) -> None:
     self.packed_input[:] = 0

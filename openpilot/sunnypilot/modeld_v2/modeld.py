@@ -159,7 +159,9 @@ class ModelState(ModelStateBase):
   def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
           inputs: dict[str, np.ndarray],
           after_enqueue: Callable[[], None] | None = None) -> dict[str, np.ndarray] | None:
+    t_start = time.perf_counter()
     self.adapter.copy_frames(bufs)
+    t_copied = time.perf_counter()
 
     desire_key = self.desire_key
     inputs[desire_key][0] = 0
@@ -188,6 +190,7 @@ class ModelState(ModelStateBase):
       self.numpy_inputs['big_tfm'][:, :] = tfm_wide
 
     raw_outputs = self.adapter.run()
+    t_enqueued = time.perf_counter()
 
     if after_enqueue is not None:
       after_enqueue()
@@ -229,7 +232,21 @@ class ModelState(ModelStateBase):
       buf[0, :-1] = buf[0, 1:]
       buf[0, -1, :] = outputs['desired_curvature'][0, :] if not self.mlsim else 0
 
+    self._log_stage_times(t_copied - t_start, t_enqueued - t_copied, time.perf_counter() - t_enqueued)
     return outputs
+
+  def _log_stage_times(self, copy_t: float, upload_t: float, wait_t: float) -> None:
+    stats = self.__dict__.setdefault('_stage_stats', np.zeros((3, 2)))
+    stats[:, 0] += (copy_t, upload_t, wait_t)
+    stats[:, 1] = np.maximum(stats[:, 1], (copy_t, upload_t, wait_t))
+    self._stage_count = getattr(self, '_stage_count', 0) + 1
+    if self._stage_count >= 100:
+      avg, mx = stats[:, 0] / self._stage_count * 1e3, stats[:, 1] * 1e3
+      cloudlog.warning(f"modeld timing ms (avg/max): frame_copy {avg[0]:.1f}/{mx[0]:.1f}, "
+                       f"upload+enqueue {avg[1]:.1f}/{mx[1]:.1f}, gpu_wait+parse {avg[2]:.1f}/{mx[2]:.1f}, "
+                       f"accel={getattr(self.adapter, 'accelerate_camera', False)}")
+      stats[:] = 0
+      self._stage_count = 0
 
   def get_action_from_model(self, model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                             lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
