@@ -14,11 +14,13 @@ from openpilot.common.basedir import BASEDIR
 from openpilot.sunnypilot.modeld_v2.camera_accelerator import NV12Downscaler, is_accelerator_enabled
 from openpilot.sunnypilot.modeld_v2.compile_modeld import (POLICY_INPUTS, derive_frame_skip,
                                                            make_split_input_queues, make_supercombo_input_queues)
-from openpilot.sunnypilot.modeld_v2.stock_dependencies import make_input_queues as stock_make_input_queues, nv12_copy_size
+from openpilot.sunnypilot.modeld_v2.stock_dependencies import (NV12Frame, make_input_queues as stock_make_input_queues,
+                                                               make_frame_prepare, nv12_copy_size)
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, Device
 from tinygrad.dtype import DType, dtypes
-from tinygrad.helpers import round_up
+from tinygrad.engine.jit import TinyJit
+from tinygrad.helpers import Context, round_up
 from tinygrad.tensor import Tensor
 from tinygrad.uop.ops import UOp
 
@@ -26,6 +28,21 @@ from tinygrad.uop.ops import UOp
 def input_view(buffer: Buffer, shape: tuple[int, ...], dtype: DType, offset: int) -> Tensor:
   view = buffer.view(math.prod(shape), dtype, offset).ensure_allocated()
   return Tensor(UOp.from_buffer(view)).reshape(shape)
+
+
+def make_native_warp(nv12, model_w, model_h, warp_device):
+  frame_prepare = make_frame_prepare(nv12, model_w, model_h)
+
+  def warp(input_frame, M_inv):
+    with Context(DEV=warp_device):
+      input_frame = input_frame.to(Device.DEFAULT)
+      M_inv = M_inv.to(Device.DEFAULT)
+      Tensor.realize(input_frame, M_inv)
+      road_frame = frame_prepare(input_frame[0], M_inv[0]).unsqueeze(0)
+      wide_frame = frame_prepare(input_frame[1], M_inv[1]).unsqueeze(0)
+      return Tensor.cat(road_frame, wide_frame)
+
+  return warp
 
 
 class BaseModelAdapter:
@@ -56,7 +73,10 @@ class BaseModelAdapter:
     self.frame_buf_params = dict.fromkeys(getattr(self, '_vision_input_names', ['img', 'big_img']), self.nv12_info)
 
   def get_dummy_inputs(self):
-    dummy_size = getattr(self, 'warp_frame_size', self.frame_copy_size if self.is_native else self.frame_buf_params[self._road_key][3])
+    if getattr(self, 'downscaler', None) is not None:
+      dummy_size = self.frame_copy_size
+    else:
+      dummy_size = getattr(self, 'warp_frame_size', self.frame_copy_size if self.is_native else self.frame_buf_params[self._road_key][3])
     dummy_frames = {k: np.zeros(dummy_size, dtype=np.uint8) for k in self._vision_input_names}
     transforms = {k: np.eye(3, dtype=np.float32) for k in [self._road_key, self._wide_key] if k}
     dummy_inputs = {k: np.zeros(v.shape, dtype=v.dtype) for k, v in self.numpy_inputs.items() if k not in ['tfm', 'big_tfm', 'prev_feat']}
@@ -175,12 +195,19 @@ class NativeTinygradAdapter(BaseModelAdapter):
     self._vision_input_names = [k for k in self.input_shapes_orig if 'img' in k]
     self.vision_output_slices = pickle.loads(codecs.decode(self.jits['metadata']['metadata']['output_slices'].encode(), 'base64'))
 
-    self.run_warp = self._load_warp()
     self._init_common()
     self.run_model = self.jits['run']
 
     self.accelerate_camera = is_accelerator_enabled()
     self.downscaler = NV12Downscaler(self.cam_w, self.cam_h) if self.accelerate_camera else None
+    if self.downscaler is None:
+      self.run_warp = self._load_warp()
+    else:
+      model_input_shape = self.input_shapes['new_img'][0]
+      model_w, model_h = model_input_shape[-1] * 2, model_input_shape[-2] * 2
+      dst_nv12 = NV12Frame(self.downscaler.dst_w, self.downscaler.dst_h,
+                           *get_nv12_info(self.downscaler.dst_w, self.downscaler.dst_h))
+      self.run_warp = TinyJit(make_native_warp(dst_nv12, model_w, model_h, self.WARP_DEV), prune=True)
 
     if self.accelerate_camera and self.downscaler is not None:
       warp_frame_size = self.downscaler.dst_frame_size

@@ -21,23 +21,26 @@ class TestCameraAccelerator(unittest.TestCase):
 
   def test_dimensions(self):
     dst_w, dst_h = get_downsampled_dims(self.cam_w, self.cam_h)
-    self.assertEqual(dst_w, 964)
-    self.assertEqual(dst_h, 604)
-    self.assertEqual(self.downscaler.dst_w, 964)
-    self.assertEqual(self.downscaler.dst_h, 604)
+    self.assertEqual(dst_w, 1280)
+    self.assertEqual(dst_h, 800)
+    self.assertEqual(self.downscaler.dst_w, 1280)
+    self.assertEqual(self.downscaler.dst_h, 800)
 
     # Check stride and dimensions
     dst_stride, dst_yh, dst_uvh, _ = get_nv12_info(dst_w, dst_h)
     self.assertEqual(self.downscaler.dst_stride, dst_stride)
     self.assertEqual(self.downscaler.dst_yh, dst_yh)
     self.assertEqual(self.downscaler.dst_uvh, dst_uvh)
+    self.assertEqual(dst_stride % 128, 0)
+    self.assertEqual(dst_yh % 32, 0)
 
-    # Destination frame size should be around 1/4 of source
-    src_stride, src_yh, src_uvh, _ = get_nv12_info(self.cam_w, self.cam_h)
-    src_size = src_stride * (src_yh + src_uvh)
-    dst_size = dst_stride * (dst_yh + dst_uvh)
+    # The packed Y and UV planes should use approximately 4/9 of source pixels.
+    src_size = self.downscaler.src_w * self.downscaler.src_h * 3 // 2
+    dst_size = dst_w * dst_h * 3 // 2
     ratio = dst_size / src_size
-    self.assertAlmostEqual(ratio, 0.25, delta=0.01)
+    self.assertAlmostEqual(ratio, 4 / 9, delta=0.01)
+    self.assertEqual(self.downscaler.dst_copy_size, dst_stride * (dst_yh + dst_uvh))
+    self.assertGreaterEqual(self.downscaler.dst_frame_size, self.downscaler.dst_copy_size)
 
   def test_downsample_into(self):
     # Construct synthetic NV12 buffer
@@ -69,14 +72,18 @@ class TestCameraAccelerator(unittest.TestCase):
     dst_buf = np.zeros(self.downscaler.dst_frame_size, dtype=np.uint8)
     self.downscaler.downsample_into(src_buf, dst_buf)
 
-    # Validate downsampled Y matches [::2, ::2]
+    # Validate Y uses nearest-neighbor coordinate mapping at the actual scale.
     dst_y = dst_buf[:self.downscaler.dst_y_size].reshape(self.downscaler.dst_yh, self.downscaler.dst_stride)
-    expected_y = y_pattern[::2, ::2]
+    expected_y = y_pattern[np.ix_(self.downscaler.dst_y_indices, self.downscaler.dst_x_indices)]
     np.testing.assert_array_equal(dst_y[:self.downscaler.dst_h, :self.downscaler.dst_w], expected_y)
 
-    # Validate downsampled UV matches [::2, ::2, :]
-    dst_uv = dst_buf[self.downscaler.dst_y_size:].reshape(self.downscaler.dst_uvh, self.downscaler.dst_stride)
-    uv_pairs_expected = uv_pattern.reshape(self.cam_h // 2, self.cam_w // 2, 2)[::2, ::2, :]
+    # Validate UV preserves interleaved U/V pairs.
+    dst_uv = dst_buf[
+      self.downscaler.dst_y_size:self.downscaler.dst_copy_size
+    ].reshape(self.downscaler.dst_uvh, self.downscaler.dst_stride)
+    uv_pairs_expected = uv_pattern.reshape(self.cam_h // 2, self.cam_w // 2, 2)[
+      self.downscaler.dst_uv_y_indices[:, None], self.downscaler.dst_uv_x_indices, :
+    ]
     dst_uv_pairs = dst_uv[:self.downscaler.dst_h // 2, :self.downscaler.dst_w].reshape(
       self.downscaler.dst_h // 2, self.downscaler.dst_w // 2, 2
     )
@@ -92,21 +99,22 @@ class TestCameraAccelerator(unittest.TestCase):
 
     adjusted = self.downscaler.adjust_transform(tfm)
 
-    # Verify scaling on row 0 and row 1
-    np.testing.assert_allclose(adjusted[0], tfm[0] * 0.5)
-    np.testing.assert_allclose(adjusted[1], tfm[1] * 0.5)
+    scale_x = self.downscaler.dst_w / self.cam_w
+    scale_y = self.downscaler.dst_h / self.cam_h
+    np.testing.assert_allclose(adjusted[0], tfm[0] * scale_x)
+    np.testing.assert_allclose(adjusted[1], tfm[1] * scale_y)
     np.testing.assert_allclose(adjusted[2], tfm[2])
 
     # Mathematical test:
     # Any input coordinate p_dst in model space maps to p_src = tfm @ p_dst
     # With adjusted transform, p_src_down = adjusted @ p_dst
-    # Verify p_src_down[:2] == 0.5 * p_src[:2]
+    # Verify the adjusted transform maps into the downsampled frame coordinates.
     p_dst = np.array([256.0, 128.0, 1.0], dtype=np.float32)
     p_src = tfm @ p_dst
     p_src_down = adjusted @ p_dst
 
-    np.testing.assert_allclose(p_src_down[0] / p_src_down[2], 0.5 * (p_src[0] / p_src[2]))
-    np.testing.assert_allclose(p_src_down[1] / p_src_down[2], 0.5 * (p_src[1] / p_src[2]))
+    np.testing.assert_allclose(p_src_down[0] / p_src_down[2], scale_x * (p_src[0] / p_src[2]))
+    np.testing.assert_allclose(p_src_down[1] / p_src_down[2], scale_y * (p_src[1] / p_src[2]))
 
   def test_enabled_check(self):
     import os
