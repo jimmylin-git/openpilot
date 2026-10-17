@@ -109,6 +109,8 @@ class SystemStatsSampler:
                 if chestnut_state == CHESTNUT_FAILED:
                     return "model failed"
                 return "idle" if not self._chestnut_onroad else "model waiting"
+            if self._params.get_bool("dp_egpu_builtin"):
+                return "builtin"
             bundle = self._params.get(P_ACTIVE_BUNDLE)
             if not isinstance(bundle, dict):
                 raise ValueError("Active eGPU model has no bundle metadata")

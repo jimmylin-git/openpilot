@@ -269,10 +269,11 @@ class TuringUsbDisplay:
         next_brightness = int(clamp(brightness, 0, 100))
         if next_brightness == self.brightness and not force:
             return False
-        self.brightness = next_brightness
         if self.dev is not None:
-            self._send_brightness(self.brightness, "brightness")
+            self._send_brightness(next_brightness, "brightness")
+            self.brightness = next_brightness
             return True
+        self.brightness = next_brightness
         return False
 
     def _find_expected_usb_device(self) -> tuple[Any, int]:
@@ -341,10 +342,11 @@ class TuringUsbDisplay:
 
     def _send_brightness(self, brightness: int, name: str) -> None:
         value = int(clamp(brightness, 0, 100) / 100 * TURZX_BRIGHTNESS_COMMAND_MAX)
-        self._send_optional_command(
+        self._send_command(
             14,
             name,
             {8: value},
+            expect_response=False,
             log=False,
             no_ack_gap_s=0.0,
             no_ack_drain_attempts=0,
@@ -540,6 +542,25 @@ class TuringUsbDisplay:
             raise RuntimeError("USB display is not open")
         if not chunk:
             return
+        if time.monotonic() >= getattr(self, "_next_pacing_check", 0.0):
+            next_gap = USBGPU_H264_CHUNK_GAP_S if _usbgpu_transfer_active() else 0.0
+            if next_gap != self.chunk_gap_s:
+                print(f"TURZX H264 eGPU coexistence pacing {'enabled' if next_gap else 'disabled'}", flush=True)
+            self.chunk_gap_s = next_gap
+            self._next_pacing_check = time.monotonic() + 0.5
+        limit = USBGPU_H264_MAX_CHUNK_SIZE if self.chunk_gap_s else len(chunk)
+        for offset in range(0, len(chunk), limit):
+            piece = chunk[offset:offset + limit]
+            self._send_h264_piece(
+                piece, is_last=is_last and offset + len(piece) == len(chunk),
+                wait_for_ack=wait_for_ack, require_ack_response=require_ack_response,
+            )
+            if self.chunk_gap_s:
+                time.sleep(self.chunk_gap_s)
+
+    def _send_h264_piece(
+        self, chunk: bytes, *, is_last: bool, wait_for_ack: bool, require_ack_response: bool,
+    ) -> None:
         try:
             if wait_for_ack:
                 try:

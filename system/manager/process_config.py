@@ -93,6 +93,10 @@ def egpu_big_model(started: bool, params: Params, CP: car.CarParams) -> bool:
   return EGPU_ROUTE.update(started, params)
 
 def not_egpu_big_model(started: bool, params: Params, CP: car.CarParams) -> bool:
+  if started and params.get_bool("dp_egpu_builtin") and params.get_bool("dp_egpu_failed"):
+    cloudlog.error("egpu: stopping failed built-in USBGPU for stock model restart")
+    params.put_bool("dp_egpu_builtin", False, block=True)
+    return False
   return not EGPU_ROUTE.update(started, params)
 
 class RestartingPythonProcess(PythonProcess):

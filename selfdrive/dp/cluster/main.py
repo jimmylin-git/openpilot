@@ -1123,9 +1123,11 @@ def run_demo(
                     # path below, which autorun is designed to relaunch
                     # after replug.
                     print(f"Warning: set_brightness({next_usb_brightness}) failed: {exc}", flush=True)
+                    brightness_refresh_pending = True
+                else:
+                    brightness_refresh_pending = False
                 if brightness_poll_due:
                     next_brightness_param_read = brightness_now + BRIGHTNESS_PARAM_POLL_SECONDS
-                brightness_refresh_pending = False
 
             if output_mode in ("window", "both"):
                 profile_stage = time.perf_counter()

@@ -58,6 +58,7 @@ class ModelNameTests(unittest.TestCase):
         self.params = Mock()
         self.params.get.return_value = {"short_name": "TT", "display_name": "Tee Time"}
         self.sampler._params = self.params
+        self.params.get_bool.return_value = False
 
     def test_inactive_states_do_not_claim_small_model(self):
         for state, label in ((None, "idle"), (CHESTNUT_LOADING, "loading"), (CHESTNUT_FAILED, "model failed")):
@@ -106,7 +107,8 @@ class ChestnutHealthTests(unittest.TestCase):
     def setUp(self):
         self.sampler = SystemStatsSampler()
         self.flags = {"dp_egpu_enabled": True, "dp_egpu_present": True,
-                      "dp_egpu_loading": False, "dp_egpu_running": True, "dp_egpu_failed": False}
+                      "dp_egpu_loading": False, "dp_egpu_running": True, "dp_egpu_failed": False,
+                      "dp_egpu_builtin": False}
         self.params = Mock()
         def read_bool(key):
             if key not in self.flags:
@@ -137,6 +139,13 @@ class ChestnutHealthTests(unittest.TestCase):
 
     def test_healthy_big_model_is_active(self):
         self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
+
+    def test_builtin_big_model_uses_actual_identity_not_selected_bundle(self):
+        self.flags["dp_egpu_builtin"] = True
+        state = self.sampler._read_chestnut_state()
+        self.assertEqual(state, CHESTNUT_ACTIVE)
+        self.assertEqual(self.sampler._read_model_name(state), "builtin")
+        self.params.get.assert_not_called()
 
     def test_small_model_requires_valid_live_publications(self):
         self.model.bigModel = False

@@ -763,6 +763,16 @@ Chestnut is loading or active, H264 USB chunks are capped at 32 KiB with a
 uses a process-shared lock at `/tmp/carrot_usbgpu_bus.lock` for cooperating
 display senders. Upstream eGPU/tinygrad transfers are not modified to acquire
 this lock; the chunk pacing is not a guarantee of serialization with inference.
+The sender rechecks GPU activity every 0.5 seconds, including offroad/onroad
+transitions. Already-queued chunks are split into at most 32 KiB pieces while
+the GPU is active, without discarding bytes or moving the final-chunk marker.
+Both downloaded bundles and the built-in USBGPU model publish loading/running
+status for pacing and watchdog monitoring. The built-in path respects the eGPU
+enable switch; its first-output/stall timeout stops that process before restarting
+the stock model, with failure latched for the rest of the drive. Cluster labels
+that model `builtin`, rather than using unrelated selected-bundle metadata.
+Brightness writes update their cache only after a successful USB write.
+A failed offroad dim remains pending and is retried on subsequent render cycles.
 
 When the asynchronous JPEG sender or native H264 sender is busy, the HUD
 skips the new USB frame before readback/encoding, without waiting for capacity.

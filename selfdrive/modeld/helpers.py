@@ -9,8 +9,8 @@ USBGPU_PID = 0x0001
 USBGPU_IDS = ((USBGPU_VID, USBGPU_PID), (0x3801, 0x0001), (0xADD1, 0x0002))  # dp - egpu: + UT3G V1.6 Dual
 
 
-def use_builtin_usbgpu(present: bool, compiled: bool, egpu_failed: bool) -> bool:
-  return present and compiled and not egpu_failed
+def use_builtin_usbgpu(present: bool, compiled: bool, egpu_failed: bool, enabled: bool) -> bool:
+  return present and compiled and not egpu_failed and enabled
 
 
 def get_tg_input_devices(process_name: str, usbgpu: bool):

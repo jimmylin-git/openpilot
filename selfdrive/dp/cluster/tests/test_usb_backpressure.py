@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import Any
 import unittest
 from unittest.mock import Mock
+from unittest.mock import patch
 
 
 CLUSTER_DIR = Path(__file__).resolve().parents[1]
@@ -33,9 +34,54 @@ def load_class(file_name: str, name: str, methods: set[str] | None = None) -> ty
         "Any": Any,
         "Iterable": Iterable,
         "NATIVE_PACKET_QUEUE_PUT_TIMEOUT_S": 0.05,
+        "USBGPU_H264_MAX_CHUNK_SIZE": 32768,
+        "USBGPU_H264_CHUNK_GAP_S": 0.002,
+        "TURZX_BRIGHTNESS_COMMAND_MAX": 102,
+        "clamp": lambda value, low, high: max(low, min(value, high)),
     }
     exec(compile(ast.fix_missing_locations(module), str(CLUSTER_DIR / file_name), "exec"), namespace)
     return namespace[name]
+
+
+class UsbControlTests(unittest.TestCase):
+    def test_brightness_timeout_preserves_cache_and_retries(self):
+        cls = load_class("cluster_usb_display.py", "TuringUsbDisplay", {"set_brightness", "_send_brightness"})
+        display = cls()
+        display.dev = object()
+        display.brightness = 20
+        display._send_command = Mock(side_effect=[RuntimeError("USB timeout"), b""])
+        with self.assertRaisesRegex(RuntimeError, "USB timeout"):
+            display.set_brightness(2)
+        self.assertEqual(display.brightness, 20)
+        self.assertTrue(display.set_brightness(2))
+        self.assertEqual(display.brightness, 2)
+        self.assertFalse(display.set_brightness(2))
+        self.assertEqual(display._send_command.call_count, 2)
+
+    def test_pacing_follows_runtime_gpu_transitions_without_dropping_bytes(self):
+        cls = load_class("cluster_usb_display.py", "TuringUsbDisplay", {"send_h264_chunk"})
+        display = cls()
+        display.dev = object()
+        display.chunk_gap_s = 0.
+        display._send_h264_piece = Mock()
+        data = b"x" * 100000
+        namespace = cls.send_h264_chunk.__globals__
+        with patch.dict(namespace, {"_usbgpu_transfer_active": Mock(side_effect=[False, True, False])}):
+            with patch.object(time, "monotonic", side_effect=[0., 0., 1., 1., 2., 2.]), patch.object(time, "sleep") as sleep:
+                display.send_h264_chunk(data, is_last=True)
+                self.assertEqual(display._send_h264_piece.call_count, 1)
+                sleep.assert_not_called()
+                display._send_h264_piece.reset_mock()
+                display.send_h264_chunk(data, is_last=True)
+                calls = display._send_h264_piece.call_args_list
+                self.assertEqual(b"".join(call.args[0] for call in calls), data)
+                self.assertTrue(all(len(call.args[0]) <= 32768 for call in calls))
+                self.assertEqual([call.kwargs["is_last"] for call in calls], [False, False, False, True])
+                self.assertEqual(sleep.call_count, 4)
+                display._send_h264_piece.reset_mock()
+                display.send_h264_chunk(data, is_last=False)
+                self.assertEqual(display._send_h264_piece.call_count, 1)
+                self.assertEqual(display.chunk_gap_s, 0.)
 
 
 class JpegBackpressureTests(unittest.TestCase):

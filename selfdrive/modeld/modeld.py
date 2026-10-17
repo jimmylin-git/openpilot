@@ -205,7 +205,12 @@ def main(demo=False, egpu_loader=None):
   _compiled = EGPU or os.path.isfile(get_manifest_path(modeld_pkl_path(usbgpu=True)))
   params = Params()
   egpu_failed = params.get_bool("dp_egpu_failed")
-  USBGPU = use_builtin_usbgpu(_present, _compiled, egpu_failed)
+  USBGPU = not EGPU and use_builtin_usbgpu(_present, _compiled, egpu_failed, params.get_bool("dp_egpu_enabled"))
+  params.put_bool("dp_egpu_builtin", USBGPU, block=True)
+  gpu_output_started = False
+  if not EGPU:
+    params.put_bool(P_RUNNING, False, block=True)
+    params.put_bool(P_LOADING, USBGPU, block=True)
   params.put_bool("UsbGpuPresent", _present)
   params.put_bool("UsbGpuCompiled", _compiled)
 
@@ -438,7 +443,7 @@ def main(demo=False, egpu_loader=None):
       model_ext_send.modelExt.rightEdgeDetected = RED.right_edge_detected
       # dp - jetlink: zoompilot's modelDataV2SP.acceleratorState and modelV2.big
       model_ext_send.modelExt.acceleratorState = getattr(model, 'big_model_state', 'none')
-      model_ext_send.modelExt.bigModel = USBGPU or (bool(getattr(model, 'chestnut', False)) and model is not small_model)
+      model_ext_send.modelExt.bigModel = EGPU or USBGPU or (bool(getattr(model, 'chestnut', False)) and model is not small_model)
       DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, RED.left_edge_detected, RED.right_edge_detected)
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
@@ -450,12 +455,14 @@ def main(demo=False, egpu_loader=None):
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)
       pm.send('modelExt', model_ext_send)
-      if EGPU and run_count == 1:
+      if (EGPU or USBGPU) and not gpu_output_started:
         # The first real camera mapping and inference must also finish outside FIFO.
-        config_realtime_process(7, 54)
+        if EGPU:
+          config_realtime_process(7, 54)
         params.put_bool(P_RUNNING, True, block=True)
         params.put_bool(P_LOADING, False, block=True)
         cloudlog.warning("egpu: first camera frame published, big model running")
+        gpu_output_started = True
     last_vipc_frame_id = meta_main.frame_id
 
 

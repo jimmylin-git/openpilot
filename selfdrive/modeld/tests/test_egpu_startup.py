@@ -72,6 +72,23 @@ def test_timeout_constants_cover_loading_and_first_output():
   assert namespace["MODEL_OUTPUT_TIMEOUT"] == 5
 
 
+@pytest.mark.parametrize("builtin", [False, True])
+def test_builtin_initializes_watchdog_before_camera_wait_and_stock_clears_it(builtin):
+  tree = ast.parse((ROOT / "selfdrive/modeld/modeld.py").read_text(encoding="utf-8"))
+  main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+  block = next(n for n in main.body if isinstance(n, ast.If) and ast.unparse(n.test) == "not EGPU")
+  assert main.body.index(block) < next(i for i, n in enumerate(main.body) if isinstance(n, ast.While))
+  tick, clock, flags, _, writes, _, _ = make_watchdog()
+  namespace = {"EGPU": False, "USBGPU": builtin, "P_RUNNING": "running", "P_LOADING": "loading",
+               "params": SimpleNamespace(put_bool=lambda key, value, **kw: flags.update({key: value}))}
+  exec(compile(ast.Module(body=[block], type_ignores=[]), "<builtin startup flags>", "exec"), namespace)
+  assert flags["loading"] == builtin and not flags["running"]
+  tick()
+  clock.now += 150
+  tick()
+  assert bool(writes) == builtin
+
+
 def test_first_output_deadline_is_bounded_and_failure_latches():
   tick, clock, flags, _, writes, errors, _ = make_watchdog()
   tick()
@@ -174,17 +191,21 @@ def test_reset_drains_both_devices_before_releasing_camera_mappings():
   assert events == [("enqueue",), ("sync", "AMD"), ("sync", "QCOM"), ("sync", "NPY"), ("clear",)]
 
 
-@pytest.mark.parametrize("egpu,run_count,expected", [(True, 1, True), (True, 2, False), (False, 1, False)])
-def test_running_and_fifo_only_follow_first_published_camera_frame(egpu, run_count, expected):
+@pytest.mark.parametrize("egpu,builtin,output_started", [
+  (True, False, False), (True, False, True), (False, True, False), (False, True, True), (False, False, False),
+])
+def test_running_and_fifo_only_follow_first_published_camera_frame(egpu, builtin, output_started):
+  expected = (egpu or builtin) and not output_started
   tree = ast.parse((ROOT / "selfdrive/modeld/modeld.py").read_text(encoding="utf-8"))
-  block = next(node for node in ast.walk(tree) if isinstance(node, ast.If) and ast.unparse(node.test) == "EGPU and run_count == 1")
+  block = next(node for node in ast.walk(tree) if isinstance(node, ast.If) and ast.unparse(node.test) == "(EGPU or USBGPU) and (not gpu_output_started)")
   publish = next(node for node in ast.walk(tree) if isinstance(node, ast.If) and ast.unparse(node.test) == "model_output is not None")
   assert publish.body[-1] is block
   sends = publish.body[-5:-1]
   events = []
   namespace = {
     "EGPU": egpu,
-    "run_count": run_count,
+    "USBGPU": builtin,
+    "gpu_output_started": output_started,
     "P_RUNNING": "running",
     "P_LOADING": "loading",
     "modelv2_send": None,
@@ -199,12 +220,12 @@ def test_running_and_fifo_only_follow_first_published_camera_frame(egpu, run_cou
   exec(compile(ast.Module(body=[*sends, block], type_ignores=[]), "<first output>", "exec"), namespace)
   assert events[:4] == [("publish", name) for name in ["modelV2", "drivingModelData", "cameraOdometry", "modelExt"]]
   if expected:
-    assert events[4:] == [
-      ("realtime", (7, 54)),
+    assert events[4:] == ([("realtime", (7, 54))] if egpu else []) + [
       ("param", ("running", True), {"block": True}),
       ("param", ("loading", False), {"block": True}),
       ("log",),
     ]
+    assert namespace["gpu_output_started"]
   else:
     assert len(events) == 4
 

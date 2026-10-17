@@ -34,6 +34,22 @@ def brightness_namespace():
 
 
 class BrightnessTests(unittest.TestCase):
+    def test_offroad_brightness_failure_remains_pending_until_success(self):
+        tree = ast.parse((CLUSTER_DIR / "main.py").read_text(encoding="utf-8"))
+        block = next(n for n in ast.walk(tree) if isinstance(n, ast.Try)
+                     and any(isinstance(child, ast.Expr) and isinstance(child.value, ast.Call)
+                             and ast.unparse(child.value.func) == "usb_display.set_brightness" for child in n.body))
+        display = Mock()
+        display.set_brightness.side_effect = [RuntimeError("USB timeout"), True]
+        namespace = {"usb_display": display, "next_usb_brightness": 2,
+                     "brightness_refresh_pending": True, "print": lambda *a, **kw: None}
+        code = compile(ast.Module(body=[block], type_ignores=[]), "<brightness retry>", "exec")
+        exec(code, namespace)
+        self.assertTrue(namespace["brightness_refresh_pending"])
+        exec(code, namespace)
+        self.assertFalse(namespace["brightness_refresh_pending"])
+        self.assertEqual(display.set_brightness.call_count, 2)
+
     def setUp(self):
         self.ns = brightness_namespace()
         self.resolve = self.ns["resolved_usb_brightness"]
