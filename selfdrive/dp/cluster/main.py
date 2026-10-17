@@ -1084,6 +1084,7 @@ def run_demo(
                 git_status=git_status_provider.status(),
                 actual_fps=display_actual_fps,
                 cluster_core_usage_text=cluster_core_usage_text,
+                gear_text="P" if is_offroad else state.gear_text,
             )
             brightness_now = time.perf_counter()
             past_boot_grace = brightness_now - start_time >= OFFROAD_DIM_BOOT_GRACE_SECONDS

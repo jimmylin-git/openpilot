@@ -15,6 +15,7 @@ indicators. Lead-departure detection and the `READY TO GO` reminder have been
 removed; normal radar/lead visualization is unchanged. This removal alone does
 not establish the cause of cluster freezes.
 Manager autorun uses 25 FPS (offroad rendering remains 1 FPS).
+Live offroad mode displays P as the default gear; onroad retains the actual gear.
 DP **Display Mode** now includes **TR-9.2** (USB PID `0x0092`,
 1920x462) and **TR-12.3** (USB PID `0x0123`, 1920x720).
 Only these two modes start `cluster_d` and its USB renderer. The selected
@@ -44,9 +45,11 @@ projected radar labels follow the same horizontal stretch. The system metrics st
 the side panels, with MEM/CPU centered at x=310 and TEMP at x=1610 and
 all three metrics raised 30 native pixels and their fonts enlarged 20%
 to clear the background artwork.
+On 9.2-inch panels TEMP is one line lower, aligned with CPU.
 Speed digits and gear text are 20% larger
-than the initial 9.2-inch layout; their centers and the km/h font size are
-unchanged relative to this positioning. The top icon row (including turn
+than the initial 9.2-inch layout; the speed block is centered at native x=220,
+30 pixels left of its previous position, with the km/h font size unchanged.
+The top icon row (including turn
 signals and GPU/model information) is shifted up 30 native pixels without
 moving AUTO HOLD or the ACC-off wheel/angle animation. The latter uses the compact central
 layout. The 12.3-inch HUD coordinates, sizes and road rendering are unchanged.

@@ -12,6 +12,17 @@ TREE = ast.parse((ROOT / "cluster_renderer.py").read_text(encoding="utf-8"))
 RENDERER = next(node for node in TREE.body if isinstance(node, ast.ClassDef) and node.name == "ClusterUiRenderer")
 
 
+@pytest.mark.parametrize("is_offroad", [False, True])
+@pytest.mark.parametrize("gear", [None, "P", "R", "N", "D", "B"])
+def test_offroad_gear_defaults_to_park_without_overriding_onroad(is_offroad, gear):
+    tree = ast.parse((ROOT / "main.py").read_text(encoding="utf-8"))
+    value = next(node.value for node in ast.walk(tree)
+                 if isinstance(node, ast.keyword) and node.arg == "gear_text")
+    result = eval(compile(ast.Expression(value), "<display gear>", "eval"),
+                  {"is_offroad": is_offroad, "state": SimpleNamespace(gear_text=gear)})
+    assert result == ("P" if is_offroad else gear)
+
+
 class Matrix:
     def __init__(self):
         self.stack = []
@@ -54,7 +65,7 @@ def region_method(matrix):
 
 
 @pytest.mark.parametrize("region,source,target,scale", [
-    ("speed", (255, 350), (250, 240), 0.9),
+    ("speed", (255, 350), (220, 240), 0.9),
     ("gear", (1615, 350), (1660, 240), 0.62),
     ("status", (960, 0), (960, 16), 0.7),
     ("top_status", (960, 0), (960, -14), 0.91),
@@ -255,7 +266,10 @@ def test_side_metrics_move_up_thirty_native_pixels_only_on_compact_panel(compact
     assert (100. - namespace["metric_y"]) * 462. / 720. == pytest.approx(30. if compact else 0.)
     texts = [n for n in ast.walk(method) if isinstance(n, ast.Call)
              and isinstance(n.func, ast.Attribute) and n.func.attr == "_draw_text"]
-    assert [ast.unparse(n.args[2]) for n in texts] == ["metric_y", "metric_y", "metric_y + TOP_SYSTEM_METRIC_LINE_GAP"]
+    namespace["metric_y"] = 0.
+    namespace["TOP_SYSTEM_METRIC_LINE_GAP"] = 30.
+    heights = [eval(compile(ast.Expression(n.args[2]), "<metric text height>", "eval"), namespace) for n in texts]
+    assert heights == ([30., 0., 30.] if compact else [0., 0., 30.])
 
 
 @pytest.mark.parametrize("compact", [False, True])

@@ -981,7 +981,7 @@ class ClusterUiRenderer:
         lfa_progress = getattr(self, "_acc_layout_progress", None)
         lfa_progress = 1.0 if lfa_progress is None else lfa_progress
         center_x, center_y, scale, origin_x, origin_y = {
-            "speed": (250.0, 240.0, 0.9, SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y),
+            "speed": (220.0, 240.0, 0.9, SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y),
             "gear": (1660.0, 240.0, 0.62, GEAR_STATUS_CENTER_X, GEAR_STATUS_CENTER_Y),
             "status": (960.0, 16.0, 0.7, 960.0, 0.0),
             "top_status": (960.0, COMPACT_TOP_STATUS_Y, COMPACT_TOP_STATUS_SCALE, 960.0, 0.0),
@@ -2667,7 +2667,7 @@ class ClusterUiRenderer:
             self._draw_text(
                 f"TEMP {temperature:.0f}C",
                 right_x,
-                metric_y,
+                metric_y + (TOP_SYSTEM_METRIC_LINE_GAP if self._compact_panel else 0.0),
                 metric_font_size,
                 theme.text,
                 anchor="center",
