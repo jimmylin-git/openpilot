@@ -280,6 +280,10 @@ class StatusLabelTests(unittest.TestCase):
     def test_scroll_is_independent_of_frame_count(self):
         self.hud._measure_text.return_value = (300.0, 30.0)
         self.draw_name("Long model name", 10.0)
+        self.assertEqual(
+            self.hud._draw_text.call_args.args[1],
+            self.ns["CHESTNUT_ICON_CENTER_X"] - self.ns["MODEL_LABEL_MAX_WIDTH"] / 2,
+        )
         x_without_frames = self.draw_name("Long model name", 13.0).args[1]
         for now in (10.5, 11.0, 11.5, 12.0, 12.5):
             self.draw_name("Long model name", now)

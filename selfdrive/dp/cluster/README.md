@@ -38,19 +38,24 @@ in its native 1920x462 canvas. Text/icons retain their aspect ratios; the
 central status row is uniformly reduced and inset, while the road/vehicle
 layer is clipped to the central area below it (native x=560–1360,
 y=125–462), near the side-frame inner edges and below the top-row labels.
-The compact 3D camera applies a uniform 1.15x perspective zoom to roads and
-vehicles without stretching their proportions; projected radar labels use
-the same camera. The system metrics stay in
+The compact 3D camera applies a uniform 1.15x perspective zoom, followed by
+an additional 1.95x horizontal projection stretch (1.3x followed by 1.5x) to roads and vehicles;
+projected radar labels follow the same horizontal stretch. The system metrics stay in
 the side panels, with MEM/CPU centered at x=310 and TEMP at x=1610 and
-all three metrics raised 30 native pixels to clear the background artwork.
+all three metrics raised 30 native pixels and their fonts enlarged 20%
+to clear the background artwork.
 Speed digits and gear text are 20% larger
 than the initial 9.2-inch layout; their centers and the km/h font size are
 unchanged relative to this positioning. The top icon row (including turn
 signals and GPU/model information) is shifted up 30 native pixels without
 moving AUTO HOLD or the ACC-off wheel/angle animation. The latter uses the compact central
 layout. The 12.3-inch HUD coordinates, sizes and road rendering are unchanged.
-The compact AUTO HOLD label is raised 35 native pixels to sit between the
-top-row details and the centered ACC-off LFA wheel; its size and blink are unchanged.
+The compact AUTO HOLD label is lowered a net 45 native pixels (35 up, then 30 and 50 down)
+from its initial placement; its size and blink are unchanged.
+The compact top icons and their labels are enlarged another 30%. Turn signals
+move a total of 200 native pixels outward (50, then 100, then 50) from their previous centers. The centered ACC-off
+LFA wheel and angle retain their size and move down 50 native pixels, with a
+continuous transition to the enlarged engaged top-row LFA.
 The GPU model-name scrolling clip follows the compact top-row transform,
 keeping long labels inside the area directly below the GPU icon.
 When valid, live `carStateExt.autoBrakeHoldActive` reports actual brake hold

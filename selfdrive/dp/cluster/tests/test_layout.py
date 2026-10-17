@@ -57,7 +57,8 @@ def region_method(matrix):
     ("speed", (255, 350), (250, 240), 0.9),
     ("gear", (1615, 350), (1660, 240), 0.62),
     ("status", (960, 0), (960, 16), 0.7),
-    ("top_status", (960, 0), (960, -14), 0.7),
+    ("top_status", (960, 0), (960, -14), 0.91),
+    ("lfa", (960, 0), (960, -14), 0.91),
 ])
 def test_compact_native_centers_and_undistorted_sizes(region, source, target, scale):
     matrix = Matrix()
@@ -70,7 +71,7 @@ def test_compact_native_centers_and_undistorted_sizes(region, source, target, sc
     assert matrix.stack == []
 
 
-@pytest.mark.parametrize("region", ["speed", "gear", "status", "top_status"])
+@pytest.mark.parametrize("region", ["speed", "gear", "status", "top_status", "lfa"])
 def test_large_panel_does_not_change_existing_matrix(region):
     matrix = Matrix()
     with region_method(matrix)(SimpleNamespace(_compact_panel=False), region):
@@ -83,11 +84,11 @@ def test_compact_status_row_stays_between_side_panels_and_above_road():
     matrix.rl_scalef(1, 462 / 720, 1)
     with region_method(matrix)(SimpleNamespace(_compact_panel=True), "top_status"):
         # Include the full turn-signal texture on each side and the detail row.
-        left, _ = matrix.point(595 - 64, 94)
-        right, bottom = matrix.point(1325 + 64, 190)
-        assert left >= 580
-        assert right <= 1340
-        assert bottom <= 150
+        left, _ = matrix.point(960 + (504.5 - 960) / .91 - 64, 94)
+        right, bottom = matrix.point(960 + (1415.5 - 960) / .91 + 64, 190)
+        assert left >= 440
+        assert right <= 1480
+        assert bottom <= 160
     with region_method(matrix)(SimpleNamespace(_compact_panel=True), "status"):
         # ACC-off wheel and steering text remain within the shorter panel.
         _, off_bottom = matrix.point(960, 600)
@@ -113,7 +114,7 @@ def test_compact_top_row_moves_thirty_pixels_without_moving_other_status():
     with region(renderer, "top_status"):
         moved = matrix.point(960, 94)
         _, top = matrix.point(960, 94 - 64)
-    assert moved == pytest.approx((original[0], original[1] - 30))
+    assert moved == pytest.approx((original[0], -14 + 94 * .91))
     assert top >= 0
     calls = {}
     for method in RENDERER.body:
@@ -130,8 +131,27 @@ def test_compact_top_row_moves_thirty_pixels_without_moving_other_status():
                 if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and regions:
                     calls.setdefault(call.func.attr, set()).update(regions)
     for name in ("_draw_turn_signal", "_draw_acc_status_icon", "_draw_follow_gap_lane_icon",
-                 "_draw_lfa_status_icon", "_draw_drive_mode_icon", "_draw_chestnut_icon", "_draw_model_label"):
+                 "_draw_drive_mode_icon", "_draw_chestnut_icon", "_draw_model_label"):
         assert calls[name] == {"top_status"}
+    assert calls["_draw_lfa_status_icon"] == {"lfa"}
+
+
+def test_compact_acc_off_lfa_moves_down_fifty_pixels_without_growing():
+    matrix = Matrix()
+    matrix.rl_scalef(1, 462 / 720, 1)
+    with region_method(matrix)(SimpleNamespace(_compact_panel=True, _acc_layout_progress=0.), "lfa"):
+        assert matrix.point(960, 360) == pytest.approx((960, -14 + .7 * 360 + 50))
+        assert matrix.transform[:2] == pytest.approx((.7, .7))
+
+
+@pytest.mark.parametrize("side,original,target", [("left", 595, 504.5), ("right", 1325, 1415.5)])
+def test_compact_turn_signals_move_two_hundred_native_pixels_outward(side, original, target):
+    method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "_draw_turn_signal")
+    block = next(n for n in method.body if isinstance(n, ast.If) and ast.unparse(n.test) == "self._compact_panel")
+    namespace = {"self": SimpleNamespace(_compact_panel=True), "side": side, "cx": original,
+                 "DESIGN_WIDTH": 1920, "COMPACT_TOP_STATUS_SCALE": .91}
+    exec(compile(ast.Module(body=[block], type_ignores=[]), "<turn signal position>", "exec"), namespace)
+    assert 960 + (namespace["cx"] - 960) * .91 == pytest.approx(target)
 
 
 @pytest.mark.parametrize("compact", [False, True])
@@ -170,6 +190,48 @@ def test_scene_zoom_is_uniform_and_compact_only(compact, fov):
     assert magnification == pytest.approx(1.15 if compact else 1.)
     camera = method.body[2].value
     assert ast.unparse(camera.args[3]) == "fovy_deg"
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_compact_projection_grows_only_horizontal_axis(compact):
+    method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "_draw_scene")
+    block = next(n for n in method.body if isinstance(n, ast.If)
+                 and ast.unparse(n.test) == "self._compact_panel" and "projection" in ast.unparse(n))
+    projection = SimpleNamespace(m0=2., m5=3., m10=4.)
+    written = []
+    namespace = {
+        "self": SimpleNamespace(_compact_panel=compact), "COMPACT_SCENE_WIDTH_SCALE": 1.95,
+        "rl": SimpleNamespace(rl_get_matrix_projection=lambda: projection,
+                              rl_set_matrix_projection=lambda matrix: written.append(matrix)),
+    }
+    exec(compile(ast.Module(body=[block], type_ignores=[]), "<horizontal zoom>", "exec"), namespace)
+    assert projection.m0 == pytest.approx(3.9 if compact else 2.)
+    assert (projection.m5, projection.m10) == (3., 4.)
+    assert len(written) == int(compact)
+
+
+@pytest.mark.parametrize("horizontal_scale", [1., 1.95])
+def test_label_projection_matches_horizontal_scene_zoom(horizontal_scale):
+    method = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == "world_to_screen_label_anchor")
+    namespace = {"math": math, "camera_depth_m": lambda *args: 10.,
+                 "rl": SimpleNamespace(get_world_to_screen_ex=lambda *args: SimpleNamespace(x=1100., y=300.))}
+    exec(compile(ast.Module(body=[method], type_ignores=[]), "<label projection>", "exec"), namespace)
+    screen = namespace["world_to_screen_label_anchor"](None, None, 1920, 462, horizontal_scale)
+    assert screen.x == pytest.approx(960 + 140 * horizontal_scale)
+    assert screen.y == 300.
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_metric_font_enlarges_twenty_percent_only_on_compact_panel(compact):
+    method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "_draw_system_top_metrics")
+    assignment = next(n for n in method.body if isinstance(n, ast.Assign)
+                      and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "metric_font_size")
+    namespace = {"self": SimpleNamespace(_compact_panel=compact), "TOP_SYSTEM_METRIC_FONT_SIZE": 24.}
+    exec(compile(ast.Module(body=[assignment], type_ignores=[]), "<metric font>", "exec"), namespace)
+    assert namespace["metric_font_size"] == pytest.approx(28.8 if compact else 24.)
+    calls = [n for n in ast.walk(method) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute) and n.func.attr == "_draw_text"]
+    assert all(ast.unparse(n.args[3]) == "metric_font_size" for n in calls)
 
 
 @pytest.mark.parametrize("compact", [False, True])
