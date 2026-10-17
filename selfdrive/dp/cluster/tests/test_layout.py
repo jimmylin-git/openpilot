@@ -84,8 +84,8 @@ def test_compact_status_row_stays_between_side_panels_and_above_road():
     matrix.rl_scalef(1, 462 / 720, 1)
     with region_method(matrix)(SimpleNamespace(_compact_panel=True), "top_status"):
         # Include the full turn-signal texture on each side and the detail row.
-        left, _ = matrix.point(960 + (504.5 - 960) / .91 - 64, 94)
-        right, bottom = matrix.point(960 + (1415.5 - 960) / .91 + 64, 190)
+        left, _ = matrix.point(960 + (604.5 - 960) / .91 - 64, 94)
+        right, bottom = matrix.point(960 + (1315.5 - 960) / .91 + 64, 190)
         assert left >= 440
         assert right <= 1480
         assert bottom <= 160
@@ -144,8 +144,8 @@ def test_compact_acc_off_lfa_moves_down_fifty_pixels_without_growing():
         assert matrix.transform[:2] == pytest.approx((.7, .7))
 
 
-@pytest.mark.parametrize("side,original,target", [("left", 595, 504.5), ("right", 1325, 1415.5)])
-def test_compact_turn_signals_move_two_hundred_native_pixels_outward(side, original, target):
+@pytest.mark.parametrize("side,original,target", [("left", 595, 604.5), ("right", 1325, 1315.5)])
+def test_compact_turn_signals_move_one_hundred_native_pixels_outward(side, original, target):
     method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "_draw_turn_signal")
     block = next(n for n in method.body if isinstance(n, ast.If) and ast.unparse(n.test) == "self._compact_panel")
     namespace = {"self": SimpleNamespace(_compact_panel=True), "side": side, "cx": original,
@@ -200,17 +200,17 @@ def test_compact_projection_grows_only_horizontal_axis(compact):
     projection = SimpleNamespace(m0=2., m5=3., m10=4.)
     written = []
     namespace = {
-        "self": SimpleNamespace(_compact_panel=compact), "COMPACT_SCENE_WIDTH_SCALE": 1.95,
+        "self": SimpleNamespace(_compact_panel=compact), "COMPACT_SCENE_WIDTH_SCALE": 1.56,
         "rl": SimpleNamespace(rl_get_matrix_projection=lambda: projection,
                               rl_set_matrix_projection=lambda matrix: written.append(matrix)),
     }
     exec(compile(ast.Module(body=[block], type_ignores=[]), "<horizontal zoom>", "exec"), namespace)
-    assert projection.m0 == pytest.approx(3.9 if compact else 2.)
+    assert projection.m0 == pytest.approx(3.12 if compact else 2.)
     assert (projection.m5, projection.m10) == (3., 4.)
     assert len(written) == int(compact)
 
 
-@pytest.mark.parametrize("horizontal_scale", [1., 1.95])
+@pytest.mark.parametrize("horizontal_scale", [1., 1.56])
 def test_label_projection_matches_horizontal_scene_zoom(horizontal_scale):
     method = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == "world_to_screen_label_anchor")
     namespace = {"math": math, "camera_depth_m": lambda *args: 10.,

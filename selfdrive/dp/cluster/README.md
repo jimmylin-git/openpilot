@@ -39,7 +39,7 @@ central status row is uniformly reduced and inset, while the road/vehicle
 layer is clipped to the central area below it (native x=560–1360,
 y=125–462), near the side-frame inner edges and below the top-row labels.
 The compact 3D camera applies a uniform 1.15x perspective zoom, followed by
-an additional 1.95x horizontal projection stretch (1.3x followed by 1.5x) to roads and vehicles;
+an additional 1.56x horizontal projection stretch (1.3x, then 1.5x, then 0.8x) to roads and vehicles;
 projected radar labels follow the same horizontal stretch. The system metrics stay in
 the side panels, with MEM/CPU centered at x=310 and TEMP at x=1610 and
 all three metrics raised 30 native pixels and their fonts enlarged 20%
@@ -50,10 +50,10 @@ unchanged relative to this positioning. The top icon row (including turn
 signals and GPU/model information) is shifted up 30 native pixels without
 moving AUTO HOLD or the ACC-off wheel/angle animation. The latter uses the compact central
 layout. The 12.3-inch HUD coordinates, sizes and road rendering are unchanged.
-The compact AUTO HOLD label is lowered a net 45 native pixels (35 up, then 30 and 50 down)
+The compact AUTO HOLD label is raised a net 5 native pixels
 from its initial placement; its size and blink are unchanged.
 The compact top icons and their labels are enlarged another 30%. Turn signals
-move a total of 200 native pixels outward (50, then 100, then 50) from their previous centers. The centered ACC-off
+move a net 100 native pixels outward from their original centers. The centered ACC-off
 LFA wheel and angle retain their size and move down 50 native pixels, with a
 continuous transition to the enlarged engaged top-row LFA.
 The GPU model-name scrolling clip follows the compact top-row transform,

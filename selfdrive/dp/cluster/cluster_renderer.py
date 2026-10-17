@@ -167,7 +167,7 @@ MODEL_LABEL_SCROLL_PAUSE_S = 1.5
 COMPACT_TOP_STATUS_SCALE = 0.7 * 1.3
 COMPACT_TOP_STATUS_Y = -14.0
 COMPACT_SCENE_ZOOM = 1.15
-COMPACT_SCENE_WIDTH_SCALE = 1.3 * 1.5
+COMPACT_SCENE_WIDTH_SCALE = 1.3 * 1.5 * 0.8
 TOP_STATUS_DETAIL_CENTER_Y = (
     TURN_SIGNAL_CENTER_Y
     + max(FOLLOW_GAP_LANE_ICON_SIZE, LFA_STATUS_ICON_SIZE) * 0.5
@@ -836,7 +836,7 @@ class ClusterUiRenderer:
         rl.rl_scalef(self.width / DESIGN_WIDTH, self.height / DESIGN_HEIGHT, 1.0)
         try:
             with self._panel_region("status"):
-                self._draw_text("AUTO HOLD", DESIGN_WIDTH * 0.5, 180.0 + 80.0 / 0.7 if self._compact_panel else 230.0,
+                self._draw_text("AUTO HOLD", DESIGN_WIDTH * 0.5, 180.0 + 30.0 / 0.7 if self._compact_panel else 230.0,
                                 36.0, color, anchor="center")
         finally:
             rl.rl_pop_matrix()
@@ -3576,7 +3576,7 @@ class ClusterUiRenderer:
         cx = TURN_SIGNAL_LEFT_CENTER_X if side == "left" else TURN_SIGNAL_RIGHT_CENTER_X
         if self._compact_panel:
             native_x = DESIGN_WIDTH * 0.5 + (cx - DESIGN_WIDTH * 0.5) * 0.7
-            native_x += -200.0 if side == "left" else 200.0
+            native_x += -100.0 if side == "left" else 100.0
             cx = DESIGN_WIDTH * 0.5 + (native_x - DESIGN_WIDTH * 0.5) / COMPACT_TOP_STATUS_SCALE
         cy = TURN_SIGNAL_CENTER_Y
         texture = self._left_turn_signal_texture if side == "left" else self._right_turn_signal_texture
