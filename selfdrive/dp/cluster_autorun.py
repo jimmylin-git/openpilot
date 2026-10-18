@@ -21,7 +21,7 @@ RAYLIB_BACKEND = "comma"
 DEFAULT_LOG_PATH = "/tmp/cluster.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
 RESTART_DELAY_S = 5.0
-DEFAULT_FPS = "25"
+DEFAULT_FPS = "60"
 STARTUP_TIMEOUT_S = 90.0
 HEARTBEAT_TIMEOUT_S = 30.0
 
@@ -33,7 +33,7 @@ def cluster_env() -> dict[str, str]:
 
 
 def cluster_fps() -> str:
-    # Keep the autorun HUD at the same 25 FPS as the renderer/encoder defaults.
+    # Keep the autorun HUD at the same 60 FPS as the renderer/encoder defaults.
     return os.environ.get("CLUSTER_FPS", "").strip() or DEFAULT_FPS
 
 

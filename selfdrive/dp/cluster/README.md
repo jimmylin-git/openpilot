@@ -14,7 +14,7 @@ icon aspect-ratio fix, USB output, native H.264 encoding, settings, radar/lead
 indicators. Lead-departure detection and the `READY TO GO` reminder have been
 removed; normal radar/lead visualization is unchanged. This removal alone does
 not establish the cause of cluster freezes.
-Manager autorun uses 25 FPS (offroad rendering remains 1 FPS).
+Manager autorun targets 60 FPS (offroad rendering remains 1 FPS).
 Live offroad mode displays P as the default gear; onroad retains the actual gear.
 DP **Display Mode** now includes **TR-9.2** (USB PID `0x0092`,
 1920x462) and **TR-12.3** (USB PID `0x0123`, 1920x720).
@@ -266,9 +266,9 @@ Keep `--usb-h264-input-format nv12` for native hardware testing. Direct RGB
 USERPTR diagnostics were removed after measured device tests showed corrupted
 output across direct and hidden 32-bit RGB variants.
 
-Manager autostart passes `--fps 25` by default (`CLUSTER_FPS` remains available
+Manager autostart passes `--fps 60` by default (`CLUSTER_FPS` remains available
 for explicit test overrides). The configured renderer, H264 encoder input,
-TURZX display command, and live setting modes default to 25 FPS onroad,
+TURZX display command, and live setting modes default to 60 FPS onroad,
 regardless of whether Chestnut is active.
 Explicit CLI `--fps`, `--usb-h264-fps`, and `--usb-display-fps` arguments remain
 available for diagnostics. Chestnut loading/active no longer imposes an extra
@@ -303,7 +303,7 @@ range `1..99`, default `10`.
 Explicit `CLUSTER_REALTIME`, `CLUSTER_REALTIME_CORES`, or
 `CLUSTER_REALTIME_PRIORITY` environment values still win.
 The manager launches `cluster_autorun` as the single live entry point. The
-supervisor passes `--input live` with 25 FPS, H264 automatic encoder selection
+supervisor passes `--input live` with 60 FPS, H264 automatic encoder selection
 and automatic theme. The
 `ClusterHudLiveFps`, `ClusterHudEncoder`, `ClusterHudTheme`, and
 `ClusterHudBrightness` names are currently read-only integration points unless
@@ -322,7 +322,7 @@ unset or unknown keys from `/data/cluster_params/<key>` (override with
 ```bash
 mkdir -p /data/cluster_params
 echo -n 1 > /data/cluster_params/ClusterHudTheme      # 0 auto, 1 dark, 2 light
-echo -n 4 > /data/cluster_params/ClusterHudLiveFps    # all modes currently resolve to 25 FPS
+echo -n 4 > /data/cluster_params/ClusterHudLiveFps    # all modes currently resolve to 60 FPS
 ```
 
 Unset keys keep the built-in defaults.
@@ -498,8 +498,8 @@ the small distance and mode items do not scale or fade. This does not increase
 the actual display frame rate or add additional rendered frames.
 Turn-signal positions do not change.
 When `--fps` is omitted, `ClusterHudLiveFps` is polled about once per second,
-but every supported setting value (`0` through `6`) now resolves to 25 FPS.
-Direct route/replay CLI runs also use the 25 FPS default. Explicit `--fps`
+but every supported setting value (`0` through `6`) now resolves to 60 FPS.
+Direct route/replay CLI runs also use the 60 FPS default. Explicit `--fps`
 remains a fixed diagnostic override. For H264 USB output, changing the
 effective FPS exits the current HUD process so autostart can relaunch with a
 matching encoder FPS when a launcher is present.
@@ -755,10 +755,10 @@ USB frame upload runs in no-ACK mode by default because some TURZX panels accept
 image data but never return a frame-upload response. Use `--usb-wait-frame-ack`
 only when testing a panel/driver combination known to reply after each frame.
 
-Manager autorun uses H264 at 25 FPS, trying the native encoder first and
+Manager autorun targets H264 at 60 FPS, trying the native encoder first and
 falling back to ffmpeg when the native bridge or V4L2 encoder is unavailable.
-Automatic bitrate at 25 FPS is 5.85 Mbps (about 0.731 MB/s before transport
-overhead); higher diagnostic rates retain the 7 Mbps cap. This is a target refresh rate,
+Automatic bitrate at 60 FPS is capped at a 7 Mbps target (about 0.875 MB/s before transport
+overhead). Actual variable bitrate and USB traffic can differ. This is a target refresh rate,
 not a guaranteed measured rate; busy-frame dropping still applies with Chestnut.
 The normal comma installation build and prebuilt release build both compile
 `system/loggerd/libcluster_h264_encoder_bridge.so` automatically.
