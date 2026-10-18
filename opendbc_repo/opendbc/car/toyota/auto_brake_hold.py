@@ -33,8 +33,8 @@ BRAKE_HOLD_IDLE = 0
 BRAKE_HOLD_COUNTING = 1
 BRAKE_HOLD_ACTIVE = 2
 
-# 呼叫頻率為 50Hz（carcontroller 每 2 個 frame 呼叫一次），100 次 = 2 秒，與 candy 相同
-BRAKE_HOLD_TIMER = 100
+# 呼叫頻率為 50Hz（carcontroller 每 2 個 frame 呼叫一次），50 次 = 1 秒
+BRAKE_HOLD_TIMER = 50
 # SPEED 模式的速度門檻 (m/s)，5 m/s = 18 km/h，與 candy 相同
 BRAKE_HOLD_SPEED_THRESHOLD = 5.
 
@@ -77,7 +77,7 @@ class AutoBrakeHold:
       elif self.state == BRAKE_HOLD_COUNTING:
         # 持續允許 -> 計時，超過門檻進入保持
         self.counter += 1
-        if self.counter > BRAKE_HOLD_TIMER:
+        if self.counter >= BRAKE_HOLD_TIMER:
           self.state = BRAKE_HOLD_ACTIVE
 
       elif self.state == BRAKE_HOLD_ACTIVE:
