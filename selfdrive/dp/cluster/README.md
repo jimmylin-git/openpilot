@@ -335,6 +335,10 @@ dark is 5%, midpoint rounds to 38%, and bright is 70%.
 `1` through `100` select fixed brightness percentages, limited to `5..70`.
 Missing ambient samples use the default brightness of `13`.
 After the boot grace period, live USB output dims to `1` while offroad.
+Each transition into offroad starts a fresh 10-second timer. Once it expires,
+both TR models render a black frame while retaining 1% backlight brightness;
+no 0% brightness command is sent. USB streaming and heartbeat continue at the
+offroad rate. Returning onroad cancels the timer and restores the HUD.
 Brightness settings and ambient light are checked once per second onroad.
 Offroad, the dim level is applied once after the boot grace period and
 brightness polling stops until the next onroad transition. Brightness commands

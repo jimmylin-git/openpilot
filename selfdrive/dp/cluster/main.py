@@ -96,6 +96,7 @@ BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
 # effectively black without touching that path.
 OFFROAD_USB_BRIGHTNESS = 1
 OFFROAD_RENDER_FPS = 1.0
+OFFROAD_BLACKOUT_SECONDS = 10.0
 # The offroad dim-to-black check is only trusted once the process has been
 # running this long (avoids the boot-time window where vehicle_started()
 # has not yet settled and could read False before the first onroad
@@ -476,6 +477,10 @@ def resolved_usb_brightness(
     return min(MAX_USB_BRIGHTNESS, max(MIN_USB_BRIGHTNESS, DEFAULT_USB_BRIGHTNESS))
 
 
+def offroad_blackout_active(offroad_since: float | None, now: float) -> bool:
+    return offroad_since is not None and now - offroad_since >= OFFROAD_BLACKOUT_SECONDS
+
+
 def build_rgba_color_test_pattern(width: int, height: int) -> bytearray:
     half_width = max(1, width // 2)
     half_height = max(1, height // 2)
@@ -728,6 +733,7 @@ def run_demo(
     usb_dropped_frames = 0
     display_actual_fps: float | None = None
     is_offroad = False
+    offroad_since: float | None = None
     brightness_refresh_pending = False
     adaptive_fps = AdaptiveFpsController(target_fps)
     render_fps = adaptive_fps.current_fps
@@ -1014,6 +1020,7 @@ def run_demo(
                 next_is_offroad = vehicle_started is False
                 if next_is_offroad != is_offroad:
                     is_offroad = next_is_offroad
+                    offroad_since = time.perf_counter() if is_offroad else None
                     brightness_refresh_pending = True
                     render_fps = OFFROAD_RENDER_FPS if is_offroad else adaptive_fps.current_fps
                     frame_interval = 1.0 / render_fps if render_fps > 0 else 0.0
@@ -1026,6 +1033,7 @@ def run_demo(
                         flush=True,
                     )
                 renderer.set_world_enabled(not is_offroad)
+                renderer.set_blackout(offroad_blackout_active(offroad_since, time.perf_counter()))
                 center_clock_text = time.strftime("%H:%M:%S")
                 profile.add_samples(live_source.profile_samples())
                 profile.add_elapsed("source.live_update", profile_stage)

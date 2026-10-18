@@ -547,6 +547,7 @@ class ClusterUiRenderer:
         self.hidden = False
         self._window_open = False
         self._world_enabled = True
+        self._blackout = False
         self._font = None
         self._owns_font = False
         self._capture_target = None
@@ -628,6 +629,9 @@ class ClusterUiRenderer:
 
     def set_world_enabled(self, enabled: bool) -> None:
         self._world_enabled = bool(enabled)
+
+    def set_blackout(self, enabled: bool) -> None:
+        self._blackout = bool(enabled)
 
     def set_target_fps(self, target_fps: int) -> None:
         self.target_fps = max(0, int(target_fps))
@@ -807,6 +811,9 @@ class ClusterUiRenderer:
 
     def render(self, state: ClusterUiState, signal_lights: tuple[bool, bool] | None = None) -> None:
         """Draw one frame into the currently active raylib render target."""
+        if self._blackout:
+            rl.clear_background(rl_color((0, 0, 0)))
+            return
         if signal_lights is None:
             signal_lights = self._turn_signal_lights(state)
         layout_progress = self._update_acc_layout_progress(state)
