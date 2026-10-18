@@ -32,7 +32,7 @@ from openpilot.common.swaglog import cloudlog
 from dragonpilot.egpu.bundles import (cached_bundles, find_bundle, get_active_bundle, pointer_for, onnx_present, model_compiled,
                                       warps_present)
 from dragonpilot.egpu.constants import (MANIFEST_CACHE_TIMEOUT_S, CAMERA_CONFIGS, CACHE_TAG, TG_FLAGS_QCOM, TG_FLAGS_AMD, EGPU_DIR,
-                                        P_PRESENT, P_ACTIVE_BUNDLE, P_MANIFEST_SYNC, P_POINTERS, P_DOWNLOAD_REF, P_FAILED, P_LOADING, P_RUNNING,
+                                        P_PRESENT, P_ACTIVE_BUNDLE, P_MANIFEST_SYNC, P_POINTERS, P_DOWNLOAD_REF, P_FAILED, P_LOADING, P_RUNNING, P_READY,
                                         P_STATUS, P_DELETE_REF, P_CLEAR_CACHE, P_ENABLED, P_SEEN, P_AUTO_DEFAULT, DEFAULT_REF, AUTO_RETRY_S,
                                         ST_IDLE, ST_RESOLVING, ST_DOWNLOADING,
                                         ST_COMPILING_WARP, ST_COMPILING, ST_DONE, ST_FAILED, ST_CANCELLED, ST_WAITING_EGPU,
@@ -67,7 +67,7 @@ class EgpuModelManager:
     self.sm.update(0)
     loading = self.params.get_bool(P_LOADING)
     running = self.params.get_bool(P_RUNNING)
-    if self.params.get_bool(P_FAILED) or not (loading or running):
+    if self.params.get_bool(P_FAILED) or self.params.get_bool(P_READY) or not (loading or running):
       self._model_wait_started = None
       self._last_model_output = None
       return
@@ -87,7 +87,7 @@ class EgpuModelManager:
       expired = now - self._model_wait_started >= FIRST_OUTPUT_TIMEOUT
       reason = f"no first big-model output within {FIRST_OUTPUT_TIMEOUT}s"
     if expired:
-      cloudlog.error(f"egpu: {reason}; failing this drive for stock fallback")
+      cloudlog.error(f"egpu: {reason}; requesting small-model fallback and background retry")
       self.params.put_bool(P_FAILED, True, block=True)
 
   # ------------------------------------------------------------------ status
@@ -356,7 +356,7 @@ class EgpuModelManager:
 
     if self.params.get_bool("IsOnroad"):
       if not present and (self.params.get_bool(P_LOADING) or self.params.get_bool(P_RUNNING)) and not self.params.get_bool(P_FAILED):
-        cloudlog.error("egpu: USB disappeared while the big model was loading/running; failing this drive for stock fallback")
+        cloudlog.error("egpu: USB disappeared while the big model was loading/running; requesting small-model fallback and background retry")
         self.params.put_bool(P_FAILED, True, block=True)
       self.check_model_progress()
       return

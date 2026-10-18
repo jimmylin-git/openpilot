@@ -777,11 +777,14 @@ this lock; the chunk pacing is not a guarantee of serialization with inference.
 The sender rechecks GPU activity every 0.5 seconds, including offroad/onroad
 transitions. Already-queued chunks are split into at most 32 KiB pieces while
 the GPU is active, without discarding bytes or moving the final-chunk marker.
-Both downloaded bundles and the built-in USBGPU model publish loading/running
-status for pacing and watchdog monitoring. The built-in path respects the eGPU
-enable switch; its first-output/stall timeout stops that process before restarting
-the stock model, with failure latched for the rest of the drive. Cluster labels
-that model `builtin`, rather than using unrelated selected-bundle metadata.
+Production now starts the local small model and loads the selected, compiled
+eGPU bundle in an isolated background worker. Loading/running status still drives
+USB pacing and watchdog monitoring; `dp_egpu_ready` means the loaded worker is
+waiting for control release. Failures return to the retained small model and
+retry loading after five seconds; switching to big is allowed only without
+control. The built-in USBGPU JIT is no longer selected by production modeld.
+Legacy diagnostic output can still be identified as `builtin` rather than using
+unrelated selected-bundle metadata.
 Brightness writes update their cache only after a successful USB write.
 A failed offroad dim remains pending and is retried on subsequent render cycles.
 
@@ -801,9 +804,9 @@ autorun to restart the HUD; normal backpressure is not treated as an error.
 The model label shows `stock` only after valid, live `modelV2` and
 `modelExt.bigModel=false` publications are observed onroad. Loading, failed,
 waiting, and offroad states do not imply that stock inference has started.
-The Chestnut failure icon stays latched for the drive even after stock output
-recovers. Built-in USB big-model output also sets `modelExt.bigModel=true`,
-so it cannot be mistaken for a small model.
+The Chestnut failure icon can recover within the drive when a new attempt starts
+or fresh big-model output resumes; it no longer stays latched until offroad.
+The selected model name is shown only with active big-model output.
 The regular status log's cumulative `usb_dropped` counter reports skipped
 busy-frame attempts. This reduces stale HUD backlog, not GPU/USB fault timeouts,
 and cannot cancel an already-running USB transfer.

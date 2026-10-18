@@ -43,10 +43,10 @@ class EgpuState(Enum):
   """dp - egpu: sunnypilot's ChestnutState for a downloaded eGPU bundle."""
   DISCONNECTED = "disconnected"
   NO_MODEL = "no_model"    # eGPU plugged in but not used: no bundle / feature off / not chosen for this drive
-  READY = "ready"          # a bundle will drive on the next drive
+  READY = "ready"          # compiled bundle or loaded worker waiting for control release
   LOADING = "loading"
   ACTIVE = "active"
-  FAILED = "failed"        # failed this drive, stock modeld drives
+  FAILED = "failed"        # small model drives while background retry is pending
 
 
 class UIState:
@@ -333,8 +333,10 @@ class UIState:
       state = EgpuState.LOADING
     elif self.started and p.get_bool(egpu_const.P_RUNNING):
       state = EgpuState.ACTIVE
+    elif p.get_bool(egpu_const.P_READY):
+      state = EgpuState.READY
     elif not self.egpu_enabled or self.egpu_bundle is None or self.started:
-      # onroad and neither loading nor running: the stock modeld drives this drive (route latched off)
+      # No worker is loading, ready or running: the local small model drives.
       state = EgpuState.NO_MODEL
     else:
       state = EgpuState.READY

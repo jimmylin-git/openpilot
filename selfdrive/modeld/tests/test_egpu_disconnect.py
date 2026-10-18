@@ -86,18 +86,10 @@ def test_failed_or_disabled_drive_never_selects_builtin_gpu(present, compiled, f
   assert namespace["use_builtin_usbgpu"](present, compiled, failed, enabled) == (present and compiled and not failed and enabled)
 
 
-def test_failed_builtin_stops_once_then_starts_stock():
+def test_manager_keeps_modeld_onroad_and_no_longer_launches_standalone_egpu():
   tree = ast.parse((ROOT / "system/manager/process_config.py").read_text(encoding="utf-8"))
-  fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "not_egpu_big_model")
-  namespace = {"EGPU_ROUTE": SimpleNamespace(update=lambda started, params: False),
-               "cloudlog": SimpleNamespace(error=lambda msg: None)}
-  module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), fn], type_ignores=[])
-  exec(compile(ast.fix_missing_locations(module), "<builtin fallback>", "exec"), namespace)
-  flags = {"dp_egpu_builtin": True, "dp_egpu_failed": False}
-  params = SimpleNamespace(get_bool=lambda key: flags[key], put_bool=lambda key, value, **kw: flags.update({key: value}))
-  should_run = namespace["not_egpu_big_model"]
-  assert should_run(True, params, None)
-  flags["dp_egpu_failed"] = True
-  assert not should_run(True, params, None)
-  assert should_run(True, params, None)
-  assert flags["dp_egpu_failed"]
+  processes = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+               and n.func.id in ("PythonProcess", "NativeProcess") and n.args and isinstance(n.args[0], ast.Constant)]
+  modeld = next(n for n in processes if n.args[0].value == "modeld")
+  assert ast.unparse(modeld.args[2]) == "only_onroad"
+  assert not any(n.args[0].value == "modeld_egpu" for n in processes)
