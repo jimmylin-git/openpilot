@@ -19,7 +19,6 @@ def brightness_namespace():
         "MIN_USB_BRIGHTNESS",
         "MAX_USB_BRIGHTNESS",
         "DEFAULT_USB_BRIGHTNESS",
-        "AUTO_USB_BRIGHTNESS_SCALE",
         "OFFROAD_USB_BRIGHTNESS",
     }
     nodes = [ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)]
@@ -55,16 +54,29 @@ class BrightnessTests(unittest.TestCase):
         self.resolve = self.ns["resolved_usb_brightness"]
 
     def test_manual_limits(self):
-        for setting, expected in ((0, 3), (1, 3), (3, 3), (10, 10), (13, 13), (15, 13), (30, 13), (100, 13)):
+        for setting, expected in ((0, 5), (1, 5), (3, 5), (5, 5), (10, 10), (13, 13), (30, 30), (70, 70), (100, 70)):
             with self.subTest(setting=setting):
                 self.assertEqual(self.resolve(setting, None, auto_enabled=False), expected)
 
-    def test_auto_limits_and_scaling(self):
+    def test_auto_limits_and_mapping(self):
         source = Mock()
-        for ambient, expected in ((0, 3), (3, 3), (10, 7), (13, 9), (15, 9), (30, 9), (100, 9)):
+        for ambient, expected in ((0, 5), (30, 5), (40, 14), (50, 24), (65, 38), (80, 51), (100, 70), (120, 70)):
             with self.subTest(ambient=ambient):
                 source.ambient_brightness_percent.return_value = ambient
                 self.assertEqual(self.resolve(0, source, auto_enabled=True), expected)
+
+    def test_auto_full_ambient_range_is_bounded_and_monotonic(self):
+        source = Mock()
+        previous = 5
+        for ambient in range(30, 101):
+            with self.subTest(ambient=ambient):
+                source.ambient_brightness_percent.return_value = ambient
+                brightness = self.resolve(0, source, auto_enabled=True)
+                self.assertGreaterEqual(brightness, previous)
+                self.assertLessEqual(brightness, 70)
+                self.assertEqual(brightness, round(5 + (ambient - 30) / 70 * 65))
+                previous = brightness
+        self.assertEqual(previous, 70)
 
     def test_missing_ambient_uses_thirteen(self):
         self.assertEqual(self.resolve(0, None, auto_enabled=True), 13)
@@ -74,11 +86,11 @@ class BrightnessTests(unittest.TestCase):
 
     def test_manual_setting_overrides_auto(self):
         source = Mock()
-        self.assertEqual(self.resolve(100, source, auto_enabled=True), 13)
+        self.assertEqual(self.resolve(100, source, auto_enabled=True), 70)
         source.ambient_brightness_percent.assert_not_called()
 
-    def test_offroad_dim_unchanged(self):
-        self.assertEqual(self.ns["OFFROAD_USB_BRIGHTNESS"], 2)
+    def test_offroad_dim_is_one_percent(self):
+        self.assertEqual(self.ns["OFFROAD_USB_BRIGHTNESS"], 1)
 
 
 if __name__ == "__main__":

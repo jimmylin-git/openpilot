@@ -379,6 +379,8 @@ class Device:
     self._interactive_timeout_callbacks: list[Callable] = []
     self._prev_timed_out = False
     self._awake: bool = True
+    self._display_mode_ready = False
+    self._first_onroad_time: float | None = None
     self._tr_display_mode: int | None = None
     self._tr_touch_active = False
 
@@ -512,6 +514,19 @@ class Device:
     return ignition
 
   def _update_wakefulness(self):
+    if not self._display_mode_ready:
+      now = time.monotonic()
+      if not ui_state.started:
+        self._first_onroad_time = None
+      elif self._first_onroad_time is None:
+        self._first_onroad_time = now
+      elif now - self._first_onroad_time >= 2.0:
+        self._display_mode_ready = True
+
+      if not self._display_mode_ready:
+        self._set_awake(True)
+        return
+
     tr_mode = ui_state.dp_ui_display_mode if ui_state.dp_ui_display_mode in (5, 6) else None
     if tr_mode != self._tr_display_mode:
       self._tr_touch_active = False

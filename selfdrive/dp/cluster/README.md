@@ -25,8 +25,13 @@ encoding resolution. The 9.2-inch model uses `assets/bg_9p2inches.png`;
 the 12.3-inch model retains `assets/bg.png`. Switching models stops the previous renderer before
 starting the new one. Selecting Std./MAIN+/OP+/MAIN-/OP- stops cluster
 autorun entirely, even if a USB display is attached. Changes are applied
-without restarting the device. In TR modes the main display starts asleep
-and wakes only on touch, not ignition or Auto Hold. It sleeps again after
+without restarting the device. On each UI process start, the main display
+stays awake until `ui_state.started` has remained onroad continuously for
+2 seconds. An offroad interruption resets this initial wait; after it completes,
+later onroad/offroad transitions do not repeat it. This gate applies to all
+display modes and does not delay the external USB renderer.
+Once the gate completes, TR modes put the main display to sleep; it then
+wakes only on touch, not ignition or Auto Hold. It sleeps again after
 the existing interaction timeout (normally 5 seconds onroad, 30 seconds
 with big UI, or 60 seconds offroad; explicit UI timeout overrides still apply).
 Turning ignition off does not restart this timer in TR modes.
@@ -324,11 +329,12 @@ Unset keys keep the built-in defaults.
 When `--usb-brightness` is omitted, USB launches follow `ClusterHudBrightness`:
 `0` auto follows the wide-road camera exposure after samples are available,
 using the same ambient-light estimate as the main UI and smoothing changes over
-time. The resolved brightness is limited to `3..13` and then scaled to 70%
-(so auto tops out at 9 after integer rounding); `1` through `100` are
-fixed brightness percentages, also limited to `3..13`.
+time. Both TR-9.2 and TR-12.3 use the same brightness control.
+Auto maps the estimator's `30..100` range linearly to `5..70`:
+dark is 5%, midpoint rounds to 38%, and bright is 70%.
+`1` through `100` select fixed brightness percentages, limited to `5..70`.
 Missing ambient samples use the default brightness of `13`.
-After the boot grace period, live USB output dims to `2` while offroad.
+After the boot grace period, live USB output dims to `1` while offroad.
 Brightness settings and ambient light are checked once per second onroad.
 Offroad, the dim level is applied once after the boot grace period and
 brightness polling stops until the next onroad transition. Brightness commands

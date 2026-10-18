@@ -5,21 +5,22 @@ from types import SimpleNamespace
 import pytest
 
 
-@pytest.mark.parametrize("mode", [5, 6])
-@pytest.mark.parametrize("pc", [False, True])
-def test_tr_screen_only_wakes_on_touch_and_times_out(mode, pc):
+def make_screen(mode, pc=False, ready=True):
     root = Path(__file__).resolve().parents[4]
     tree = ast.parse((root / "selfdrive/ui/ui_state.py").read_text(encoding="utf-8"))
     device = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Device")
     methods = [node for node in device.body if isinstance(node, ast.FunctionDef)
                and node.name in ("_update_wakefulness", "_ignition_state_ovrride")]
-    state = SimpleNamespace(dp_ui_display_mode=mode, ignition=True, dp_ui_auto_brake_hold_active=True)
+    state = SimpleNamespace(dp_ui_display_mode=mode, ignition=True, started=True, dp_ui_auto_brake_hold_active=True,
+                            dp_ui_display_mode_cruise_available=False, dp_ui_display_mode_cruise_enabled=False)
     app = SimpleNamespace(mouse_events=[])
     clock = SimpleNamespace(now=100.0)
     namespace = {"ui_state": state, "gui_app": app, "time": SimpleNamespace(monotonic=lambda: clock.now), "PC": pc}
     cls = ast.ClassDef(name="TestDevice", bases=[], keywords=[], body=methods, decorator_list=[])
     exec(compile(ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[])), "<display wake>", "exec"), namespace)
     screen = namespace["TestDevice"]()
+    screen._display_mode_ready = ready
+    screen._first_onroad_time = None
     screen._tr_display_mode = None
     screen._tr_touch_active = False
     screen._ignition = True
@@ -29,9 +30,15 @@ def test_tr_screen_only_wakes_on_touch_and_times_out(mode, pc):
     screen._interactive_timeout_callbacks = [lambda: callbacks.append("timeout")]
     screen._set_awake = lambda on: setattr(screen, "awake", on)
     screen._reset_interactive_timeout = lambda: setattr(screen, "_interaction_time", clock.now + 5)
+    return screen, state, app, clock, callbacks
 
+
+@pytest.mark.parametrize("mode", [5, 6])
+@pytest.mark.parametrize("pc", [False, True])
+def test_tr_screen_only_wakes_on_touch_and_times_out(mode, pc):
+    screen, state, app, clock, callbacks = make_screen(mode, pc)
     screen._update_wakefulness()
-    assert not screen.awake  # Initial boot grace, ignition and Auto Hold cannot wake it.
+    assert not screen.awake  # After startup, ignition and Auto Hold cannot wake it.
     app.mouse_events = [SimpleNamespace(left_down=True)]
     screen._update_wakefulness()
     assert screen.awake
@@ -58,3 +65,51 @@ def test_tr_screen_only_wakes_on_touch_and_times_out(mode, pc):
     state.dp_ui_display_mode = 0
     screen._update_wakefulness()
     assert screen.awake  # Stock ignition behavior restored immediately.
+
+
+@pytest.mark.parametrize("mode", range(7))
+def test_display_mode_waits_for_two_continuous_onroad_seconds_once(mode):
+    screen, state, app, clock, callbacks = make_screen(mode, ready=False)
+    state.dp_ui_auto_brake_hold_active = False
+    state.started = False
+    state.ignition = False
+    screen._interaction_time = 0
+    screen._update_wakefulness()
+    assert screen.awake
+    assert not screen._display_mode_ready
+    assert callbacks == []
+
+    clock.now = 200
+    state.started = state.ignition = True
+    screen._update_wakefulness()
+    clock.now = 201.99
+    screen._update_wakefulness()
+    assert screen.awake
+    assert not screen._display_mode_ready
+
+    state.started = state.ignition = False
+    screen._update_wakefulness()
+    assert screen._first_onroad_time is None
+    clock.now = 300
+    state.started = state.ignition = True
+    screen._update_wakefulness()
+    clock.now = 301.99
+    screen._update_wakefulness()
+    assert not screen._display_mode_ready
+    assert screen.awake
+    clock.now = 302
+    screen._update_wakefulness()
+    assert screen._display_mode_ready
+    assert screen.awake == (mode in (0, 3, 4))
+
+    state.started = state.ignition = False
+    screen._update_wakefulness()
+    assert screen._display_mode_ready
+    assert screen.awake == (mode not in (5, 6))
+    clock.now = 308
+    screen._update_wakefulness()
+    assert not screen.awake
+    state.started = state.ignition = True
+    screen._update_wakefulness()
+    assert screen._display_mode_ready
+    assert screen.awake == (mode in (0, 3, 4))

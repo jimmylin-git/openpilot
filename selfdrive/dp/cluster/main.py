@@ -76,10 +76,8 @@ from cluster_usb_pipeline import AsyncJpegUsbPipeline
 
 DEFAULT_FPS = CLUSTER_FIXED_FPS
 DEFAULT_USB_BRIGHTNESS = 13
-MAX_USB_BRIGHTNESS = 13
-MIN_USB_BRIGHTNESS = 3
-# Auto (ambient) brightness is dimmed to 70% after clamping.
-AUTO_USB_BRIGHTNESS_SCALE = 0.7
+MAX_USB_BRIGHTNESS = 70
+MIN_USB_BRIGHTNESS = 5
 DEFAULT_H264_BITRATE = "auto"
 DEFAULT_H264_GOP = 1
 H264_AUTO_BITRATE_BITS_PER_FPS = 234_000
@@ -96,7 +94,7 @@ BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
 # and crashes+relaunches the whole HUD process a few seconds after the
 # vehicle is turned off. A very low but nonzero value still reads as
 # effectively black without touching that path.
-OFFROAD_USB_BRIGHTNESS = 2
+OFFROAD_USB_BRIGHTNESS = 1
 OFFROAD_RENDER_FPS = 1.0
 # The offroad dim-to-black check is only trusted once the process has been
 # running this long (avoids the boot-time window where vehicle_started()
@@ -471,11 +469,9 @@ def resolved_usb_brightness(
     if live_source is not None:
         auto_brightness = live_source.ambient_brightness_percent()
         if auto_brightness is not None:
-            auto_brightness = max(
-                MIN_USB_BRIGHTNESS,
-                min(MAX_USB_BRIGHTNESS, normalize_cluster_brightness_percent(auto_brightness)),
-            )
-            return max(MIN_USB_BRIGHTNESS, int(round(auto_brightness * AUTO_USB_BRIGHTNESS_SCALE)))
+            # The ambient estimator returns 30 (dark) through 100 (bright).
+            fraction = max(0.0, min(1.0, (auto_brightness - 30.0) / 70.0))
+            return int(round(MIN_USB_BRIGHTNESS + fraction * (MAX_USB_BRIGHTNESS - MIN_USB_BRIGHTNESS)))
 
     return min(MAX_USB_BRIGHTNESS, max(MIN_USB_BRIGHTNESS, DEFAULT_USB_BRIGHTNESS))
 
