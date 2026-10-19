@@ -87,13 +87,8 @@ DEFAULT_H264_DIMENSION_ALIGN = 1
 THEME_PARAM_POLL_SECONDS = 1.0
 FPS_PARAM_POLL_SECONDS = 1.0
 BRIGHTNESS_PARAM_POLL_SECONDS = 1.0
-# Not literal 0: on this TURZX hardware, sending a brightness of exactly 0
-# while the process keeps running (as opposed to the brightness-off command
-# sent right before close()/exit) has been observed to make the physical USB
-# display reset/re-enumerate, which then surfaces as a "disconnected" error
-# and crashes+relaunches the whole HUD process a few seconds after the
-# vehicle is turned off. A very low but nonzero value still reads as
-# effectively black without touching that path.
+# Keep 1% during the offroad grace period, then explicitly turn the backlight off.
+# Some panels may re-enumerate at 0%; autorun handles frame-path disconnects.
 OFFROAD_USB_BRIGHTNESS = 1
 OFFROAD_RENDER_FPS = 1.0
 OFFROAD_BLACKOUT_SECONDS = 10.0
@@ -1092,8 +1087,16 @@ def run_demo(
             )
             brightness_now = time.perf_counter()
             past_boot_grace = brightness_now - start_time >= OFFROAD_DIM_BOOT_GRACE_SECONDS
-            brightness_poll_due = not is_offroad and brightness_now >= next_brightness_param_read
-            offroad_brightness_due = is_offroad and brightness_refresh_pending and past_boot_grace
+            brightness_poll_due = not is_offroad and (
+                brightness_refresh_pending or brightness_now >= next_brightness_param_read
+            )
+            offroad_usb_brightness = (
+                0 if offroad_blackout_active(offroad_since, brightness_now) else OFFROAD_USB_BRIGHTNESS
+            )
+            offroad_brightness_due = is_offroad and past_boot_grace and (
+                brightness_refresh_pending
+                or (usb_display is not None and usb_display.brightness != offroad_usb_brightness)
+            )
             if usb_display is not None and (brightness_poll_due or offroad_brightness_due):
                 if brightness_poll_due and usb_brightness_param_reader is not None:
                     next_brightness_setting = usb_brightness_param_reader.read()
@@ -1105,10 +1108,10 @@ def run_demo(
                             else f"{active_brightness_setting}%"
                         )
                         print(f"{CLUSTER_BRIGHTNESS_PARAM} updated: {brightness_text}", flush=True)
-                # Apply the offroad level once after the boot grace period;
-                # while offroad, do not poll brightness params or ambient light.
+                # Apply each offroad level once, retrying failed commands without
+                # polling brightness params or ambient light.
                 if is_offroad and past_boot_grace:
-                    next_usb_brightness = OFFROAD_USB_BRIGHTNESS
+                    next_usb_brightness = offroad_usb_brightness
                 elif live_source is not None and not live_source.live_data_available():
                     next_usb_brightness = MIN_USB_BRIGHTNESS
                 else:

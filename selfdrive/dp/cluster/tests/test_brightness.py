@@ -94,6 +94,80 @@ class BrightnessTests(unittest.TestCase):
     def test_offroad_dim_is_one_percent(self):
         self.assertEqual(self.ns["OFFROAD_USB_BRIGHTNESS"], 1)
 
+    def test_live_brightness_blackout_retry_and_onroad_recovery(self):
+        tree = ast.parse((CLUSTER_DIR / "main.py").read_text(encoding="utf-8"))
+        run = next(n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                   and any(isinstance(t, ast.Name) and t.id == "brightness_now" for t in n.targets))
+        # Execute the actual contiguous brightness block without GPU/USB imports.
+        body = next(n.body for n in ast.walk(tree) if isinstance(n, ast.While) and run in n.body)
+        start = body.index(run)
+        end = next(i for i in range(start, len(body)) if isinstance(body[i], ast.If)
+                   and "brightness_poll_due or offroad_brightness_due" in ast.unparse(body[i].test))
+        code = compile(ast.Module(body=body[start:end + 1], type_ignores=[]), "<live brightness>", "exec")
+        clock = SimpleNamespace(now=100.0)
+        display = SimpleNamespace(brightness=38)
+        writes = []
+        fail = False
+        def set_brightness(value):
+            writes.append(value)
+            if fail:
+                raise RuntimeError("USB timeout")
+            display.brightness = value
+        display.set_brightness = set_brightness
+        source = Mock()
+        reader = Mock()
+        reader.read.return_value = 38
+        ns = {
+            **self.ns, "time": SimpleNamespace(perf_counter=lambda: clock.now),
+            "start_time": 0, "OFFROAD_DIM_BOOT_GRACE_SECONDS": 10,
+            "BRIGHTNESS_PARAM_POLL_SECONDS": 1, "CLUSTER_BRIGHTNESS_PARAM": "brightness",
+            "is_offroad": True, "offroad_since": 100.0, "brightness_refresh_pending": True,
+            "next_brightness_param_read": 1000, "usb_display": display,
+            "usb_brightness_param_reader": reader, "live_source": source,
+            "active_brightness_setting": 38, "usb_brightness_auto_enabled": True,
+            "print": lambda *args, **kwargs: None,
+        }
+        source.live_data_available.return_value = True
+        def step(now):
+            clock.now = now
+            exec(code, ns)
+        step(100)
+        self.assertEqual(writes, [1])
+        step(109.999)
+        self.assertEqual(writes, [1])
+        fail = True
+        step(110)
+        self.assertEqual(writes, [1, 0])
+        self.assertTrue(ns["brightness_refresh_pending"])
+        self.assertEqual(display.brightness, 1)
+        fail = False
+        step(111)
+        self.assertEqual(writes, [1, 0, 0])
+        self.assertFalse(ns["brightness_refresh_pending"])
+        step(112)
+        self.assertEqual(writes, [1, 0, 0])
+        reader.read.assert_not_called()
+        source.ambient_brightness_percent.assert_not_called()
+        ns.update(is_offroad=False, offroad_since=None, brightness_refresh_pending=True)
+        step(112.01)
+        self.assertEqual(writes[-1], 38)  # Restore immediately, even before the next poll.
+        reader.read.assert_called_once()
+        ns.update(is_offroad=True, offroad_since=120, brightness_refresh_pending=True)
+        step(120)
+        self.assertEqual(writes[-1], 1)
+        step(129.999)
+        self.assertEqual(writes[-1], 1)
+        step(130)
+        self.assertEqual(writes[-1], 0)
+        # Cold start: do not issue a dim command before the boot grace expires.
+        ns.update(start_time=200, offroad_since=200, brightness_refresh_pending=True)
+        display.brightness = 38
+        count = len(writes)
+        step(209.999)
+        self.assertEqual(len(writes), count)
+        step(210)
+        self.assertEqual(writes[-1], 0)
+
     def test_offroad_blackout_boundary_and_reentry(self):
         blackout = self.ns["offroad_blackout_active"]
         self.assertFalse(blackout(None, 1000))

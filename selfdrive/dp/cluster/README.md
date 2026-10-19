@@ -336,12 +336,17 @@ dark is 5%, midpoint rounds to 38%, and bright is 70%.
 Missing ambient samples use the default brightness of `13`.
 After the boot grace period, live USB output dims to `1` while offroad.
 Each transition into offroad starts a fresh 10-second timer. Once it expires,
-both TR models render a black frame while retaining 1% backlight brightness;
-no 0% brightness command is sent. USB streaming and heartbeat continue at the
-offroad rate. Returning onroad cancels the timer and restores the HUD.
+both TR models render a black frame and receive a 0% backlight command.
+This does not cut USB power. USB streaming and heartbeat continue at the
+offroad rate. Returning onroad cancels the timer, restores the HUD and immediately
+refreshes the configured onroad brightness. Some panels may reset/re-enumerate
+at 0%; frame-send disconnects still use the supervisor's restart path, and
+hardware wake/reconnect reliability must be verified on the panel.
 Brightness settings and ambient light are checked once per second onroad.
-Offroad, the dim level is applied once after the boot grace period and
-brightness polling stops until the next onroad transition. Brightness commands
+Offroad, the 1% level is applied after the boot grace period if the blackout timer
+has not expired; otherwise 0% is applied directly. Each level is sent only when
+needed, with failed writes retried, and brightness polling stops until the next
+onroad transition. Brightness commands
 use no-ACK command `14` during USB initialization and when the resolved
 brightness changes.
 
