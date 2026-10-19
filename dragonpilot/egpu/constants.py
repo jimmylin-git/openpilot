@@ -133,7 +133,7 @@ P_CLEAR_CACHE = "dp_egpu_clear_cache"        # BOOL  manager start  request: del
 P_LOADING = "dp_egpu_loading"                # BOOL  manager start | offroad  modeld_egpu is loading the model
 P_RUNNING = "dp_egpu_running"                # BOOL  manager start | offroad  big model is driving
 P_AUTO_DEFAULT = "dp_egpu_auto_default"     # BOOL  PERSISTENT   download + compile DEFAULT_BUNDLE by itself once (plan B)
-P_FAILED = "dp_egpu_failed"                  # BOOL  manager start | offroad  small model active pending retry
+P_FAILED = "dp_egpu_failed"                  # BOOL  manager start | offroad  big model failed this drive -> stock modeld
 
 BIG_MODEL_TIMEOUT = 120
 PCIE_WAIT = 15
@@ -152,4 +152,3 @@ ST_FAILED = "failed"
 ST_CANCELLED = "cancelled"
 ST_WAITING_EGPU = "waiting_egpu"    # downloaded, compile needs the eGPU plugged in
 BUSY_STATES = (ST_RESOLVING, ST_DOWNLOADING, ST_COMPILING_WARP, ST_COMPILING)
-P_READY = "dp_egpu_ready"  # Loaded worker waiting for control to be released.

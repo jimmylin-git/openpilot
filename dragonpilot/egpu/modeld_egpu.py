@@ -2,15 +2,14 @@
 """
 dp - modeld_egpu: dp's modeld main loop driving a big model compiled on this device for the eGPU.
 
-Legacy diagnostic entry point (cwd dragonpilot/egpu, `<python> ./modeld_egpu.py`), i.e. a
+Started by manager as a NativeProcess (cwd dragonpilot/egpu, `<manager python> ./modeld_egpu.py`), i.e. a
 fresh interpreter: manager preimports every PythonProcess module, so a forked one would inherit dp's
 tinygrad from tinygrad_repo. Here nothing is imported yet, so tg_env can put the vendored sunnypilot
 tinygrad (tinygrad_spm/, the one compile.py used) first on sys.path.
 
 Failure handling (sunnypilot: "big model unavailable until the next drive"): a load that fails or
-exceeds BIG_MODEL_TIMEOUT, or any exception while driving, sets dp_egpu_failed and exits.
-This diagnostic is not managed or restarted by production manager; production uses worker.py
-and keeps small-model fallback inside modeld instead.
+exceeds BIG_MODEL_TIMEOUT, or any exception while driving, sets dp_egpu_failed and exits. manager's
+route (dragonpilot/egpu/bundles.py EgpuRoute) then starts dp's stock modeld for the rest of the drive.
 """
 import tg_env  # first: vendored tinygrad on sys.path (this script's dir is sys.path[0])
 

@@ -108,7 +108,6 @@ class ChestnutHealthTests(unittest.TestCase):
         self.sampler = SystemStatsSampler()
         self.flags = {"dp_egpu_enabled": True, "dp_egpu_present": True,
                       "dp_egpu_loading": False, "dp_egpu_running": True, "dp_egpu_failed": False,
-                      "dp_egpu_ready": False,
                       "dp_egpu_builtin": False}
         self.params = Mock()
         def read_bool(key):
@@ -178,28 +177,15 @@ class ChestnutHealthTests(unittest.TestCase):
                     self.model.bigModel = False
                 self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
 
-    def test_failure_recovers_with_fresh_big_output_in_same_drive(self):
+    def test_failure_is_latched_until_offroad(self):
         self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
         self.model.bigModel = False
         self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
         self.model.bigModel = True
-        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
+        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
         self.device.started = False
         self.assertIsNone(self.sampler._read_chestnut_state())
         self.device.started = True
-        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
-
-    def test_background_retry_and_ready_wait_clear_old_failure(self):
-        self.flags["dp_egpu_failed"] = True
-        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_FAILED)
-        self.flags.update(dp_egpu_failed=False, dp_egpu_loading=True, dp_egpu_running=False)
-        self.model.bigModel = False
-        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_LOADING)
-        self.assertEqual(self.sampler._read_model_name(CHESTNUT_LOADING), "stock")
-        self.flags.update(dp_egpu_loading=False, dp_egpu_ready=True)
-        self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_LOADING)
-        self.flags.update(dp_egpu_ready=False, dp_egpu_running=True)
-        self.model.bigModel = True
         self.assertEqual(self.sampler._read_chestnut_state(), CHESTNUT_ACTIVE)
 
     def test_startup_waits_for_device_and_model(self):

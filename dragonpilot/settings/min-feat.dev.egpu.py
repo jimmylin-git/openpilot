@@ -13,7 +13,6 @@ ITEMS = [
   {"key": "dp_egpu_clear_cache", "flags": "CLEAR_ON_MANAGER_START", "param_type": "BOOL", "default": "0"},
   {"key": "dp_egpu_loading", "flags": "CLEAR_ON_MANAGER_START|CLEAR_ON_OFFROAD_TRANSITION", "param_type": "BOOL", "default": "0"},
   {"key": "dp_egpu_running", "flags": "CLEAR_ON_MANAGER_START|CLEAR_ON_OFFROAD_TRANSITION", "param_type": "BOOL", "default": "0"},
-  {"key": "dp_egpu_ready", "flags": "CLEAR_ON_MANAGER_START|CLEAR_ON_OFFROAD_TRANSITION", "param_type": "BOOL", "default": "0"},
   {"key": "dp_egpu_auto_default", "flags": "PERSISTENT", "param_type": "BOOL", "default": "1"},
   {"key": "dp_egpu_failed", "flags": "CLEAR_ON_MANAGER_START|CLEAR_ON_OFFROAD_TRANSITION", "param_type": "BOOL", "default": "0"},
 ]

@@ -54,7 +54,7 @@ def call_warp(warp, tfm, big_tfm, frame, big_frame):
   return warp(tfm=tfm, big_tfm=big_tfm, frame=frame, big_frame=big_frame)
 
 
-def init_device(log, device: str | None = None) -> None:
+def init_device(log) -> None:
   """Bring the GPU up now, on the caller's thread.
 
   tinygrad initialises the device on its first kernel run and spawns a libusb
@@ -64,7 +64,7 @@ def init_device(log, device: str | None = None) -> None:
   """
   try:
     from tinygrad.tensor import Tensor
-    Tensor([0.0], device=device).realize()
+    Tensor([0.0]).realize()
   except Exception:
     log.exception("jetlink: could not bring the gpu up before modeld goes realtime")
   # the same trap for tinygrad's compile pool (engine/worker.py): created on

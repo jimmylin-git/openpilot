@@ -136,7 +136,7 @@ class SystemStatsSampler:
                 self._params_unavailable = True
                 return None
         try:
-            from dragonpilot.egpu.constants import P_ENABLED, P_PRESENT, P_LOADING, P_RUNNING, P_FAILED, P_READY
+            from dragonpilot.egpu.constants import P_ENABLED, P_PRESENT, P_LOADING, P_RUNNING, P_FAILED
 
             if self._chestnut_sm is None:
                 from cereal import messaging
@@ -153,7 +153,6 @@ class SystemStatsSampler:
             loading = self._params.get_bool(P_LOADING)
             active = self._params.get_bool(P_RUNNING)
             failed = self._params.get_bool(P_FAILED)
-            ready = self._params.get_bool(P_READY)
             if sm.recv_frame["deviceState"] <= 0:
                 return CHESTNUT_LOADING if loading or active else None
             if not onroad:
@@ -168,10 +167,6 @@ class SystemStatsSampler:
                     for service in ("deviceState", "modelV2", "modelExt")
                 )
             )
-            # A new attempt can recover within the same drive.
-            self._chestnut_failed = False
-            if loading or ready or failed:
-                self._chestnut_model_seen = False
             self._chestnut_model_seen |= active and sm.updated["modelExt"] and big
             if failed or (self._chestnut_seen and (
                 not detected or not enabled or not sm.alive["deviceState"] or not sm.valid["deviceState"]
@@ -183,9 +178,9 @@ class SystemStatsSampler:
                 self._chestnut_failed = True
             if self._chestnut_failed:
                 return CHESTNUT_FAILED
-            if not detected or not enabled or not (loading or active or ready):
+            if not detected or not enabled or not (loading or active):
                 return None
-            if loading or ready or not self._chestnut_model_seen:
+            if loading or not self._chestnut_model_seen:
                 return CHESTNUT_LOADING
         except Exception:
             logging.getLogger(__name__).exception("Unable to read cluster Chestnut health")

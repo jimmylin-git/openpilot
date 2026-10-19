@@ -19,7 +19,7 @@ def load_definitions(path, names, namespace):
 
 def make_watchdog():
   clock = SimpleNamespace(now=100.0)
-  flags = {"loading": True, "running": False, "failed": False, "ready": False}
+  flags = {"loading": True, "running": False, "failed": False}
   writes, errors = [], []
 
   def put_bool(key, value, **kwargs):
@@ -48,7 +48,6 @@ def make_watchdog():
       "P_LOADING": "loading",
       "P_RUNNING": "running",
       "P_FAILED": "failed",
-      "P_READY": "ready",
       "FIRST_OUTPUT_TIMEOUT": 150,
       "MODEL_OUTPUT_TIMEOUT": 5,
       "cloudlog": SimpleNamespace(error=errors.append),
@@ -73,20 +72,21 @@ def test_timeout_constants_cover_loading_and_first_output():
   assert namespace["MODEL_OUTPUT_TIMEOUT"] == 5
 
 
-def test_small_first_startup_clears_watchdog_before_camera_wait():
+@pytest.mark.parametrize("builtin", [False, True])
+def test_builtin_initializes_watchdog_before_camera_wait_and_stock_clears_it(builtin):
   tree = ast.parse((ROOT / "selfdrive/modeld/modeld.py").read_text(encoding="utf-8"))
   main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
   block = next(n for n in main.body if isinstance(n, ast.If) and ast.unparse(n.test) == "not EGPU")
   assert main.body.index(block) < next(i for i, n in enumerate(main.body) if isinstance(n, ast.While))
   tick, clock, flags, _, writes, _, _ = make_watchdog()
-  namespace = {"EGPU": False, "P_RUNNING": "running", "P_LOADING": "loading", "P_READY": "ready", "P_FAILED": "failed",
+  namespace = {"EGPU": False, "USBGPU": builtin, "P_RUNNING": "running", "P_LOADING": "loading",
                "params": SimpleNamespace(put_bool=lambda key, value, **kw: flags.update({key: value}))}
   exec(compile(ast.Module(body=[block], type_ignores=[]), "<builtin startup flags>", "exec"), namespace)
-  assert not any(flags.values())
+  assert flags["loading"] == builtin and not flags["running"]
   tick()
   clock.now += 150
   tick()
-  assert writes == []
+  assert bool(writes) == builtin
 
 
 def test_first_output_deadline_is_bounded_and_failure_latches():
@@ -157,21 +157,6 @@ def test_inactive_watchdog_resets_for_next_attempt():
   tick()
   assert manager._model_wait_started == clock.now
   assert writes == []
-
-
-def test_ready_worker_does_not_expire_while_waiting_for_control_release():
-  tick, clock, flags, _, writes, _, manager = make_watchdog()
-  tick()
-  flags.update(loading=False, ready=True)
-  clock.now += 1000
-  tick()
-  assert manager._model_wait_started is None
-  assert writes == []
-  flags.update(ready=False, running=True)
-  tick()
-  clock.now += 5
-  tick()
-  assert writes == [("failed", True, {"block": True})]
 
 
 def test_reset_drains_both_devices_before_releasing_camera_mappings():
