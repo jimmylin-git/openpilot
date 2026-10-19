@@ -783,6 +783,12 @@ USB pacing and watchdog monitoring; `dp_egpu_ready` means the loaded worker is
 waiting for control release. Failures return to the retained small model and
 retry loading after five seconds; switching to big is allowed only without
 control. The built-in USBGPU JIT is no longer selected by production modeld.
+The parent explicitly initializes QCOM; USB AMD ownership stays in the worker.
+Both memfd camera frames receive a CPU cache clean before each worker inference.
+If resetting the retained small model fails, eGPU runtime flags are cleared and
+the failure is logged; modeld exits and manager restarts it onroad with fresh
+small-model history. Model output is interrupted during that restart.
+First-ever hotplug still requires another modeld start to enable the router.
 Legacy diagnostic output can still be identified as `builtin` rather than using
 unrelated selected-bundle metadata.
 Brightness writes update their cache only after a successful USB write.

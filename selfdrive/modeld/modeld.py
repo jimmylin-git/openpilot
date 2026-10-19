@@ -230,7 +230,7 @@ def main(demo=False, egpu_loader=None):
       jetlink_adapter.prepare()
     else:
       from jetlink.openpilot.warp import init_device
-      init_device(cloudlog)
+      init_device(cloudlog, device="QCOM")
     # USB GPU currently saturates a core so can't do this yet,
     # also need to move the aux USB interrupts for good timings
     config_realtime_process(7, 54)

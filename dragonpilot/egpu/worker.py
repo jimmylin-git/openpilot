@@ -22,6 +22,7 @@ def main():
   import mmap
   from multiprocessing.connection import Connection
   import numpy as np
+  from tinygrad.runtime.ops_qcom import dcache_flush
   from dragonpilot.egpu.constants import PCIE_WAIT, model_root, model_pkl_name, warp_pkl_name
   from dragonpilot.egpu.usb import wait_pcie_link
   from dragonpilot.egpu.runner import EgpuModelState
@@ -41,9 +42,16 @@ def main():
                           os.path.join(model_root(), model_pkl_name(bundle['sha256'])),
                           os.path.join(model_root(), warp_pkl_name(width, height)))
     model.warmup()
+    flush = dcache_flush().fxn
+    frame_start = frames['img'].ctypes.data
+    cache_start = frame_start & ~63
+    cache_lines = (frame_start + 2 * frame_size - cache_start + 63) // 64
     conn.send('ready')
     while True:
       transforms, inputs = conn.recv()
+      # memfd is CPU write-back memory, unlike camerad's GPU buffers. Clean both
+      # shared frames on every request, even when from_blob reuses its mapping.
+      flush(ctypes.c_uint64(cache_start), cache_lines)
       conn.send(model.run(frames, transforms, inputs))
   except EOFError:
     pass  # The owning modeld closed its private connection.

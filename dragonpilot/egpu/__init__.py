@@ -25,11 +25,20 @@ An error, unplug, disable, watchdog failure or dropped-frame ratio above 0.0075
 returns to the retained small model after resetting its history. After a five-second
 cooldown the next worker may load in the background, even during control; switching
 back to big still requires no control. A new worker cannot overlap an unreaped one.
+The parent explicitly initializes QCOM, never auto-selecting the USB AMD device.
+The worker cleans the CPU cache for both shared frames before each inference;
+the first from_blob mapping alone is not sufficient for reused memfd buffers.
+If small-model history reset fails, runtime flags are cleared and the exception
+is logged and propagated: manager restarts modeld onroad to build fresh history,
+rather than publishing from an unreset small model. This interrupts model output
+while modeld restarts; it is not a seamless fallback.
 
 This replaces production's built-in USBGPU / standalone modeld_egpu selection with
 the selected, locally compiled eGPU bundle. Existing artifacts are reused; it does
 not download or compile onroad. No bundle means the local small model continues.
 Jetlink's existing adapter/library version and the cluster/UI layout are retained.
+The router is selected at modeld startup: a never-seen eGPU first plugged in
+later joins on the next modeld start, not midway through that drive.
 
 The router and IPC design follow herizon1054/openpilot dpegpu00 at a45a1959e2.
 Hardware-free regression tests cover routing, faults, timing, transport and UI

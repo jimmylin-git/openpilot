@@ -61,14 +61,19 @@ class JoiningEgpu(EgpuAction):
   def _fail(self, reason, now):
     self.log.error(f'egpu: returning to small model: {reason}; retry in {RETRY_SECONDS:.0f}s')
     self.close()
-    if self.chestnut:
-      self.reset_small()
-      self.handovers += 1
+    was_big = self.chestnut
     self.chestnut = False
     self.small_frames = 0
     self.failed = True
     self.retry_at = max(now, self.clock()) + RETRY_SECONDS
     self._flags(False, False, False, True)
+    if was_big:
+      try:
+        self.reset_small()
+      except Exception as exc:
+        self.log.exception('egpu: small model reset failed; modeld must restart before publishing')
+        raise RuntimeError('egpu: small model reset failed') from exc
+      self.handovers += 1
 
   def close(self):
     if self.worker:

@@ -1,8 +1,11 @@
 """Hardware-free execution of the production router and frame transport."""
 import ast
+import ctypes
 import mmap
 import queue
+import sys
 import threading
+import types
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -138,6 +141,147 @@ def test_invalid_bundle_overrides_log_failure_without_worker():
   assert s.flags['failed']
   s.factory.assert_not_called()
   s.logger.error.assert_called_once()
+
+
+@pytest.mark.parametrize('failure', ['timeout', 'disconnect'])
+def test_reset_failure_clears_running_state_and_does_not_run_stale_small(failure):
+  s = setup_router()
+  activate(s)
+  if failure == 'timeout':
+    s.router.worker.run.side_effect = TimeoutError('80ms')
+  else:
+    s.flags['present'] = False
+  error = RuntimeError('QCOM reset failed')
+  s.reset.side_effect = error
+  with pytest.raises(RuntimeError, match='small model reset failed') as caught:
+    s.run()
+  assert caught.value.__cause__ is error
+  assert s.router.failed and not s.router.chestnut
+  assert s.router.big_model_state == 'unavailable'
+  assert s.flags['failed'] and not any(s.flags[k] for k in ('running', 'loading', 'ready'))
+  assert s.small.run.call_count == 3
+  s.router.worker.close.assert_called_once()
+  s.logger.exception.assert_called_once()
+
+
+def test_manager_restarts_modeld_only_when_onroad():
+  tree = ast.parse((ROOT / 'system/manager/process_config.py').read_text(encoding='utf-8'))
+  config = next(n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id == 'PythonProcess' and n.args and isinstance(n.args[0], ast.Constant) and n.args[0].value == 'modeld')
+  process_tree = ast.parse((ROOT / 'system/manager/process.py').read_text(encoding='utf-8'))
+  ensure = next(n for n in process_tree.body if isinstance(n, ast.FunctionDef) and n.name == 'ensure_running')
+  processes = {'cloudlog': Mock()}
+  future = ast.parse('from __future__ import annotations').body
+  exec(compile(ast.Module(body=[*future, ensure], type_ignores=[]), '<ensure running>', 'exec'), processes)
+  calls = []
+  dead = SimpleNamespace(
+    name='modeld', enabled=True, restart_if_crash=False,
+    should_run=lambda started, *args: started, proc=SimpleNamespace(is_alive=lambda: False, exitcode=1),
+    restart=lambda: calls.append('restart'), start=lambda: calls.append('start'),
+    stop=lambda **kwargs: calls.append('stop'),
+  )
+  for kw in config.keywords:
+    if kw.arg == 'restart_if_crash':
+      dead.restart_if_crash = ast.literal_eval(kw.value)
+  assert ast.unparse(config.args[2]) == 'only_onroad'
+  assert dead.restart_if_crash
+  assert processes['ensure_running']([dead], True) == [dead]
+  assert calls == ['restart', 'start']
+  calls.clear()
+  assert processes['ensure_running']([dead], False) == []
+  assert calls == ['stop']
+
+
+@pytest.mark.parametrize('device', [None, 'QCOM'])
+def test_gpu_initialization_preserves_default_but_can_pin_qcom(monkeypatch, device):
+  tensor = Mock()
+  tensor_module = types.ModuleType('tinygrad.tensor')
+  tensor_module.Tensor = tensor
+  worker_module = types.ModuleType('tinygrad.engine.worker')
+  worker_module.get_worker_pool = Mock()
+  monkeypatch.setitem(sys.modules, 'tinygrad.tensor', tensor_module)
+  monkeypatch.setitem(sys.modules, 'tinygrad.engine.worker', worker_module)
+  tree = ast.parse((ROOT / 'jetlink_repo/jetlink/openpilot/warp.py').read_text(encoding='utf-8'))
+  init = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'init_device')
+  ns = {}
+  exec(compile(ast.Module(body=[init], type_ignores=[]), '<gpu init>', 'exec'), ns)
+  logger = Mock()
+  if device is None:
+    ns['init_device'](logger)
+  else:
+    ns['init_device'](logger, device=device)
+  tensor.assert_called_once_with([0.0], device=device)
+  tensor.return_value.realize.assert_called_once()
+  worker_module.get_worker_pool.assert_called_once()
+  logger.exception.assert_not_called()
+  main_tree = ast.parse((ROOT / 'selfdrive/modeld/modeld.py').read_text(encoding='utf-8'))
+  call = next(n for n in ast.walk(main_tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'init_device')
+  assert any(kw.arg == 'device' and ast.literal_eval(kw.value) == 'QCOM' for kw in call.keywords)
+
+
+@pytest.mark.parametrize('flush_failure', [False, True])
+def test_shared_frames_flushed_before_every_inference(flush_failure):
+  tree = ast.parse((ROOT / 'dragonpilot/egpu/worker.py').read_text(encoding='utf-8'))
+  main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'main')
+
+  class WithoutImports(ast.NodeTransformer):
+    def visit_Import(self, node):
+      return ast.copy_location(ast.Pass(), node)
+
+    def visit_ImportFrom(self, node):
+      return ast.copy_location(ast.Pass(), node)
+
+  main = WithoutImports().visit(main)
+  memory = bytearray(8192)
+  events = []
+  model = SimpleNamespace(warmup=lambda: events.append('warmup'))
+  def infer(frames, transforms, inputs):
+    events.append(('infer', frames['img'][0], frames['big_img'][0]))
+    return {'plan': 'ok'}
+  model.run = infer
+  def flush(address, lines):
+    events.append(('flush', address.value, lines))
+    if flush_failure:
+      raise RuntimeError('cache clean failed')
+  conn = Mock()
+  requests = iter([({'frame': 1}, {}), ({'frame': 2}, {})])
+  def recv():
+    if conn.recv.call_count == 1:
+      return 1928, 1208, 4096, {'sha256': 'sha'}
+    try:
+      transforms, inputs = next(requests)
+    except StopIteration:
+      raise EOFError
+    memory[0] = memory[4096] = transforms['frame']
+    return transforms, inputs
+  conn.recv.side_effect = recv
+  os_mock = Mock()
+  os_mock.getppid.return_value = 10
+  os_mock.environ = {}
+  ns = {
+    'ctypes': SimpleNamespace(CDLL=lambda _: SimpleNamespace(prctl=lambda *args: 0), c_uint64=ctypes.c_uint64),
+    'os': os_mock, 'sys': SimpleNamespace(argv=['worker.py', '1', '2', '10']),
+    'tg_env': Mock(), 'mmap': SimpleNamespace(mmap=lambda *args: memory), 'Connection': lambda fd: conn,
+    'np': np, 'PCIE_WAIT': 15, 'wait_pcie_link': lambda _: (True, 'ok'),
+    'model_root': lambda: 'models', 'model_pkl_name': lambda _: 'model', 'warp_pkl_name': lambda *args: 'warp',
+    'EgpuModelState': lambda *args: model, 'cloudlog': Mock(),
+    'dcache_flush': lambda: SimpleNamespace(fxn=flush),
+  }
+  exec(compile(ast.fix_missing_locations(ast.Module(body=[main], type_ignores=[])), '<worker>', 'exec'), ns)
+  ns['main']()
+  conn.close.assert_called_once()
+  if flush_failure:
+    assert not any(isinstance(e, tuple) and e[0] == 'infer' for e in events)
+    assert 'cache clean failed' in conn.send.call_args.args[0]['error']
+    ns['cloudlog'].exception.assert_called_once()
+  else:
+    assert [e[0] for e in events[1:]] == ['flush', 'infer', 'flush', 'infer']
+    assert [e for e in events if isinstance(e, tuple) and e[0] == 'infer'] == [('infer', 1, 1), ('infer', 2, 2)]
+    start = np.frombuffer(memory, dtype=np.uint8).ctypes.data
+    aligned = start & ~63
+    lines = (start + len(memory) - aligned + 63) // 64
+    assert events[1] == events[3] == ('flush', aligned, lines)
+    ns['cloudlog'].exception.assert_not_called()
 
 
 def test_disabled_start_does_not_load_until_enabled():

@@ -142,7 +142,7 @@ procs = [
   PythonProcess("micd", "system.micd", iscar, enabled=not LITE),
   PythonProcess("timed", "system.timed", always_run, enabled=not PC),
 
-  PythonProcess("modeld", "selfdrive.modeld.modeld", only_onroad),
+  PythonProcess("modeld", "selfdrive.modeld.modeld", only_onroad, restart_if_crash=True),
   # modeld owns the eGPU worker and retains the small model for fallback.
   PythonProcess("egpu_manager", "dragonpilot.egpu.manager", always_run, enabled=not PC),
   # dp - jetlink: always_run, jetlinkd holds the USB gadget open for as long as the link is enabled,
