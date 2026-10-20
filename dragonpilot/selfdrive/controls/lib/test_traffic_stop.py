@@ -141,4 +141,5 @@ def test_lead_cancel_margin_boundary():
   ctrl_out = stopping_ctrl(20.0)
   ctrl_out.update(model_v2(model_x, model_y, model_v), car_state(), radar_state(20.0 + 6.0), 5.0, -0.5, 15.0)
   assert ctrl_out.state == ts.STOPPING
-  assert ctrl_out.stop_dist_m is not None
+  assert ctrl_out.stop_dist_m is None
+  assert ctrl_out.near_stop_dist_m is not None

@@ -55,16 +55,16 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
                                                 ModelConstants.T_IDXS,
                                                 v_ego,
                                                 lat_action_t)
+    # Previous action already includes the fixed, per-drive offset.
+    curvature_offset = 2.0 * (dp_lat_offset_cm / 100.0) / 900.0 if dp_lat_offset_cm != 0 else 0.0
+    prev_curvature_base = prev_action.desiredCurvature - curvature_offset
     if v_ego > MIN_LAT_CONTROL_SPEED:
-      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, LAT_SMOOTH_SECONDS)
+      desired_curvature = smooth_value(desired_curvature, prev_curvature_base, LAT_SMOOTH_SECONDS)
     else:
-      desired_curvature = prev_action.desiredCurvature
+      desired_curvature = prev_curvature_base
 
     # Apply lateral offset (driving style adjustment)
-    if dp_lat_offset_cm != 0:
-        lat_offset_m = dp_lat_offset_cm / 100.0
-        curvature_offset = 2.0 * lat_offset_m / 900.0
-        desired_curvature += curvature_offset
+    desired_curvature += curvature_offset
 
     return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
                                   desiredAcceleration=float(desired_accel),
@@ -444,7 +444,8 @@ def main(demo=False, egpu_loader=None):
       # dp - jetlink: zoompilot's modelDataV2SP.acceleratorState and modelV2.big
       model_ext_send.modelExt.acceleratorState = getattr(model, 'big_model_state', 'none')
       model_ext_send.modelExt.bigModel = EGPU or USBGPU or (bool(getattr(model, 'chestnut', False)) and model is not small_model)
-      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, RED.left_edge_detected, RED.right_edge_detected)
+      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, RED.left_edge_detected, RED.right_edge_detected,
+                list(modelv2_send.modelV2.laneLineProbs))
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state

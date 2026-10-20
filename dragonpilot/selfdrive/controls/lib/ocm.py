@@ -1,11 +1,20 @@
 """
 Copyright (c) 2025, Rick Lan
 Modified OCM (Overdrive Coasting Mode) integrated with DTSC strict abort logic.
+
+Ported from herizon1054/openpilot dpegpu01 at 98cf58a4a3. The planner enables
+OCM from its feature flag and overrides the final acceleration target, not
+the MPC velocity/acceleration trajectories. Non-cruise sources and strong
+braking requests cancel coasting immediately. The target uses a Corolla TSS2
+coast calibration, not a guarantee of zero throttle/brake on other vehicles.
 """
 
 import time
 import numpy as np
+from cereal import log
 from openpilot.common.swaglog import cloudlog
+
+LongitudinalPlanSource = log.LongitudinalPlan.LongitudinalPlanSource
 
 # =========================================================
 # 滑行速度與安全參數設定區 (沿用 OCM 邏輯)
@@ -19,8 +28,8 @@ MIN_SPEED_ENABLE = 50.0 / 3.6
 MIN_SPEED_DISABLE = 40.0 / 3.6   
 
 # 下坡/超速防護上限 (加入遲滯區間防震盪)
-OVERSPEED_ACTIVE_MARGIN = 25.0 / 3.6   # 正在滑行時最高容忍超速 25 km/h
-OVERSPEED_INACTIVE_MARGIN = 20.0 / 3.6 # 關閉後需降至超速 20 km/h 以下才重啟
+OVERSPEED_ACTIVE_MARGIN = 35.0 / 3.6
+OVERSPEED_INACTIVE_MARGIN = 30.0 / 3.6
 
 # 緊急安全防線
 EMERGENCY_TTC = 2.0              # 註：緊急解除仍維持 2.0 秒，避免與常規 3.0 秒解除混淆而狂刷警示日誌
@@ -35,6 +44,7 @@ MIN_DIST_V = [5., 10., 15., 20.]
 PITCH_SMOOTH_ALPHA_UP = 0.30           
 PITCH_SMOOTH_ALPHA_DOWN = 0.15
 PITCH_DOWNHILL_THRESHOLD = -0.030      # 判定為下坡的閾值 (-3% 坡度)
+COAST_ACCEL_OFFSET = 0.0
 
 
 class OCM:
@@ -49,6 +59,7 @@ class OCM:
     self._has_lead = False
     self._active_prev = False
     self._last_lead_time = 0.0
+    self.lead_ttc = float('inf')
     
     # 坡度記憶
     self.current_pitch = 0.0              
@@ -120,7 +131,16 @@ class OCM:
     return (not user_ctrl_lon and not self._has_lead and 
             not in_cooldown and self._is_speed_over_cruise)
 
-  def update_states(self, cc, rs, user_ctrl_lon, v_ego, v_cruise, dtsc_active=False):
+  def _set_inactive(self, reason: str | None = None):
+    self.active = False
+    self.just_disabled = self._active_prev and not self.active
+    if self.just_disabled and reason is not None:
+      cloudlog.info(f"OCM deactivated: {reason}")
+    self._active_prev = self.active
+
+  def update_states(self, cc, rs, user_ctrl_lon, v_ego, v_cruise, dtsc_active=False,
+                    plan_source=LongitudinalPlanSource.cruise, a_target=0.0, a_plan_min=0.0):
+    """Yield to non-cruise sources or strong current/future braking requests."""
     # 車速總開關狀態更新 (40關閉 50打開)
     if v_ego >= MIN_SPEED_ENABLE:
       self.speed_allowed = True
@@ -129,25 +149,17 @@ class OCM:
 
     # 絕對硬防線：當前車速低於巡航車速時，強制關閉
     if v_ego < v_cruise:
-      self.active = False
-      self.just_disabled = self._active_prev and not self.active
-      self._active_prev = self.active
+      self._set_inactive("below cruise speed")
       return
 
     # 🚨 DTSC 攔截防護 (修正狀態機同步)
     if dtsc_active:
-      self.active = False
-      self.just_disabled = self._active_prev and not self.active
-      if self.just_disabled:
-        cloudlog.info("OCM deactivated: DTSC is currently active in curve")
-      self._active_prev = self.active
+      self._set_inactive("DTSC is currently active in curve")
       return
 
     # 如果開關未啟用、車速未達標、或姿態資料不完整
     if not self.enabled or not self.speed_allowed or len(cc.orientationNED) != 3:
-      self.active = False
-      self.just_disabled = self._active_prev and not self.active
-      self._active_prev = self.active
+      self._set_inactive()
       return
 
     self._update_pitch(cc.orientationNED)
@@ -156,9 +168,19 @@ class OCM:
     lead = rs.leadOne
 
     if self._check_emergency_conditions(lead, v_ego, current_time):
-      self.active = False
-      self.just_disabled = self._active_prev and not self.active
-      self._active_prev = self.active
+      self._set_inactive("lead emergency")
+      return
+
+    if plan_source != LongitudinalPlanSource.cruise:
+      self._last_lead_time = current_time
+      self._set_inactive(f"plan source {plan_source}")
+      return
+    min_accel = min(a_target, a_plan_min)
+    if min_accel < EMERGENCY_DECEL_THRESHOLD:
+      if self.active:
+        cloudlog.warning(f"OCM aborting: requested {min_accel:.2f} m/s^2 braking (target={a_target:.2f}, plan_min={a_plan_min:.2f})")
+      self._last_lead_time = current_time
+      self._set_inactive(f"strong decel requested {min_accel:.2f} m/s^2")
       return
 
     self._update_lead_status(lead, v_ego, current_time)
@@ -175,21 +197,6 @@ class OCM:
       
     self._active_prev = self.active
 
-  def update_a_desired_trajectory(self, a_desired_trajectory):
-    if not self.active:
-      return a_desired_trajectory
-
-    # 安全檢查：若 MPC 模型判定需要急煞，不予攔截
-    min_accel = np.min(a_desired_trajectory)
-    if min_accel < EMERGENCY_DECEL_THRESHOLD:
-      cloudlog.warning(f"OCM aborting: MPC requested {min_accel:.2f} m/s² braking")
-      self.active = False
-      return a_desired_trajectory
-
-    # 取消滑行下限，實現平順滑行 (保留 -1.0 的過彎穩定底線)
-    modified = np.copy(a_desired_trajectory)
-    for i in range(len(modified)):
-      if -1.0 < modified[i] < 0:
-        modified[i] = 0.0
-        
-    return modified
+  @staticmethod
+  def get_coast_target(accel_coast: float) -> float:
+    return min(accel_coast + COAST_ACCEL_OFFSET, 0.0)

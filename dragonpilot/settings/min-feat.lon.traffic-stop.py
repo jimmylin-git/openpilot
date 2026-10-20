@@ -10,7 +10,10 @@ ITEMS = [
       "Uses the driving model's own predicted path to detect an upcoming red "
       "light or stop sign and brings the car to a smooth stop, without needing "
       "a dedicated traffic-light recognition model.<br>Ported from the "
-      "openpilot carrot (cp) branch."),
+      "openpilot carrot (cp) branch.<br>The MPC stop obstacle is delayed until "
+      "braking is needed, then retained for that stop. Uphill detection suppresses "
+      "new stops above 30 km/h and requires 0.5 seconds of confirmation at lower "
+      "speeds; this can also suppress a real uphill stop."),
     "flags": "PERSISTENT",
     "param_type": "BOOL",
     "default": "0",

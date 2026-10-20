@@ -11,11 +11,13 @@ from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import CRUISE_MIN_ACCEL
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
 
 from dragonpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlannerDP
+from dragonpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanSource as DPPlanSource
 from dragonpilot.selfdrive.controls.lib.ocm import OCM
 from dragonpilot.selfdrive.controls.lib.aem import AEM
 from dragonpilot.selfdrive.controls.lib.apm import APM
@@ -105,8 +107,15 @@ class DPFlags:
 def get_max_accel(v_ego):
   return np.interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)
 
-def get_coast_accel(pitch):
-  return np.sin(pitch) * -5.65 - 0.3  
+# Corolla TSS2 rlog calibration from dpegpu01/98cf58a4a3. Above 45 km/h is
+# extrapolated; this is not calibrated for Prius Prime. Validate PCM braking.
+DP_COAST_BP_KPH = [0.,    20.,   30.,   35.,   45.,   60.,   80.,   100.,  120.]
+DP_COAST_BASE   = [-0.10, -0.11, -0.11, -0.14, -0.22, -0.24, -0.27, -0.30, -0.33]
+
+def get_coast_accel(pitch, v_ego=None):
+  if v_ego is None:
+    return np.sin(pitch) * -5.65 - 0.3
+  return np.sin(pitch) * -5.65 + float(np.interp(v_ego * CV.MS_TO_KPH, DP_COAST_BP_KPH, DP_COAST_BASE))
 
 def limit_accel_in_turns(v_ego, angle_steers, a_target, CP):
   a_total_max = np.interp(v_ego, _A_TOTAL_MAX_BP, _A_TOTAL_MAX_V)
@@ -172,7 +181,7 @@ class LongitudinalPlanner(LongitudinalPlannerDP):
     LongitudinalPlannerDP.update(self, sm)
 
     if dp_flags & DPFlags.AEM:
-      # ⚠️ self.traffic_stop.stop_dist_m 要到後段 LongitudinalPlannerDP.update_targets()
+      # ⚠️ self.traffic_stop.near_stop_dist_m 要到後段 LongitudinalPlannerDP.update_targets()
       # 才會刷新成這一幀的值，這裡讀到的是上一幀（約 50 ms 前）。near-stop 判斷本身有
       # 0.5 秒防彈跳與 10 m 遲滯，一幀落差可忽略；若要完全同步需把 update_targets()
       # 提前，但會牽動它使用 self.v_desired_filter.x / self.a_desired（上一幀平滑值）
@@ -180,11 +189,11 @@ class LongitudinalPlanner(LongitudinalPlannerDP):
       # ⚠️ AEM 啟用時，get_mode() 預設忽略這裡傳入的 mode（即實驗模式開關），屬刻意分歧，
       # 見 aem.py 檔頭與 AEM_EXPERIMENTAL_OFF_FORCES_ACC。
       self.aem.update_states(model_msg=sm['modelV2'], radar_msg=sm['radarState'], v_ego=sm['carState'].vEgo,
-                              stop_dist_m=self.traffic_stop.stop_dist_m)
+                              stop_dist_m=self.traffic_stop.near_stop_dist_m)
       mode = self.aem.get_mode(mode)
 
     if len(sm['carControl'].orientationNED) == 3:
-      accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
+      accel_coast = get_coast_accel(sm['carControl'].orientationNED[1], sm['carState'].vEgo)
     else:
       accel_coast = ACCEL_MAX
 
@@ -204,10 +213,11 @@ class LongitudinalPlanner(LongitudinalPlannerDP):
       accel_clip = dp_accel_clip
     elif mode == 'acc':
       accel_clip = [ACCEL_MIN, get_max_accel(v_ego)]
-      steer_angle_without_offset = sm['carState'].steeringAngleDeg - sm['liveParameters'].angleOffsetDeg
-      accel_clip = limit_accel_in_turns(v_ego, steer_angle_without_offset, accel_clip, self.CP)
     else:
       accel_clip = [ACCEL_MIN, ACCEL_MAX]
+    if mode == 'acc':
+      steer_angle_without_offset = sm['carState'].steeringAngleDeg - sm['liveParameters'].angleOffsetDeg
+      accel_clip = limit_accel_in_turns(v_ego, steer_angle_without_offset, accel_clip, self.CP)
 
     if reset_state:
       self.v_desired_filter.x = v_ego
@@ -246,6 +256,11 @@ class LongitudinalPlanner(LongitudinalPlannerDP):
       clipped_accel_coast = max(accel_coast, accel_clip[0])
       clipped_accel_coast_interp = np.interp(v_ego, [MIN_ALLOW_THROTTLE_SPEED, MIN_ALLOW_THROTTLE_SPEED*2], [accel_clip[1], clipped_accel_coast])
       accel_clip[1] = min(accel_clip[1], clipped_accel_coast_interp)
+
+    # Use last frame's coasting state before MPC; current source is known below.
+    if ((dp_flags & DPFlags.OCM) and self.ocm.active and not reset_state and not force_slow_decel
+        and len(sm['carControl'].orientationNED) == 3):
+      accel_clip[1] = min(accel_clip[1], max(OCM.get_coast_target(accel_coast), accel_clip[0]))
 
     personality = sm['selfdriveState'].personality
     if dp_flags & DPFlags.APM:
@@ -287,6 +302,10 @@ class LongitudinalPlanner(LongitudinalPlannerDP):
 
     v_cruise_target, a_target_from_dp = LongitudinalPlannerDP.update_targets(self, sm, self.v_desired_filter.x, self.a_desired, v_cruise)
     a_cruise_min_override = LongitudinalPlannerDP.get_cruise_min_accel(self, v_ego)
+    # Comfort limits must not weaken forced slowdown or traffic-stop braking.
+    # DTSC retains its own gradual curve constraints.
+    if a_cruise_min_override is not None and (force_slow_decel or self.source == DPPlanSource.trafficStop):
+      a_cruise_min_override = min(a_cruise_min_override, CRUISE_MIN_ACCEL)
 
     if force_slow_decel:
       v_cruise_target = 0.0
@@ -295,17 +314,12 @@ class LongitudinalPlanner(LongitudinalPlannerDP):
     # dp: 紅綠燈/停止標誌虛擬停止線直接餵給 MPC 當障礙物（而非只靠 v_cruise_target
     # 軟限速），求解出來的煞車曲線比純降速平順。self.traffic_stop.stop_dist_m 由上面
     # LongitudinalPlannerDP.update_targets() 這一幀已經算好；None 代表目前沒有主動
-    # 停等中，MPC 端會用 disabled sentinel（1000m），不影響一般行駛。
+    # 停等目標或尚未達制動門檻，MPC 端會用 disabled sentinel（1000m）。
     self.mpc.update(sm['radarState'], v_cruise_target, personality=personality, a_cruise_min_override=a_cruise_min_override,
                      a_min_arr=a_min_dtsc_out, a_max_arr=a_max_dtsc_out, traffic_stop_obstacle_m=self.traffic_stop.stop_dist_m)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
-    
-    if dp_flags & DPFlags.OCM:
-      user_control = long_control_off if self.CP.openpilotLongitudinalControl else not sm['selfdriveState'].enabled
-      self.ocm.update_states(sm['carControl'], sm['radarState'], user_control, v_ego, v_cruise, dtsc_active=is_dtsc_active)
-      self.a_desired_trajectory = self.ocm.update_a_desired_trajectory(self.a_desired_trajectory)
     
     self.j_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC[:-1], self.mpc.j_solution)
 
@@ -361,6 +375,19 @@ class LongitudinalPlanner(LongitudinalPlannerDP):
           self.mpc.source = log.LongitudinalPlan.LongitudinalPlanSource.e2e
         except ImportError:
           pass
+
+    self.ocm.enabled = bool(dp_flags & DPFlags.OCM)
+    if self.ocm.enabled:
+      # Unlike upstream, forced slowdown/reset must never be overridden by OCM.
+      user_control = reset_state or force_slow_decel
+      self.ocm.update_states(sm['carControl'], sm['radarState'], user_control, v_ego, v_cruise, dtsc_active=is_dtsc_active,
+                             plan_source=self.mpc.source, a_target=float(output_a_target),
+                             a_plan_min=float(np.min(self.a_desired_trajectory)))
+      if self.ocm.active:
+        output_a_target = OCM.get_coast_target(accel_coast)
+        self.output_should_stop = False
+    else:
+      self.ocm.active = False
 
     for idx in range(2):
       accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)

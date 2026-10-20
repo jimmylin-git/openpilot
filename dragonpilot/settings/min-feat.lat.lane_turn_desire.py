@@ -6,7 +6,7 @@ ITEMS = [
     "key": "dp_lane_turn_desire",
     "type": "toggle_item",
     "title": lambda: tr("Use Lane Turn Desires (LTD)"),
-    "description": lambda: tr("If you're driving below the set speed and have your blinker on, the car will plan a turn in that direction at the nearest drivable path. This prevents situations (like at red lights) where the car might plan the wrong turn direction. From SunnyPilot."),
+    "description": lambda: tr("Below the set speed, a single blinker can request a turn when either ego-lane line becomes weak (probability 0.5 or lower). The turn stays latched while that blinker remains on, speed stays below the limit, and no blindspot or road edge blocks that side. Missing lane probabilities retain the original behavior. From SunnyPilot."),
     "flags": "PERSISTENT",
     "param_type": "BOOL",
     "default": "0",

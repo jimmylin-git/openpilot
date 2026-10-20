@@ -288,7 +288,7 @@ class LongitudinalMpc:
     v_ego = self.x0[1]
     
     t_follow = get_T_FOLLOW(personality)
-    self.set_weights(personality=personality)
+    # The planner already set weights with the current prev_accel_constraint.
     
     a_cruise_min = a_cruise_min_override if a_cruise_min_override is not None else CRUISE_MIN_ACCEL
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status

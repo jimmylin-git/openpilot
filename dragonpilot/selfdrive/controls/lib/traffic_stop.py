@@ -1,10 +1,17 @@
 """
 Traffic light / stop sign virtual stop-line obstacle.
 
+Control port from herizon1054/openpilot dpegpu01 at 98cf58a4a3:
+gate the MPC obstacle until braking is needed, then latch it for that stop.
+AEM receives the ungated near_stop_dist_m. Uphill entry suppression uses a
+1.5% grade threshold, a four-second hold and 0.5-second confirmation at low
+speed. This can also suppress a real uphill stop; validate on the vehicle.
+Positive user distance adjustment moves the obstacle closer (stop further back).
+
 Ported from the carrot (cp) fork's traffic-stop mechanism into openpilot-dptest.
 Pure-function layer is numerically verified against cp's official
-`selfdrive/carrot/tests/test_traffic_stop.py`; the state machine is a
-line-for-line port of cp's `carrot_functions.py` state transitions.
+`selfdrive/carrot/tests/test_traffic_stop.py`. The original state machine
+follows cp's `carrot_functions.py`, with the gate/crest changes above.
 
 Integration divergence from cp (intentional, see traffic_stop_complete_guide_v2.md
 section 9): cp disables this obstacle entirely in blended/e2e mode
@@ -13,9 +20,9 @@ unconditionally across all longitudinal modes - dp's mode switching is not
 trusted to always avoid blended mode approaching a red light. The final
 accel candidate selection in selfdrive/controls/lib/longitudinal_planner.py
 still takes min(mpc, e2e) in blended mode, so the e2e model's own stopping
-judgement is never suppressed - this module (both the MPC obstacle and the
-v_cruise floor below) only ever makes the mpc candidate *more* conservative,
-never less; it can't remove a safety margin the e2e side would have applied.
+judgement is not suppressed by this controller. The new gate and crest guard
+can withhold its extra braking constraint; they are not a guarantee that
+model-based traffic detection will stop at every real red light.
 
 Not ported in this pass (flagged for follow-up, see guide section 8.13):
 the mode-switch "taper" fix for the e2e-candidate handoff blip. dp's outer
@@ -48,7 +55,16 @@ import numpy as np
 
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
-from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
+V_TARGET_SENTINEL = 1e6
+RELEASE_BRAKE_MPS2 = 1.6
+MPC_OBSTACLE_ONLY_WHEN_MUST_BRAKE = True
+
+CREST_GRADE_THRESHOLD = 0.015
+CREST_HOLD_S = 4.0
+CREST_MIN_SPEED_KPH = 30.0
+UPHILL_CONFIRM_S = 0.5
+CREST_HOLD_FRAMES = round(CREST_HOLD_S / DT_MDL)
+UPHILL_CONFIRM_FRAMES = round(UPHILL_CONFIRM_S / DT_MDL)
 
 # ── state machine states ────────────────────────────────────────────────
 CRUISE, STOPPING, STOPPED = 0, 1, 2
@@ -199,7 +215,11 @@ class TrafficStopController:
     self.stopped_grace_frames = 0
 
     self.stop_dist_m: float | None = None
-    self.output_v_target = V_CRUISE_MAX
+    self.near_stop_dist_m: float | None = None
+    self._obstacle_latched = False
+    self.uphill_hold_frames = 0
+    self.ahead_grade = 0.0
+    self.output_v_target = V_TARGET_SENTINEL
     self.output_a_target = 0.0
 
   def _poll_params(self):
@@ -234,7 +254,9 @@ class TrafficStopController:
     self.reference_speed_kph = 0.0
     self.stopped_grace_frames = 0
     self.stop_dist_m = None
-    self.output_v_target = V_CRUISE_MAX
+    self.near_stop_dist_m = None
+    self._obstacle_latched = False
+    self.output_v_target = V_TARGET_SENTINEL
     self.output_a_target = 0.0
 
   def _update_stop_model_x(self, raw_x: float, v_ego: float) -> tuple[float, float]:
@@ -260,11 +282,23 @@ class TrafficStopController:
     model_x_traj = model_v2.position.x
     model_y_traj = model_v2.position.y
     model_v_traj = model_v2.velocity.x
-    if len(model_x_traj) < 2 or len(model_v_traj) == 0:
-      self.output_v_target = V_CRUISE_MAX
+    if len(model_x_traj) < 2 or len(model_v_traj) == 0 or len(model_y_traj) == 0:
+      self.stop_dist_m = None
+      self.near_stop_dist_m = None
+      self.output_v_target = V_TARGET_SENTINEL
       self.output_a_target = 0.0
       return
     model_x_end = model_x_traj[-1]
+
+    model_z_traj = getattr(model_v2.position, "z", None)
+    if model_z_traj is not None and len(model_z_traj) == len(model_x_traj):
+      self.ahead_grade = (model_z_traj[-1] - model_z_traj[0]) / max(model_x_end, 1.0)
+    else:
+      self.ahead_grade = 0.0
+    if self.ahead_grade > CREST_GRADE_THRESHOLD:
+      self.uphill_hold_frames = CREST_HOLD_FRAMES
+    elif self.uphill_hold_frames > 0:
+      self.uphill_hold_frames -= 1
 
     lead = radar_state.leadOne
     lead_present = bool(lead.status)
@@ -293,9 +327,12 @@ class TrafficStopController:
 
     if self.state == CRUISE:
       entry_allowed = is_traffic_stop_entry_allowed(steering_angle_deg)
+      uphill = self.uphill_hold_frames > 0
+      crest_ok = not uphill or (v_ego * 3.6 <= CREST_MIN_SPEED_KPH and self.stop_sign_count >= UPHILL_CONFIRM_FRAMES)
       if (not lead_present and traffic_state == RED and
-          entry_allowed and self.gas_suppress_frames == 0):
+          entry_allowed and self.gas_suppress_frames == 0 and crest_ok):
         self.state = STOPPING
+        self._obstacle_latched = False
         self.reference_speed_kph = get_traffic_stop_reference_speed(v_ego * 3.6, None)
         self.actual_stop_distance = get_virtual_traffic_stop_distance(
           self.stop_model_x_rl, self.reference_speed_kph)
@@ -334,7 +371,9 @@ class TrafficStopController:
       self.reference_speed_kph = 0.0
       self.stopped_grace_frames = 0
       self.stop_dist_m = None
-      self.output_v_target = V_CRUISE_MAX
+      self.near_stop_dist_m = None
+      self._obstacle_latched = False
+      self.output_v_target = V_TARGET_SENTINEL
       self.output_a_target = 0.0
       return
 
@@ -342,24 +381,44 @@ class TrafficStopController:
 
     if traffic_state in (OFF, GREEN):
       self.actual_stop_distance = 0.0
-      self.output_v_target = V_CRUISE_MAX
+      self.output_v_target = V_TARGET_SENTINEL
       self.output_a_target = 0.0
+      # Keep the latched stop fixed on the ground across transient model OFF.
+      if self.near_stop_dist_m is not None:
+        self.near_stop_dist_m = max(0.0, self.near_stop_dist_m - v_ego * DT_MDL)
+        if self.state == STOPPING and not self._obstacle_latched:
+          v_release = (2 * RELEASE_BRAKE_MPS2 * max(self.near_stop_dist_m - 1.0, 0.0)) ** 0.5
+          if v_release < v_ego:
+            self._obstacle_latched = True
+        if self.state == STOPPED or self._obstacle_latched or not MPC_OBSTACLE_ONLY_WHEN_MUST_BRAKE:
+          self.stop_dist_m = self.near_stop_dist_m
       return  # state does NOT revert here - only via the transitions above
 
     self.stop_model_x_rl = self.stop_model_x_raw  # actively stopping: force sync every frame
 
     contribution = 0.0 if self.actual_stop_distance > 0.0 else self.stop_model_x_rl
     stop_dist = max(0.0, contribution + self.actual_stop_distance)
-    stop_dist = get_traffic_stop_obstacle_distance(stop_dist, CAMERA_TO_FRONT_M + self.distance_adjust_m)
+    stop_dist = get_traffic_stop_obstacle_distance(stop_dist, CAMERA_TO_FRONT_M - self.distance_adjust_m)
     self.stop_dist_m = stop_dist
+    self.near_stop_dist_m = stop_dist
 
     if self.state == STOPPED:
       self.output_v_target = 0.0
       self.output_a_target = 0.0
     else:
-      self.output_v_target = v_ego
-      self.output_a_target = -COMFORT_BRAKE_BASE * STOPPING_BRAKE_DISCOUNT
-      if stop_dist < 300.0:
-        comfort_brake = COMFORT_BRAKE_BASE * STOPPING_BRAKE_DISCOUNT
-        v_limited = (2 * comfort_brake * max(stop_dist - 1.0, 0.0)) ** 0.5
-        self.output_v_target = min(v_limited, v_ego)
+      comfort_brake = COMFORT_BRAKE_BASE * STOPPING_BRAKE_DISCOUNT
+      v_limited = ((2 * comfort_brake * max(stop_dist - 1.0, 0.0)) ** 0.5
+                   if stop_dist < 300.0 else float('inf'))
+      if v_limited < v_ego:
+        self.output_v_target = v_limited
+        self.output_a_target = -comfort_brake
+      else:
+        self.output_v_target = V_TARGET_SENTINEL
+        self.output_a_target = 0.0
+
+      v_release = ((2 * RELEASE_BRAKE_MPS2 * max(stop_dist - 1.0, 0.0)) ** 0.5
+                   if stop_dist < 300.0 else float('inf'))
+      if v_release < v_ego:
+        self._obstacle_latched = True
+      if MPC_OBSTACLE_ONLY_WHEN_MUST_BRAKE and not self._obstacle_latched:
+        self.stop_dist_m = None

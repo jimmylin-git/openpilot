@@ -57,8 +57,8 @@ class LongitudinalPlannerDP:
     # [修改] 已經移除 self.dtsc.update(...) 呼叫，因為 DTSC 已純淨化，不再依賴外部動態刷新
 
     # 紅綠燈/停止標誌虛擬停止線：內部自行輪詢 Params 開關，關閉時 output_v_target
-    # 維持 V_CRUISE_MAX，min() 選擇時自然不會勝出，故不需要額外的 dp_flags 閘門
-    self.traffic_stop.update(sm['modelV2'], CS, sm['radarState'], v_ego, a_ego, v_cruise)
+    # 使用實際車速推算停止線，停用時以 sentinel 排除目標。
+    self.traffic_stop.update(sm['modelV2'], CS, sm['radarState'], CS.vEgo, a_ego, v_cruise)
 
     # 控制參考來源
     # output_v_target = 目標巡航速度
