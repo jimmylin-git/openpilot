@@ -110,13 +110,11 @@ DRIVE_STATUS_BASE_BOX_SIZE = 46.0
 DRIVE_STATUS_ROW_HEIGHT = TURN_SIGNAL_HEAD_HALF_HEIGHT * 2.0
 DRIVE_STATUS_SCALE = DRIVE_STATUS_ROW_HEIGHT / DRIVE_STATUS_BASE_BOX_SIZE
 TOP_ROW_ITEM_SCALE = DRIVE_STATUS_SCALE * TOP_ROW_SCALE
-# Nudged left from the panel's visual mid-point (~1635) to keep the enlarged Orbitron
-# text clear of the right hex panel's edges (measured solid span ~1345-1871 at y=350).
 GEAR_STATUS_CENTER_X = 1615
 GEAR_STATUS_CENTER_Y = 350
 GEAR_STATUS_FONT_SIZE = 150.0 * DRIVE_STATUS_SCALE
-TOP_SYSTEM_METRIC_LEFT_X = 340.0
-TOP_SYSTEM_METRIC_RIGHT_X = 1570.0
+TOP_SYSTEM_METRIC_LEFT_X = 295.0
+TOP_SYSTEM_METRIC_RIGHT_X = 1620.0
 TOP_SYSTEM_METRIC_Y = 100.0
 TOP_SYSTEM_METRIC_FONT_SIZE = 24.0
 TOP_SYSTEM_METRIC_LINE_GAP = 30.0
@@ -166,8 +164,11 @@ MODEL_LABEL_SCROLL_SPEED = 24.0
 MODEL_LABEL_SCROLL_PAUSE_S = 1.5
 COMPACT_TOP_STATUS_SCALE = 0.7 * 1.3
 COMPACT_TOP_STATUS_Y = -14.0
+LARGE_TOP_STATUS_SCALE = 0.9
+LARGE_TOP_STATUS_Y = 14.0
 COMPACT_SCENE_ZOOM = 1.15
 COMPACT_SCENE_WIDTH_SCALE = 1.3 * 1.5 * 0.8
+LARGE_SCENE_WIDTH_SCALE = 1.3
 TOP_STATUS_DETAIL_CENTER_Y = (
     TURN_SIGNAL_CENTER_Y
     + max(FOLLOW_GAP_LANE_ICON_SIZE, LFA_STATUS_ICON_SIZE) * 0.5
@@ -538,6 +539,7 @@ class ClusterUiRenderer:
         self.width = width
         self.height = height
         self._compact_panel = usb_product_id == 0x0092
+        self._usb_rotate_180 = usb_product_id == 0x0123
         self._background_image_path = BACKGROUND_9P2_IMAGE_PATH if usb_product_id == 0x0092 else BACKGROUND_IMAGE_PATH
         self.title = title
         self.target_fps = target_fps
@@ -971,17 +973,33 @@ class ClusterUiRenderer:
         if self._compact_panel:
             sx, sy = self.width / 1920.0, self.height / 462.0
             rl.begin_scissor_mode(round(560 * sx), round(125 * sy), round(800 * sx), round(337 * sy))
+        else:
+            sx, sy = self.width / DESIGN_WIDTH, self.height / DESIGN_HEIGHT
+            rl.begin_scissor_mode(round(440 * sx), round(205 * sy), round(1040 * sx), round(515 * sy))
         try:
             self._draw_scene(scene, state)
         finally:
-            if self._compact_panel:
-                rl.end_scissor_mode()
+            rl.end_scissor_mode()
         self._profile_add("render_world.draw_scene", profile_stage)
 
     @contextmanager
     def _panel_region(self, region: str) -> Iterator[None]:
         if not self._compact_panel:
-            yield
+            center_x, center_y, scale, origin_x, origin_y = {
+                "speed": (245.0, 360.0, 0.9, SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y),
+                "gear": (1675.0, 360.0, 0.82, GEAR_STATUS_CENTER_X, GEAR_STATUS_CENTER_Y),
+                "status": (960.0, 0.0, 0.85, 960.0, 0.0),
+                "top_status": (960.0, LARGE_TOP_STATUS_Y, LARGE_TOP_STATUS_SCALE, 960.0, 0.0),
+                "lfa": (960.0, LARGE_TOP_STATUS_Y, LARGE_TOP_STATUS_SCALE, 960.0, 0.0),
+            }[region]
+            rl.rl_push_matrix()
+            rl.rl_translatef(center_x, center_y, 0.0)
+            rl.rl_scalef(scale, scale, 1.0)
+            rl.rl_translatef(-origin_x, -origin_y, 0.0)
+            try:
+                yield
+            finally:
+                rl.rl_pop_matrix()
             return
         # Coordinates below are measured on the 1920x462 background. Undo the
         # outer HUD's vertical squeeze so text and icons keep their aspect ratio.
@@ -1162,8 +1180,8 @@ class ClusterUiRenderer:
         source = rl.Rectangle(
             0.0,
             0.0,
-            float(target.texture.width),
-            float(target.texture.height),
+            float(target.texture.width) * (-1.0 if self._usb_rotate_180 else 1.0),
+            float(target.texture.height) * (-1.0 if self._usb_rotate_180 else 1.0),
         )
         dest = rl.Rectangle(
             0.0,
@@ -1373,8 +1391,8 @@ class ClusterUiRenderer:
             source = rl.Rectangle(
                 0.0,
                 0.0,
-                float(target.texture.width),
-                float(target.texture.height),
+                float(target.texture.width) * (-1.0 if self._usb_rotate_180 else 1.0),
+                float(target.texture.height) * (-1.0 if self._usb_rotate_180 else 1.0),
             )
             dest = rl.Rectangle(
                 0.0,
@@ -1403,7 +1421,10 @@ class ClusterUiRenderer:
             self._profile_add("render_to_image.readback_texture", profile_stage)
 
             profile_stage = self._profile_start()
-            rl.image_flip_vertical(image)
+            if self._usb_rotate_180:
+                rl.image_flip_horizontal(image)
+            else:
+                rl.image_flip_vertical(image)
             self._profile_add("render_to_image.flip_vertical", profile_stage)
 
         return image
@@ -1718,10 +1739,9 @@ class ClusterUiRenderer:
         )
         profile_stage = self._profile_start()
         rl.begin_mode_3d(camera)
-        if self._compact_panel:
-            projection = rl.rl_get_matrix_projection()
-            projection.m0 *= COMPACT_SCENE_WIDTH_SCALE
-            rl.rl_set_matrix_projection(projection)
+        projection = rl.rl_get_matrix_projection()
+        projection.m0 *= COMPACT_SCENE_WIDTH_SCALE if self._compact_panel else LARGE_SCENE_WIDTH_SCALE
+        rl.rl_set_matrix_projection(projection)
         self._profile_add("draw_scene.begin_mode_3d", profile_stage)
         rl.rl_push_matrix()
         if abs(scene.scene_shift_x_m) > 0.0001:
@@ -2043,7 +2063,7 @@ class ClusterUiRenderer:
                 project_stage = time.perf_counter()
             screen = world_to_screen_label_anchor(
                 anchor, camera, self.width, self.height,
-                COMPACT_SCENE_WIDTH_SCALE if self._compact_panel else 1.0,
+                COMPACT_SCENE_WIDTH_SCALE if self._compact_panel else LARGE_SCENE_WIDTH_SCALE,
             )
             if profile_enabled:
                 project_ms += (time.perf_counter() - project_stage) * 1000.0
@@ -2174,7 +2194,7 @@ class ClusterUiRenderer:
                 project_stage = time.perf_counter()
             screen = world_to_screen_label_anchor(
                 anchor, camera, self.width, self.height,
-                COMPACT_SCENE_WIDTH_SCALE if self._compact_panel else 1.0,
+                COMPACT_SCENE_WIDTH_SCALE if self._compact_panel else LARGE_SCENE_WIDTH_SCALE,
             )
             if profile_enabled:
                 project_ms += (time.perf_counter() - project_stage) * 1000.0
@@ -2669,12 +2689,12 @@ class ClusterUiRenderer:
         left_x = 310.0 if self._compact_panel else TOP_SYSTEM_METRIC_LEFT_X
         right_x = 1610.0 if self._compact_panel else TOP_SYSTEM_METRIC_RIGHT_X
         metric_y = TOP_SYSTEM_METRIC_Y - (30.0 * DESIGN_HEIGHT / 462.0 if self._compact_panel else 0.0)
-        metric_font_size = TOP_SYSTEM_METRIC_FONT_SIZE * (1.2 if self._compact_panel else 1.0)
+        metric_font_size = TOP_SYSTEM_METRIC_FONT_SIZE * (1.2 if self._compact_panel else 1.1)
         if temperature is not None:
             self._draw_text(
                 f"TEMP {temperature:.0f}C",
                 right_x,
-                metric_y + (TOP_SYSTEM_METRIC_LINE_GAP if self._compact_panel else 0.0),
+                metric_y + (TOP_SYSTEM_METRIC_LINE_GAP if self._compact_panel else -20.0),
                 metric_font_size,
                 theme.text,
                 anchor="center",
@@ -2683,7 +2703,7 @@ class ClusterUiRenderer:
             self._draw_text(
                 f"MEM {memory_percent:.0f}%",
                 left_x,
-                metric_y,
+                metric_y - (0.0 if self._compact_panel else 30.0),
                 metric_font_size,
                 theme.text,
                 anchor="center",
@@ -2693,7 +2713,7 @@ class ClusterUiRenderer:
             self._draw_text(
                 f"CPU {cpu_percent:.0f}%",
                 left_x,
-                metric_y + TOP_SYSTEM_METRIC_LINE_GAP,
+                metric_y + TOP_SYSTEM_METRIC_LINE_GAP - (0.0 if self._compact_panel else 30.0),
                 metric_font_size,
                 theme.text,
                 anchor="center",
@@ -2734,12 +2754,14 @@ class ClusterUiRenderer:
         right = left + MODEL_LABEL_MAX_WIDTH
         bottom = top + text_height + size * TEXT_VERTICAL_CENTER_OFFSET_RATIO
         sx, sy = self.width / DESIGN_WIDTH, self.height / DESIGN_HEIGHT
+        # Scissor coordinates are framebuffer pixels, not transformed HUD coordinates.
+        scale = COMPACT_TOP_STATUS_SCALE if self._compact_panel else LARGE_TOP_STATUS_SCALE
+        row_y = COMPACT_TOP_STATUS_Y if self._compact_panel else LARGE_TOP_STATUS_Y
+        left = DESIGN_WIDTH * 0.5 + (left - DESIGN_WIDTH * 0.5) * scale
+        right = DESIGN_WIDTH * 0.5 + (right - DESIGN_WIDTH * 0.5) * scale
+        top = row_y + top * scale
+        bottom = row_y + bottom * scale
         if self._compact_panel:
-            # Scissor coordinates are framebuffer pixels, not transformed HUD coordinates.
-            left = DESIGN_WIDTH * 0.5 + (left - DESIGN_WIDTH * 0.5) * COMPACT_TOP_STATUS_SCALE
-            right = DESIGN_WIDTH * 0.5 + (right - DESIGN_WIDTH * 0.5) * COMPACT_TOP_STATUS_SCALE
-            top = COMPACT_TOP_STATUS_Y + top * COMPACT_TOP_STATUS_SCALE
-            bottom = COMPACT_TOP_STATUS_Y + bottom * COMPACT_TOP_STATUS_SCALE
             sy = self.height / 462.0
         clip_left, clip_top = math.floor(left * sx), math.floor(top * sy)
         clip_right = math.ceil(right * sx)
@@ -3348,6 +3370,13 @@ class ClusterUiRenderer:
         icon_center_x = LFA_STATUS_CENTER_X + (DESIGN_WIDTH * 0.5 - LFA_STATUS_CENTER_X) * (1.0 - layout_progress)
         acc_off_center_y = DESIGN_HEIGHT * 0.5 - detail_font_size * 0.625 + ACC_OFF_LFA_OFFSET_Y
         icon_center_y = TURN_SIGNAL_CENTER_Y + (acc_off_center_y - TURN_SIGNAL_CENTER_Y) * (1.0 - layout_progress)
+        if not self._compact_panel:
+            off_progress = 1.0 - layout_progress
+            off_scale = 1.0 + 0.5 * off_progress
+            icon_scale *= off_scale
+            icon_size *= off_scale
+            detail_font_size *= off_scale
+            icon_center_y += 50.0 / LARGE_TOP_STATUS_SCALE * off_progress
         # Anchor the angle text to the icon's current bottom edge so it never
         # slides over the wheel while the icon moves and resizes.
         top_row_text_gap = TOP_STATUS_DETAIL_CENTER_Y - (TURN_SIGNAL_CENTER_Y + icon_size * 0.5)

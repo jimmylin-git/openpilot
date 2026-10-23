@@ -304,33 +304,37 @@ class StatusLabelTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.draw_name("Long model name", 10.0)
         x, y, width, height = self.rl.begin_scissor_mode.call_args.args
-        left = (self.ns["CHESTNUT_ICON_CENTER_X"] - self.ns["MODEL_LABEL_MAX_WIDTH"] / 2) / 2
-        right = (self.ns["CHESTNUT_ICON_CENTER_X"] + self.ns["MODEL_LABEL_MAX_WIDTH"] / 2) / 2
-        top = (self.ns["TOP_STATUS_DETAIL_CENTER_Y"] - 15) / 2
-        bottom = (self.ns["TOP_STATUS_DETAIL_CENTER_Y"] + 15 + self.ns["TOP_STATUS_LABEL_FONT_SIZE"] * self.ns["TEXT_VERTICAL_CENTER_OFFSET_RATIO"]) / 2
+        scale, row_y = self.ns["LARGE_TOP_STATUS_SCALE"], self.ns["LARGE_TOP_STATUS_Y"]
+        center = 960 + (self.ns["CHESTNUT_ICON_CENTER_X"] - 960) * scale
+        half_width = self.ns["MODEL_LABEL_MAX_WIDTH"] * scale / 2
+        left, right = (center - half_width) / 2, (center + half_width) / 2
+        top = (row_y + (self.ns["TOP_STATUS_DETAIL_CENTER_Y"] - 15) * scale) / 2
+        bottom = top + (30 + self.ns["TOP_STATUS_LABEL_FONT_SIZE"] * self.ns["TEXT_VERTICAL_CENTER_OFFSET_RATIO"]) * scale / 2
         self.assertEqual(x, math.floor(left))
         self.assertEqual(y, math.floor(top))
         self.assertEqual(width, math.ceil(right) - math.floor(left))
         self.assertEqual(height, math.ceil(bottom) - math.floor(top))
         self.rl.end_scissor_mode.assert_called_once()
 
-    def test_compact_model_clip_tracks_top_row_at_native_and_scaled_resolution(self):
-        self.hud._compact_panel = True
+    def test_model_clip_tracks_both_panels_at_native_and_scaled_resolution(self):
         self.hud._measure_text.return_value = (300.0, 30.0)
-        for width, height in ((1920, 462), (960, 231)):
+        for compact, width, height in ((True, 1920, 462), (True, 960, 231), (False, 1920, 720), (False, 960, 360)):
             with self.subTest(width=width, height=height):
+                self.hud._compact_panel = compact
                 self.hud.width, self.hud.height = width, height
                 self.draw_name("Long model name", 10.0)
                 x, y, w, h = self.rl.begin_scissor_mode.call_args.args
-                scale = self.ns["COMPACT_TOP_STATUS_SCALE"]
+                scale = self.ns["COMPACT_TOP_STATUS_SCALE" if compact else "LARGE_TOP_STATUS_SCALE"]
+                row_y = self.ns["COMPACT_TOP_STATUS_Y" if compact else "LARGE_TOP_STATUS_Y"]
+                native_height = 462 if compact else 720
                 center = 960 + (self.ns["CHESTNUT_ICON_CENTER_X"] - 960) * scale
                 half_width = self.ns["MODEL_LABEL_MAX_WIDTH"] * scale / 2
-                top = self.ns["COMPACT_TOP_STATUS_Y"] + (self.ns["TOP_STATUS_DETAIL_CENTER_Y"] - 15) * scale
+                top = row_y + (self.ns["TOP_STATUS_DETAIL_CENTER_Y"] - 15) * scale
                 bottom = top + (30 + self.ns["TOP_STATUS_LABEL_FONT_SIZE"] * self.ns["TEXT_VERTICAL_CENTER_OFFSET_RATIO"]) * scale
                 self.assertEqual(x, math.floor((center - half_width) * width / 1920))
                 self.assertEqual(w, math.ceil((center + half_width) * width / 1920) - x)
-                self.assertEqual(y, math.floor(top * height / 462))
-                self.assertEqual(h, math.ceil(bottom * height / 462) - y)
+                self.assertEqual(y, math.floor(top * height / native_height))
+                self.assertEqual(h, math.ceil(bottom * height / native_height) - y)
 
     def test_compact_short_name_remains_centered_beneath_gpu(self):
         self.hud._compact_panel = True
@@ -375,6 +379,31 @@ class StatusLabelTests(unittest.TestCase):
                     if progress == 1.0:
                         self.assertAlmostEqual(center_y, self.ns["TOP_STATUS_DETAIL_CENTER_Y"])
                         self.assertEqual(size, self.ns["TOP_STATUS_LABEL_FONT_SIZE"])
+
+
+    def test_large_acc_off_lfa_grows_and_moves_without_changing_engaged_or_compact(self):
+        self.hud._lfa_texture = object()
+        self.hud._top_row_tint = Mock(return_value=(0, 255, 0))
+        self.hud._draw_bottom_aligned_texture_icon = Mock(return_value=True)
+        self.hud._draw_steering_angle_text = Mock()
+        self.hud._acc_layout_settle_scale = 1.0
+        state = SimpleNamespace(wheel_critical=False, steering_angle_deg=10.0)
+        for compact in (False, True):
+            self.hud._compact_panel = compact
+            for progress in (0., .5, 1.):
+                self.hud._draw_lfa_status_icon(state, progress)
+                args = self.hud._draw_bottom_aligned_texture_icon.call_args.args
+                font = self.hud._draw_steering_angle_text.call_args.args[-1]
+                base_scale = 1 + (self.ns["ACC_OFF_LFA_SCALE"] - 1) * (1 - progress)
+                base_font = self.ns["TOP_STATUS_LABEL_FONT_SIZE"] * base_scale
+                base_center = self.ns["TURN_SIGNAL_CENTER_Y"] + (
+                    360 - base_font * .625 + self.ns["ACC_OFF_LFA_OFFSET_Y"] - self.ns["TURN_SIGNAL_CENTER_Y"]
+                ) * (1 - progress)
+                extra_scale = 1 if compact else 1 + .5 * (1 - progress)
+                self.assertAlmostEqual(args[3], self.ns["LFA_STATUS_ICON_SIZE"] * base_scale * extra_scale)
+                self.assertAlmostEqual(font, base_font * extra_scale)
+                self.assertAlmostEqual((args[2] - args[4] / 2 - base_center) * .9,
+                                       0 if compact else 50 * (1 - progress))
 
 
 if __name__ == "__main__":

@@ -12,6 +12,47 @@ TREE = ast.parse((ROOT / "cluster_renderer.py").read_text(encoding="utf-8"))
 RENDERER = next(node for node in TREE.body if isinstance(node, ast.ClassDef) and node.name == "ClusterUiRenderer")
 
 
+@pytest.mark.parametrize("product_id,rotated", [(None, False), (0x0092, False), (0x0123, True)])
+def test_output_rotation_is_only_enabled_for_12p3_usb(product_id, rotated):
+    init = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "__init__")
+    assignment = next(n for n in init.body if isinstance(n, ast.Assign)
+                      and ast.unparse(n.targets[0]) == "self._usb_rotate_180")
+    renderer = SimpleNamespace()
+    exec(compile(ast.Module(body=[assignment], type_ignores=[]), "<USB orientation>", "exec"),
+         {"self": renderer, "usb_product_id": product_id})
+    assert renderer._usb_rotate_180 is rotated
+
+
+@pytest.mark.parametrize("rotated", [False, True])
+@pytest.mark.parametrize("method_name", ["render_to_nv12_buffer", "_render_to_image"])
+def test_portrait_upload_rotation_flips_both_source_axes(method_name, rotated):
+    method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == method_name)
+    source = next(n for n in ast.walk(method) if isinstance(n, ast.Assign)
+                  and ast.unparse(n.targets[0]) == "source")
+    namespace = {
+        "self": SimpleNamespace(_usb_rotate_180=rotated),
+        "target": SimpleNamespace(texture=SimpleNamespace(width=1920, height=720)),
+        "rl": SimpleNamespace(Rectangle=lambda *args: args),
+    }
+    exec(compile(ast.Module(body=[source], type_ignores=[]), "<GPU upload orientation>", "exec"), namespace)
+    assert namespace["source"] == ((0., 0., -1920., -720.) if rotated else (0., 0., 1920., 720.))
+
+
+@pytest.mark.parametrize("rotated", [False, True])
+def test_landscape_readback_rotation_preserves_framebuffer_vertical_correction(rotated):
+    method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "_render_to_image")
+    block = next(n for n in ast.walk(method) if isinstance(n, ast.If)
+                 and ast.unparse(n.test) == "self._usb_rotate_180")
+    calls = []
+    namespace = {
+        "self": SimpleNamespace(_usb_rotate_180=rotated), "image": object(),
+        "rl": SimpleNamespace(image_flip_horizontal=lambda image: calls.append("horizontal"),
+                              image_flip_vertical=lambda image: calls.append("vertical")),
+    }
+    exec(compile(ast.Module(body=[block], type_ignores=[]), "<landscape orientation>", "exec"), namespace)
+    assert calls == (["horizontal"] if rotated else ["vertical"])
+
+
 @pytest.mark.parametrize("is_offroad", [False, True])
 @pytest.mark.parametrize("gear", [None, "P", "R", "N", "D", "B"])
 def test_offroad_gear_defaults_to_park_without_overriding_onroad(is_offroad, gear):
@@ -54,7 +95,8 @@ def region_method(matrix):
     constants = [node for node in TREE.body if isinstance(node, ast.Assign)
                  and isinstance(node.targets[0], ast.Name)
                  and node.targets[0].id in ("SPEED_VALUE_CENTER_X", "SPEED_VALUE_CENTER_Y", "GEAR_STATUS_CENTER_X", "GEAR_STATUS_CENTER_Y",
-                                           "COMPACT_TOP_STATUS_SCALE", "COMPACT_TOP_STATUS_Y")]
+                                           "COMPACT_TOP_STATUS_SCALE", "COMPACT_TOP_STATUS_Y",
+                                           "LARGE_TOP_STATUS_SCALE", "LARGE_TOP_STATUS_Y")]
     method = next(node for node in RENDERER.body if isinstance(node, ast.FunctionDef) and node.name == "_panel_region")
     namespace = {"rl": matrix, "contextmanager": contextmanager, "DESIGN_HEIGHT": 720}
     module = ast.Module(body=[
@@ -82,12 +124,20 @@ def test_compact_native_centers_and_undistorted_sizes(region, source, target, sc
     assert matrix.stack == []
 
 
-@pytest.mark.parametrize("region", ["speed", "gear", "status", "top_status", "lfa"])
-def test_large_panel_does_not_change_existing_matrix(region):
+@pytest.mark.parametrize("region,source,target,scale", [
+    ("speed", (255, 350), (245, 360), .9),
+    ("gear", (1615, 350), (1675, 360), .82),
+    ("status", (960, 0), (960, 0), .85),
+    ("top_status", (960, 0), (960, 14), .9),
+    ("lfa", (960, 0), (960, 14), .9),
+])
+def test_large_panel_matches_new_background_and_keeps_aspect_ratio(region, source, target, scale):
     matrix = Matrix()
     with region_method(matrix)(SimpleNamespace(_compact_panel=False), region):
-        assert matrix.transform == (1, 1, 0, 0)
-    assert matrix.calls == []
+        assert matrix.point(*source) == pytest.approx(target)
+        assert matrix.transform[:2] == pytest.approx((scale, scale))
+    assert matrix.transform == (1, 1, 0, 0)
+    assert matrix.stack == []
 
 
 def test_compact_status_row_stays_between_side_panels_and_above_road():
@@ -106,10 +156,11 @@ def test_compact_status_row_stays_between_side_panels_and_above_road():
         assert off_bottom < 462
 
 
-def test_compact_transform_cleanup_after_draw_error():
+@pytest.mark.parametrize("compact", [False, True])
+def test_panel_transform_cleanup_after_draw_error(compact):
     matrix = Matrix()
     with pytest.raises(RuntimeError, match="draw failed"):
-        with region_method(matrix)(SimpleNamespace(_compact_panel=True), "speed"):
+        with region_method(matrix)(SimpleNamespace(_compact_panel=compact), "speed"):
             raise RuntimeError("draw failed")
     assert matrix.transform == (1, 1, 0, 0)
     assert matrix.stack == []
@@ -166,7 +217,7 @@ def test_compact_turn_signals_move_one_hundred_native_pixels_outward(side, origi
 
 
 @pytest.mark.parametrize("compact", [False, True])
-def test_road_clipping_is_compact_only_and_cleans_up(compact):
+def test_road_clipping_matches_panel_and_cleans_up(compact):
     method = next(node for node in RENDERER.body if isinstance(node, ast.FunctionDef) and node.name == "_render_world")
     start = next(index for index, node in enumerate(method.body) if isinstance(node, ast.If)
                  and ast.unparse(node.test) == "self._compact_panel")
@@ -181,11 +232,11 @@ def test_road_clipping_is_compact_only_and_cleans_up(compact):
         events.append("draw")
         raise RuntimeError("draw failed")
 
-    renderer = SimpleNamespace(_compact_panel=compact, width=1920, height=462, _draw_scene=draw)
+    renderer = SimpleNamespace(_compact_panel=compact, width=1920, height=462 if compact else 720, _draw_scene=draw)
     with pytest.raises(RuntimeError, match="draw failed"):
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "<road clipping>", "exec"),
-             {"self": renderer, "rl": rl, "scene": None, "state": None})
-    assert events == ([(560, 125, 800, 337), "draw", "end"] if compact else ["draw"])
+             {"self": renderer, "rl": rl, "scene": None, "state": None, "DESIGN_WIDTH": 1920, "DESIGN_HEIGHT": 720})
+    assert events == ([(560, 125, 800, 337), "draw", "end"] if compact else [(440, 205, 1040, 515), "draw", "end"])
 
 
 @pytest.mark.parametrize("compact", [False, True])
@@ -204,24 +255,42 @@ def test_scene_zoom_is_uniform_and_compact_only(compact, fov):
 
 
 @pytest.mark.parametrize("compact", [False, True])
-def test_compact_projection_grows_only_horizontal_axis(compact):
+def test_panel_projection_grows_only_horizontal_axis(compact):
     method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "_draw_scene")
-    block = next(n for n in method.body if isinstance(n, ast.If)
-                 and ast.unparse(n.test) == "self._compact_panel" and "projection" in ast.unparse(n))
+    start = next(i for i, n in enumerate(method.body) if isinstance(n, ast.Assign)
+                 and ast.unparse(n.targets[0]) == "projection")
+    nodes = method.body[start:start + 3]
     projection = SimpleNamespace(m0=2., m5=3., m10=4.)
     written = []
     namespace = {
         "self": SimpleNamespace(_compact_panel=compact), "COMPACT_SCENE_WIDTH_SCALE": 1.56,
+        "LARGE_SCENE_WIDTH_SCALE": 1.3,
         "rl": SimpleNamespace(rl_get_matrix_projection=lambda: projection,
                               rl_set_matrix_projection=lambda matrix: written.append(matrix)),
     }
-    exec(compile(ast.Module(body=[block], type_ignores=[]), "<horizontal zoom>", "exec"), namespace)
-    assert projection.m0 == pytest.approx(3.12 if compact else 2.)
+    constants = [n for n in TREE.body if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
+                 and n.targets[0].id in ("COMPACT_SCENE_WIDTH_SCALE", "LARGE_SCENE_WIDTH_SCALE")]
+    exec(compile(ast.Module(body=constants, type_ignores=[]), "<scene scales>", "exec"), namespace)
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), "<horizontal zoom>", "exec"), namespace)
+    assert projection.m0 == pytest.approx(3.12 if compact else 2.6)
     assert (projection.m5, projection.m10) == (3., 4.)
-    assert len(written) == int(compact)
+    assert len(written) == 1
 
 
-@pytest.mark.parametrize("horizontal_scale", [1., 1.56])
+@pytest.mark.parametrize("compact,expected", [(False, 1.3), (True, 1.56)])
+def test_both_projected_label_paths_share_scene_width(compact, expected):
+    calls = [node for node in ast.walk(RENDERER) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Name) and node.func.id == "world_to_screen_label_anchor"]
+    assert len(calls) == 2
+    namespace = {"self": SimpleNamespace(_compact_panel=compact)}
+    constants = [n for n in TREE.body if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
+                 and n.targets[0].id in ("COMPACT_SCENE_WIDTH_SCALE", "LARGE_SCENE_WIDTH_SCALE")]
+    exec(compile(ast.Module(body=constants, type_ignores=[]), "<scene scales>", "exec"), namespace)
+    for call in calls:
+        assert eval(compile(ast.Expression(call.args[-1]), "<label scale>", "eval"), namespace) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("horizontal_scale", [1., 1.3, 1.56])
 def test_label_projection_matches_horizontal_scene_zoom(horizontal_scale):
     method = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == "world_to_screen_label_anchor")
     namespace = {"math": math, "camera_depth_m": lambda *args: 10.,
@@ -233,43 +302,43 @@ def test_label_projection_matches_horizontal_scene_zoom(horizontal_scale):
 
 
 @pytest.mark.parametrize("compact", [False, True])
-def test_metric_font_enlarges_twenty_percent_only_on_compact_panel(compact):
+def test_metric_font_sizes_match_each_panel(compact):
     method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "_draw_system_top_metrics")
     assignment = next(n for n in method.body if isinstance(n, ast.Assign)
                       and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "metric_font_size")
     namespace = {"self": SimpleNamespace(_compact_panel=compact), "TOP_SYSTEM_METRIC_FONT_SIZE": 24.}
     exec(compile(ast.Module(body=[assignment], type_ignores=[]), "<metric font>", "exec"), namespace)
-    assert namespace["metric_font_size"] == pytest.approx(28.8 if compact else 24.)
+    assert namespace["metric_font_size"] == pytest.approx(28.8 if compact else 26.4)
     calls = [n for n in ast.walk(method) if isinstance(n, ast.Call)
              and isinstance(n.func, ast.Attribute) and n.func.attr == "_draw_text"]
     assert all(ast.unparse(n.args[3]) == "metric_font_size" for n in calls)
 
 
 @pytest.mark.parametrize("compact", [False, True])
-def test_side_metrics_move_inward_only_on_compact_panel(compact):
+def test_side_metrics_follow_each_background(compact):
     method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "_draw_system_top_metrics")
     positions = [n for n in method.body if isinstance(n, ast.Assign)
                  and isinstance(n.targets[0], ast.Name) and n.targets[0].id in ("left_x", "right_x")]
     namespace = {"self": SimpleNamespace(_compact_panel=compact),
-                 "TOP_SYSTEM_METRIC_LEFT_X": 260, "TOP_SYSTEM_METRIC_RIGHT_X": 1660}
+                 "TOP_SYSTEM_METRIC_LEFT_X": 295, "TOP_SYSTEM_METRIC_RIGHT_X": 1620}
     exec(compile(ast.Module(body=positions, type_ignores=[]), "<metric positions>", "exec"), namespace)
-    assert (namespace["left_x"], namespace["right_x"]) == ((310, 1610) if compact else (260, 1660))
+    assert (namespace["left_x"], namespace["right_x"]) == ((310, 1610) if compact else (295, 1620))
 
 
 @pytest.mark.parametrize("compact", [False, True])
-def test_side_metrics_move_up_thirty_native_pixels_only_on_compact_panel(compact):
+def test_side_metrics_stay_at_top_on_both_panels(compact):
     method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "_draw_system_top_metrics")
     position = next(n for n in method.body if isinstance(n, ast.Assign)
                     and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "metric_y")
     namespace = {"self": SimpleNamespace(_compact_panel=compact), "TOP_SYSTEM_METRIC_Y": 100., "DESIGN_HEIGHT": 720.}
     exec(compile(ast.Module(body=[position], type_ignores=[]), "<metric height>", "exec"), namespace)
-    assert (100. - namespace["metric_y"]) * 462. / 720. == pytest.approx(30. if compact else 0.)
+    assert namespace["metric_y"] == pytest.approx(100. - 30. * 720. / 462. if compact else 100.)
     texts = [n for n in ast.walk(method) if isinstance(n, ast.Call)
              and isinstance(n.func, ast.Attribute) and n.func.attr == "_draw_text"]
     namespace["metric_y"] = 0.
     namespace["TOP_SYSTEM_METRIC_LINE_GAP"] = 30.
     heights = [eval(compile(ast.Expression(n.args[2]), "<metric text height>", "eval"), namespace) for n in texts]
-    assert heights == ([30., 0., 30.] if compact else [0., 0., 30.])
+    assert heights == ([30., 0., 30.] if compact else [-20., -30., 0.])
 
 
 @pytest.mark.parametrize("compact", [False, True])

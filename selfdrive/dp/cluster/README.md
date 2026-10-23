@@ -38,7 +38,26 @@ Turning ignition off does not restart this timer in TR modes.
 Existing installations must explicitly select a TR mode to enable autorun;
 the default Std. no longer starts cluster. Manual diagnostic commands below
 remain available independently of the DP setting.
-The 9.2-inch panel has its own HUD placement, not a vertically squeezed
+The 12.3-inch layout follows the tall side panels in `assets/bg.png`.
+USB output for the 12.3-inch panel (PID 0x0123) is rotated 180 degrees,
+including JPEG, PNG and H.264/NV12 output. The upload transform runs on the GPU
+for portrait output. The 9.2-inch panel and previews without a USB product ID
+retain their existing orientation; HUD design coordinates remain unchanged.
+Speed and gear are centered at (245, 360) and (1675, 360) on the
+1920x720 canvas, with uniform 0.9x and 0.82x HUD scales respectively.
+MEM/CPU occupy the upper left panel at x=295, y=70/100; TEMP occupies the upper
+right at x=1620, y=80, with metric fonts enlarged 10%. The top icon/detail row
+uses a uniform 0.9x scale and a 14-pixel downward offset, including its
+model-name scrolling clip and the ACC-off LFA animation. AUTO HOLD uses
+a separate 0.85x scale below the top details.
+Only the ACC-off central LFA wheel and angle are enlarged another 1.5x,
+with the wheel center moved down 50 pixels; both changes blend out during
+the transition to the unchanged engaged LFA icon.
+The 3D scene is stretched horizontally by 1.3x without changing camera
+field of view or vertical proportions. Both radar labels and vehicle badges
+follow that projection. The scene is clipped to x=440–1480, y=205–720
+to keep it out of the side readouts and top status row.
+The 9.2-inch panel retains its own HUD placement, not a vertically squeezed
 12.3-inch layout: speed and gear are centered at (250, 240) and (1660, 240)
 in its native 1920x462 canvas. Text/icons retain their aspect ratios; the
 central status row is uniformly reduced and inset, while the road/vehicle
@@ -57,7 +76,7 @@ than the initial 9.2-inch layout; the speed block is centered at native x=220,
 The top icon row (including turn
 signals and GPU/model information) is shifted up 30 native pixels without
 moving AUTO HOLD or the ACC-off wheel/angle animation. The latter uses the compact central
-layout. The 12.3-inch HUD coordinates, sizes and road rendering are unchanged.
+layout.
 The compact AUTO HOLD label is raised a net 5 native pixels
 from its initial placement; its size and blink are unchanged.
 The compact top icons and their labels are enlarged another 30%. Turn signals
