@@ -986,7 +986,7 @@ class ClusterUiRenderer:
     def _panel_region(self, region: str) -> Iterator[None]:
         if not self._compact_panel:
             center_x, center_y, scale, origin_x, origin_y = {
-                "speed": (245.0, 360.0, 0.9, SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y),
+                "speed": (225.0, 360.0, 0.9, SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y),
                 "gear": (1675.0, 360.0, 0.82, GEAR_STATUS_CENTER_X, GEAR_STATUS_CENTER_Y),
                 "status": (960.0, 0.0, 0.85, 960.0, 0.0),
                 "top_status": (960.0, LARGE_TOP_STATUS_Y, LARGE_TOP_STATUS_SCALE, 960.0, 0.0),

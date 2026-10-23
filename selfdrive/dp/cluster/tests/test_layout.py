@@ -125,7 +125,7 @@ def test_compact_native_centers_and_undistorted_sizes(region, source, target, sc
 
 
 @pytest.mark.parametrize("region,source,target,scale", [
-    ("speed", (255, 350), (245, 360), .9),
+    ("speed", (255, 350), (225, 360), .9),
     ("gear", (1615, 350), (1675, 360), .82),
     ("status", (960, 0), (960, 0), .85),
     ("top_status", (960, 0), (960, 14), .9),

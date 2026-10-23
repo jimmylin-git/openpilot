@@ -43,7 +43,7 @@ USB output for the 12.3-inch panel (PID 0x0123) is rotated 180 degrees,
 including JPEG, PNG and H.264/NV12 output. The upload transform runs on the GPU
 for portrait output. The 9.2-inch panel and previews without a USB product ID
 retain their existing orientation; HUD design coordinates remain unchanged.
-Speed and gear are centered at (245, 360) and (1675, 360) on the
+Speed and gear are centered at (225, 360) and (1675, 360) on the
 1920x720 canvas, with uniform 0.9x and 0.82x HUD scales respectively.
 Speed digits and gear text are enlarged another 30% within those regions;
 the speed unit and the 9.2-inch fonts are unchanged.
