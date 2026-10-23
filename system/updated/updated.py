@@ -20,6 +20,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.system.hardware import AGNOS, HARDWARE
 from openpilot.system.version import get_build_metadata
+from openpilot.system.updated.overlay import overlay_skip_reason, write_base_state
 
 LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
 STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
@@ -126,15 +127,13 @@ def dismount_overlay() -> None:
 
 def init_overlay() -> None:
 
-  # Re-create the overlay if BASEDIR/.git has changed since we created the overlay
+  # Git index refreshes and lock files are not source changes.
   if OVERLAY_INIT.is_file() and os.path.ismount(OVERLAY_MERGED):
-    git_dir_path = os.path.join(BASEDIR, ".git")
-    new_files = run(["find", git_dir_path, "-newer", str(OVERLAY_INIT)])
-    if not len(new_files.splitlines()):
-      # A valid overlay already exists
+    reason = overlay_skip_reason(BASEDIR)
+    if reason is None:
       return
     else:
-      cloudlog.info(".git directory changed, recreating overlay")
+      cloudlog.info("recreating overlay: %s", reason)
 
   cloudlog.info("preparing new safe staging area")
 
@@ -152,15 +151,11 @@ def init_overlay() -> None:
   if os.lstat(BASEDIR).st_dev != os.lstat(OVERLAY_MERGED).st_dev:
     raise RuntimeError("base and overlay merge directories are on different filesystems; not valid for overlay FS!")
 
-  # Leave a timestamped canary in BASEDIR to check at startup. The device clock
-  # should be correct by the time we get here. If the init file disappears, or
-  # critical mtimes in BASEDIR are newer than .overlay_init, continue.sh can
-  # assume that BASEDIR has used for local development or otherwise modified,
-  # and skips the update activation attempt.
+  # The launcher verifies this source baseline before activating the update.
   consistent_file = Path(os.path.join(BASEDIR, ".overlay_consistent"))
   if consistent_file.is_file():
     consistent_file.unlink()
-  OVERLAY_INIT.touch()
+  write_base_state(BASEDIR)
 
   os.sync()
   overlay_opts = f"lowerdir={BASEDIR},upperdir={OVERLAY_UPPER},workdir={OVERLAY_METADATA}"

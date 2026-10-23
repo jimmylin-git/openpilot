@@ -138,16 +138,11 @@ set_model_fingerprint() {
 function launch {
   [ -f "$DIR/.git/index.lock" ] && rm -f $DIR/.git/index.lock
 
-  # Git 智慧更新機制：commit hash 比對 (快) + 本地修改保護 (近乎零成本的 stat 比對)
-  #
-  # LOCAL_MODIFIED 檢查沿用原生機制：只要 .git 底下有任何檔案比 .overlay_init 新，
-  # 就代表使用者在本地做了修改（不論是否已 commit），此時一律跳過覆蓋更新，
-  # 避免自動更新把還在寫的東西沖掉。這個檢查只是一次 find+grep，幾乎不花時間，
-  # 不會拖慢開機。
+  # Verify source changes rather than Git metadata timestamps before activation.
   if [ ! -f "/data/.skip_overlay_check" ]; then
     LOCAL_MODIFIED=0
-    if [ -f "${DIR}/.overlay_init" ]; then
-      find ${DIR}/.git -newer ${DIR}/.overlay_init 2>/dev/null | grep -q '.' && LOCAL_MODIFIED=1
+    if [ -f "${STAGING_ROOT}/finalized/.overlay_consistent" ]; then
+      python3 "$DIR/system/updated/overlay.py" "$DIR" || LOCAL_MODIFIED=1
     fi
 
     if [ "$LOCAL_MODIFIED" -eq 1 ]; then

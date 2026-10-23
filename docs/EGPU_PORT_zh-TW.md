@@ -26,7 +26,17 @@ v2 改成**下載模型的 onnx、在車上自己編譯一次**，warp 永遠編
 
 ## 1. 機器上的 tinygrad（兩份，互相隔離）
 
-### dpegpu00-cluster：Dashy eGPU 網頁管理
+### dpegpu-cluster：車機更新保護
+
+更新器下載到 staging 後，「安裝」會重啟並套用 finalized 版本。`.overlay_init`
+記錄下載基底的 commit、分支與乾淨狀態；開機時驗證真正的程式修改，不再以 `.git`
+目錄時間判斷。單純的索引刷新、Git 設定或 fetch 中繼資料不會阻擋安裝；本地 commit、
+切換分支、暫存／未暫存修改、未忽略的新檔與子模組修改仍會阻止覆蓋，原因寫入開機日誌。
+舊版空白 `.overlay_init` 會安全拒絕套用，必須重新下載建立新基底。
+首次導入此修正需先更新目前執行中的 launcher／更新器；只把修正版下載進 staging，
+無法改變重啟前仍在使用的舊 launcher 判斷。
+
+### Dashy eGPU 網頁入口
 
 開啟 `http://<車機 IP>:5088`，點選左下角「eGPU 管理」（設定面板開啟時也可見），或直接開啟
 `/pages/egpu.html`。可查看連接、載入、執行與下載／編譯狀態，以及啟用、
