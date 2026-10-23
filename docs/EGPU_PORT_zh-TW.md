@@ -26,6 +26,18 @@ v2 改成**下載模型的 onnx、在車上自己編譯一次**，warp 永遠編
 
 ## 1. 機器上的 tinygrad（兩份，互相隔離）
 
+### dpegpu00-cluster：Dashy eGPU 網頁管理
+
+開啟 `http://<車機 IP>:5088`，點選左上角「eGPU 管理」，或直接開啟
+`/pages/egpu.html`。可查看連接、載入、執行與下載／編譯狀態，以及啟用、
+選擇／下載模型、取消、刪除、清除快取及更新清單。所有變更都要求明確的
+offroad 狀態；onroad 或狀態讀取失敗時僅供查看／停用操作。
+
+此頁沿用 `egpu_manager` 的參數協定，沒有變更推論、單趟路由、韌體或
+Jetlink 版本。Jetlink 已開啟時拒絕啟用 eGPU；需要先透過既有設定關閉
+Jetlink。模型清單仍共用，背景處理結果以狀態欄為準，送出要求不等於完成。
+清除快取保留目前模型，刪除目前模型則會解除該模型選擇。
+
 ### dpegpu00-cluster 開機診斷
 
 - `hardwared` 首次發布 offroad `deviceState` 後，至少保持 offroad 3 秒，才允許依當下點火及全部既有啟動條件進入 onroad。以 monotonic 時間計算，不阻塞硬體／Panda 資料接收，也不偽造點火；診斷條件名為 `initial_offroad_complete`。計時只在此程序啟動時進行一次，正常熄火再點火不重算，重啟 `hardwared` 則重算。這不會先載入小模型，也不保證 eGPU 在 3 秒內就緒或能解決模型載入停滯。

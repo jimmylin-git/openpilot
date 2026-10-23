@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>eGPU 管理 - Dashy</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #111820; color: #eef3f7; }
+    body { max-width: 760px; margin: auto; padding: 22px 18px 60px; }
+    a { color: #9ed3ff; }
+    section { background: #1b2530; border: 1px solid #354555; border-radius: 16px; padding: 20px; margin: 22px 0; }
+    p { line-height: 1.6; }
+    label { display: block; margin: 20px 0 8px; }
+    select, button { font: inherit; border-radius: 9px; border: 1px solid #597082; background: #253747; color: inherit; padding: 12px; min-height: 46px; }
+    select { width: 100%; }
+    button { cursor: pointer; }
+    button:disabled, select:disabled { opacity: .45; cursor: default; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    .danger { border-color: #c77d7d; }
+    output { display: block; white-space: pre-wrap; line-height: 1.7; margin: 14px 0; overflow-wrap: anywhere; }
+    #notice { background: #283b4a; padding: 12px; border-radius: 10px; }
+    #message { color: #ffb8b8; }
+    input { width: 22px; height: 22px; vertical-align: middle; margin-right: 10px; }
+  </style>
+</head>
+<body>
+  <a href="/">← 返回 Dashy</a>
+  <h1>eGPU 管理</h1>
+  <p id="notice" role="status">正在讀取裝置狀態…</p>
+  <p id="message" role="alert"></p>
+  <section>
+    <p>僅限 offroad 變更設定。選擇模型後會下載並在車機編譯，編譯需要接上 eGPU。設定沿用現有 eGPU 程序；模型路徑於下一趟 onroad 評估，不會在行車中切換。</p>
+    <label><input id="enabled" type="checkbox" disabled>啟用 eGPU 大模型</label>
+    <output id="status">讀取中…</output>
+    <label for="model">大模型</label>
+    <select id="model" disabled></select>
+    <div class="actions">
+      <button id="select" disabled>套用／下載模型</button>
+      <button id="cancel" disabled>取消下載／編譯</button>
+    </div>
+    <label for="delete-model">已下載／編譯的模型</label>
+    <select id="delete-model" disabled></select>
+    <div class="actions">
+      <button id="delete" class="danger" disabled>刪除選取模型</button>
+      <button id="clear" class="danger" disabled>清除快取（保留目前模型）</button>
+      <button id="refresh" disabled>更新模型清單</button>
+    </div>
+    <p>模型清單與 Jetlink 共用；此頁不啟用或變更 Jetlink。沒有新增韌體燒錄功能。</p>
+  </section>
+  <script src="/js/egpu.js"></script>
+</body>
+</html>

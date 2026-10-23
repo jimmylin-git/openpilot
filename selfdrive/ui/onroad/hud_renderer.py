@@ -22,10 +22,9 @@ from openpilot.selfdrive.ui.ui_state import EgpuState
 SET_SPEED_NA = 255
 KM_TO_MILE = 0.621371
 CRUISE_DISABLED_CHAR = '–'
-Congestion = custom.Tdx.Congestion
 TRAFFIC_STOP_IDX = int(custom.LongitudinalPlanDP.LongitudinalPlanSource.trafficStop)
 
-# dp - 紅綠燈減速中 banner（基準尺寸 x1.5）：佔用 TDX「前方車速」的位置（中央車速正下方），顯示期間 TDX 全部讓位
+# dp - 紅綠燈減速中 banner（基準尺寸 x1.5）：中央車速正下方
 TS_HOLD_TIME = 0.5          # 秒；braking 訊號短暫掉落時維持顯示，避免閃爍
 TS_FONT_SIZE = 144
 TS_BANNER_HEIGHT = 225
@@ -112,12 +111,6 @@ class HudRenderer(Widget):
     self.ts_braking: bool = False
     self._ts_last_braking_t: float = -1e9
 
-    # --- TDX 路況預警變數 ---
-    self.tdx_next_speed: int = -1
-    self.tdx_congestion = Congestion.unknown
-    self.tdx_event_active: bool = False
-    self.tdx_event_desc: str = ""
-
     self._font_semi_bold: rl.Font = gui_app.font(FontWeight.SEMI_BOLD)
     self._font_bold: rl.Font = gui_app.font(FontWeight.BOLD)
     self._font_medium: rl.Font = gui_app.font(FontWeight.MEDIUM)
@@ -148,8 +141,6 @@ class HudRenderer(Widget):
       self.lead_dist_raw = 0.0
       self.steering_angle_deg = 0.0
 
-      # 重置 TDX 變數，避免殘留上次熄火前的資料
-      self._reset_tdx()
       self.ts_braking = False
       self._ts_last_braking_t = -1e9
       return
@@ -167,22 +158,6 @@ class HudRenderer(Widget):
     else:
       self.lead_dist_raw = 0.0
       self.lead_dist = "-"
-
-    # --- 讀取 TDX 狀態 ---
-    # 只採用本次上路後收到、且仍在更新中的資料（tdxd 1Hz；GPS 失效 / 隧道 / 啟動中不會發布）
-    if sm.recv_frame['tdx'] >= ui_state.started_frame and sm.alive['tdx']:
-      tdx = sm['tdx']
-      self.tdx_next_speed = tdx.nextSpeed
-      self.tdx_congestion = tdx.congestion
-      events = tdx.events
-      self.tdx_event_active = len(events) > 0
-      if self.tdx_event_active:
-        loc_part = "目前" if events[0].isCurrentSection else "前方"
-        self.tdx_event_desc = f"{loc_part}: {' / '.join(str(e.description) for e in events)}"
-      else:
-        self.tdx_event_desc = ""
-    else:
-      self._reset_tdx()
 
     v_cruise_cluster = car_state.vCruiseCluster
     self.set_speed = (
@@ -216,12 +191,6 @@ class HudRenderer(Widget):
       self._ts_last_braking_t = now
     self.ts_braking = (now - self._ts_last_braking_t) < TS_HOLD_TIME
 
-  def _reset_tdx(self) -> None:
-    self.tdx_next_speed = -1
-    self.tdx_congestion = Congestion.unknown
-    self.tdx_event_active = False
-    self.tdx_event_desc = ""
-
   def _render(self, rect: rl.Rectangle) -> None:
     """Render HUD elements to the screen."""
     # Draw the header background
@@ -239,12 +208,8 @@ class HudRenderer(Widget):
 
     self._draw_current_speed(rect)
 
-    # --- 紅綠燈減速中（優先）/ TDX 雙行顯示資訊 ---
-    # 紅綠燈減速期間 TDX（前方車速 + 底部事件）全部讓位，避免搶注意力
     if self.ts_braking:
       self._draw_traffic_stop(rect)
-    else:
-      self._draw_tdx_info(rect)
 
     button_x = rect.x + rect.width - UI_CONFIG.border_size - UI_CONFIG.button_size
     button_y = rect.y + UI_CONFIG.border_size
@@ -306,109 +271,8 @@ class HudRenderer(Widget):
   def user_interacting(self) -> bool:
     return self._exp_button.is_pressed
 
-  def _draw_tdx_info(self, rect: rl.Rectangle) -> None:
-    """繪製高公局即時路況與事件 (車速維持原位，事件貼齊下方單行跑馬燈)"""
-    if self.tdx_next_speed <= 0 and not self.tdx_event_active:
-      return
-
-    bg_padding_x = 45
-    bg_padding_y = 20
-
-    # 1. 決定車速的文字顏色
-    if self.tdx_congestion == Congestion.smooth:
-      speed_color = rl.Color(128, 216, 166, 255)
-    elif self.tdx_congestion == Congestion.slow:
-      speed_color = rl.Color(255, 204, 0, 255)
-    elif self.tdx_congestion == Congestion.congested:
-      speed_color = rl.Color(255, 100, 100, 255)
-    else:
-      speed_color = rl.WHITE
-
-    # ==========================================
-    # 第一行: 車速 (維持在原位：頂部列下方，僅顯示前方車速)
-    # ==========================================
-    if 0 < self.tdx_next_speed <= 150:
-      speed_text = f"前方車速: {self.tdx_next_speed} km/h"
-      tdx_speed_font_size = 90
-      speed_size = measure_text_cached(self._font_semi_bold, speed_text, tdx_speed_font_size)
-      
-      # 恢復原本的固定 Y 軸位置
-      top_y = rect.y + UI_CONFIG.header_height + 25 
-      speed_x = rect.x + rect.width / 2 - speed_size.x / 2
-      
-      bg_rect = rl.Rectangle(speed_x - bg_padding_x, top_y - bg_padding_y, speed_size.x + bg_padding_x * 2, speed_size.y + bg_padding_y * 2)
-      rl.draw_rectangle_rounded(bg_rect, 0.2, 10, rl.Color(0, 0, 0, 160))
-      
-      rl.draw_text_ex(self._font_semi_bold, speed_text, rl.Vector2(speed_x, top_y), tdx_speed_font_size, 0, speed_color)
-
-    # ==========================================
-    # 第二行: 事件 (貼齊下方 Performance 列，單行跑馬燈)
-    # ==========================================
-    if self.tdx_event_active and self.tdx_event_desc:
-      # 計算 Performance 列的位置以決定事件區底部
-      perf_bar_height = PERF_FONT_SIZE + 2 * PERF_PADDING
-      perf_bar_y = rect.y + rect.height - perf_bar_height - PERF_MARGIN_BOTTOM
-
-      tdx_event_font_size = 75
-      max_text_width = rect.width - 200
-
-      text = self.tdx_event_desc
-      text_size = measure_text_cached(self._font_semi_bold, text, tdx_event_font_size)
-      text_width = text_size.x
-      line_height = text_size.y
-
-      display_width = min(text_width, max_text_width)
-
-      event_bg_height = line_height + bg_padding_y * 2
-      event_y = perf_bar_y - event_bg_height - 15  # 留 15px 間距避免太黏
-
-      event_x = rect.x + rect.width / 2 - display_width / 2
-      event_bg_rect = rl.Rectangle(
-          event_x - bg_padding_x,
-          event_y,
-          display_width + bg_padding_x * 2,
-          event_bg_height
-      )
-
-      # 呼吸燈閃爍警告背景
-      alpha = 130 + int(50 * math.sin(time.time() * 5))
-      rl.draw_rectangle_rounded(event_bg_rect, 0.2, 10, rl.Color(220, 50, 50, alpha))
-
-      draw_y = event_y + bg_padding_y
-
-      if text_width > max_text_width:
-        # 文字超長 -> 裁切 + 跑馬燈來回捲動
-        rl.begin_scissor_mode(int(event_bg_rect.x), int(event_bg_rect.y), int(event_bg_rect.width), int(event_bg_rect.height))
-
-        extra_width = text_width - max_text_width
-        scroll_speed = 80.0     # 跑馬燈捲動速度 (像素/秒)
-        scroll_duration = extra_width / scroll_speed
-        pause_duration = 2.0    # 在兩側邊界停留的時間 (秒)
-
-        cycle_time = time.time() % ((scroll_duration + pause_duration) * 2)
-
-        # 四階段: 左停 -> 往左捲 -> 右停 -> 往右捲回
-        if cycle_time < pause_duration:
-          offset = 0.0
-        elif cycle_time < pause_duration + scroll_duration:
-          progress = (cycle_time - pause_duration) / scroll_duration
-          offset = extra_width * progress
-        elif cycle_time < pause_duration * 2 + scroll_duration:
-          offset = extra_width
-        else:
-          progress = (cycle_time - pause_duration * 2 - scroll_duration) / scroll_duration
-          offset = extra_width * (1 - progress)
-
-        draw_x = event_x - offset
-        rl.draw_text_ex(self._font_semi_bold, text, rl.Vector2(draw_x, draw_y), tdx_event_font_size, 0, rl.WHITE)
-
-        rl.end_scissor_mode()
-      else:
-        # 文字沒超長 -> 直接單行置中顯示
-        rl.draw_text_ex(self._font_semi_bold, text, rl.Vector2(event_x, draw_y), tdx_event_font_size, 0, rl.WHITE)
-
   def _draw_traffic_stop(self, rect: rl.Rectangle) -> None:
-    """中央車速正下方（TDX 前方車速的位置）：大型紅綠燈圖示 + 「紅綠燈減速中」"""
+    """中央車速正下方：大型紅綠燈圖示 + 「紅綠燈減速中」"""
     text = "紅綠燈減速中"
     text_size = measure_text_cached(self._font_bold, text, TS_FONT_SIZE)
     icon_w = TS_LIGHT_RADIUS * 6 + TS_LIGHT_GAP * 4

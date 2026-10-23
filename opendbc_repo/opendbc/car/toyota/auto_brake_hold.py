@@ -33,8 +33,8 @@ BRAKE_HOLD_IDLE = 0
 BRAKE_HOLD_COUNTING = 1
 BRAKE_HOLD_ACTIVE = 2
 
-# 呼叫頻率為 50Hz（carcontroller 每 2 個 frame 呼叫一次），50 次 = 1 秒
-BRAKE_HOLD_TIMER = 50
+# 呼叫頻率為 50Hz（carcontroller 每 2 個 frame 呼叫一次），35 次 = 0.7 秒
+BRAKE_HOLD_TIMER = 35
 # SPEED 模式的速度門檻 (m/s)，5 m/s = 18 km/h，與 candy 相同
 BRAKE_HOLD_SPEED_THRESHOLD = 5.
 

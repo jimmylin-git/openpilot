@@ -86,7 +86,6 @@ class UIState:
         "rawAudioData",
         "controlsStateExt",
         "liveTracks", # dp - for dp_ui_lead
-        "tdx",
         "longitudinalPlanDP",  # dp - 紅綠燈減速中 HUD（targets[trafficStop].braking）
         "modelExt",  # dp - jetlink: acceleratorState / bigModel
       ]

@@ -50,6 +50,7 @@ from openpilot.common.params import Params
 from openpilot.system.hardware import PC, HARDWARE
 from openpilot.system.ui.lib.multilang import multilang as base_multilang
 from dragonpilot.settings import SETTINGS, tr
+from dragonpilot.dashy import egpu
 
 try:
     from openpilot.system.version import get_build_metadata as _get_build_metadata
@@ -819,6 +820,8 @@ def setup_aiohttp_app(host: str, port: int, debug: bool):
     app = web.Application(middlewares=[no_cache_middleware])
 
     # API routes
+    app.router.add_get("/api/egpu", egpu.get_status)
+    app.router.add_post("/api/egpu", egpu.post_action)
     app.router.add_get("/api/init", init_api)
     app.router.add_get("/api/files", list_files_api)
     app.router.add_get("/api/play", serve_player_api)

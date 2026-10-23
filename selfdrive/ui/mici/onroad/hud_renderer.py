@@ -15,11 +15,11 @@ from cereal import log, custom
 EventName = log.OnroadEvent.EventName
 TRAFFIC_STOP_IDX = int(custom.LongitudinalPlanDP.LongitudinalPlanSource.trafficStop)
 
-# --- dp 紅綠燈減速中 banner：佔用 TDX 橫幅的位置（畫面中央），顯示期間 TDX 讓位 ---
+# --- dp 紅綠燈減速中 banner（畫面中央） ---
 TS_HOLD_TIME = 0.5      # 秒；braking 訊號短暫掉落時維持顯示，避免閃爍
 TS_FONT_SIZE = 48
 TS_EDGE_BAR_WIDTH = 20  # 與 _draw_edge_warnings 的 bar_width 一致
-TS_EDGE_GAP = 2         # 與 _draw_tdx_info 的 gap 一致
+TS_EDGE_GAP = 2
 TS_PADDING_Y = 15
 TS_ICON_TEXT_GAP = 10
 TS_LIGHT_RADIUS = 11
@@ -130,9 +130,6 @@ class HudRenderer(Widget):
     self.v_ego_cluster_seen: bool = False
     self._engaged: bool = False
 
-    self.tdx_event_active: bool = False
-    self.tdx_event_desc: str = ""
-
     # --- 紅綠燈減速中 ---
     self.ts_braking: bool = False
     self._ts_last_braking_t: float = -1e9
@@ -222,8 +219,6 @@ class HudRenderer(Widget):
       self.is_cruise_set = False
       self.set_speed = SET_SPEED_NA
       self.speed = 0.0
-      self.tdx_event_active = False
-      self.tdx_event_desc = ""
       self.lead_dist = "-"
       self.lead_dist_raw = 0.0
       
@@ -252,38 +247,6 @@ class HudRenderer(Widget):
     else:
       self.lead_dist_raw = 0.0
       self.lead_dist = "-"
-
-    # --- 讀取 TDX 狀態 (背景接收事件) ---
-    # 只採用本次上路後收到、且仍在更新中的資料（tdxd 1Hz；GPS 失效 / 隧道 / 啟動中不會發布）
-    if sm.recv_frame['tdx'] >= ui_state.started_frame and sm.alive['tdx']:
-      try:
-        events = sm['tdx'].events
-        self.tdx_event_active = len(events) > 0
-
-        EVENT_TYPE_LABEL = {
-            1: '交通事故', 2: '施工事件', 3: '壅塞事件',
-            4: '道路管制', 5: '天氣異常', 8: '其他異常'
-        }
-
-        if self.tdx_event_active:
-            # "目前" 與 "前方" 都顯示
-            loc_part = "目前" if events[0].isCurrentSection else "前方"
-
-            unique_labels = []
-            for evt in events:
-                label = EVENT_TYPE_LABEL.get(evt.eventType, '[其他]')
-                if label not in unique_labels:
-                    unique_labels.append(label)
-
-            self.tdx_event_desc = f"{loc_part}:{''.join(unique_labels)}"
-        else:
-            self.tdx_event_desc = ""
-
-      except Exception:
-        pass
-    else:
-      self.tdx_event_active = False
-      self.tdx_event_desc = ""
 
     controls_state = sm['controlsState']
     car_state = sm['carState']
@@ -343,11 +306,8 @@ class HudRenderer(Widget):
     # 顯示置中的動態立體倒三角形與前車距離
     self._draw_lead_info(rect)
     
-    # 紅綠燈減速中（優先）/ TDX 警告：同一個中央位置，紅綠燈減速期間 TDX 讓位
     if self.ts_braking:
       self._draw_traffic_stop(rect)
-    else:
-      self._draw_tdx_info(rect)
 
     # dp - jetlink: which model drives
     self._draw_model_source(rect)
@@ -433,7 +393,7 @@ class HudRenderer(Widget):
     is_warning = (self.lead_dist_raw < 15.0)
 
     if is_warning:
-      # 同步 TDX 頻道的呼吸燈頻率與透明度
+      # 邊緣警告呼吸燈
       alpha = 150 + int(60 * math.sin(time.time() * 5))
       center_color = rl.Color(255, 100, 100, alpha) 
       edge_color = rl.Color(180, 0, 0, alpha)       
@@ -517,9 +477,9 @@ class HudRenderer(Widget):
     draw_rounded_triangle_poly(bar_x, bar_y, bar_w, bar_h, base_r, 0.7, center_color)
 
   def _draw_traffic_stop(self, rect: rl.Rectangle) -> None:
-    """畫面中央橫幅（TDX 橫幅的位置）：紅綠燈圖示 + 「紅綠燈減速中」。
+    """畫面中央橫幅：紅綠燈圖示 + 「紅綠燈減速中」。
 
-    - 寬度與 TDX 橫幅相同，貼齊兩側方向燈 / 盲區邊條內側
+    - 貼齊兩側方向燈 / 盲區邊條內側
     - 有 alert 時不畫（alert 由上方下拉，HUD 疊在 alert 之上，會蓋住 alert 文字）
     """
     if not self._can_draw_top_icons:
@@ -533,7 +493,7 @@ class HudRenderer(Widget):
 
     bg_x = rect.x + TS_EDGE_BAR_WIDTH + TS_EDGE_GAP
     bg_w = rect.width - (TS_EDGE_BAR_WIDTH + TS_EDGE_GAP) * 2
-    pos_y = rect.y + (rect.height - text_size.y) / 2 - 20   # 與 TDX 橫幅相同的垂直位置
+    pos_y = rect.y + (rect.height - text_size.y) / 2 - 20
     bg_y = pos_y - TS_PADDING_Y
     bg_h = text_size.y + TS_PADDING_Y * 2
 
@@ -555,75 +515,6 @@ class HudRenderer(Widget):
 
     text_x = icon_x + icon_w + TS_ICON_TEXT_GAP
     rl.draw_text_ex(self._font_bold, text, rl.Vector2(text_x, pos_y), TS_FONT_SIZE, 0, rl.WHITE)
-
-  def _draw_tdx_info(self, rect: rl.Rectangle) -> None:
-    """TDX 路況警告：單向循環跑馬燈，寬度貼齊兩側 BSM 與方向燈，字體 70"""
-    if not self.tdx_event_active or not self.tdx_event_desc:
-      return
-
-    font_size = 70
-    text_size = measure_text_cached(self._font_bold, self.tdx_event_desc, font_size)
-    
-    # 這裡呼應 BSM 邊緣條的設定
-    bar_width = 20  
-    gap = 2  # 距離兩側邊條的 2px 安全微調間距
-
-    # 計算背景框的固定寬度與位置 (完美橫跨左右邊條的內部空間)
-    bg_width = rect.width - (bar_width * 2) - (gap * 2)
-    bg_x = rect.x + bar_width + gap
-    
-    bg_padding_y = 15
-    bg_height = text_size.y + bg_padding_y * 2
-    
-    # 垂直位置：螢幕中央偏下
-    pos_y = rect.y + (rect.height - text_size.y) / 2 - 20
-    bg_y = pos_y - bg_padding_y
-
-    bg_rect = rl.Rectangle(bg_x, bg_y, bg_width, bg_height)
-    
-    # 畫背景
-    rl.draw_rectangle_rounded(bg_rect, 0.2, 10, rl.Color(0, 0, 0, 180))
-    alpha = 150 + int(60 * math.sin(time.time() * 5))
-    rl.draw_rectangle_rounded(bg_rect, 0.2, 10, rl.Color(220, 50, 50, alpha))
-    
-    # 處理文字跑馬燈 (文字顯示的有效範圍)
-    text_padding = 20
-    max_text_width = bg_width - (text_padding * 2)
-    is_overflow = text_size.x > max_text_width
-
-    if is_overflow:
-      rl.begin_scissor_mode(int(bg_rect.x), int(bg_rect.y), int(bg_rect.width), int(bg_rect.height))
-
-      extra_width = text_size.x - max_text_width
-      scroll_speed = 80.0     
-      scroll_duration = extra_width / scroll_speed
-      
-      # --- 單向跑馬燈時間設定 ---
-      start_pause = 2.0  # 停在起點的時間 (秒)
-      end_pause = 2.0    # 停在終點的時間 (秒)
-      total_cycle = start_pause + scroll_duration + end_pause
-
-      cycle_time = time.time() % total_cycle
-
-      if cycle_time < start_pause:
-        # 第一階段：停在開頭
-        offset = 0.0
-      elif cycle_time < start_pause + scroll_duration:
-        # 第二階段：單向向左滑動
-        progress = (cycle_time - start_pause) / scroll_duration
-        offset = extra_width * progress
-      else:
-        # 第三階段：停在結尾，時間一到直接歸零重新開始
-        offset = extra_width
-
-      draw_x = bg_x + text_padding - offset
-      rl.draw_text_ex(self._font_bold, self.tdx_event_desc, rl.Vector2(draw_x, pos_y), font_size, 0, rl.WHITE)
-
-      rl.end_scissor_mode()
-    else:
-      # 文字沒超過時，在整條橫幅中置中
-      draw_x = bg_x + (bg_width - text_size.x) / 2
-      rl.draw_text_ex(self._font_bold, self.tdx_event_desc, rl.Vector2(draw_x, pos_y), font_size, 0, rl.WHITE)
 
   def _draw_steering_wheel(self, rect: rl.Rectangle) -> None:
     wheel_txt = self._txt_wheel_critical if self._show_wheel_critical else self._txt_wheel

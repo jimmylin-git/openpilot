@@ -108,7 +108,7 @@ struct LiveGPS @0xa5cd762cd951a455 {
   livePoseOk @11 :Bool;                # livePose valid and providing orientation/velocity
 }
 # ==========================================
-# TDX 高公局路況預警系統資料結構
+# TDX 高公局路況預警系統資料結構（功能已移除，保留以解碼歷史日誌）
 # ==========================================
 # 佔用 CustomReserved6 槽位（Event @113），ID 沿用原保留 ID
 struct Tdx @0xf98d843bfd7004a3 {
