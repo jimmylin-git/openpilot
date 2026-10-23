@@ -164,8 +164,9 @@ MODEL_LABEL_SCROLL_SPEED = 24.0
 MODEL_LABEL_SCROLL_PAUSE_S = 1.5
 COMPACT_TOP_STATUS_SCALE = 0.7 * 1.3
 COMPACT_TOP_STATUS_Y = -14.0
-LARGE_TOP_STATUS_SCALE = 0.9
-LARGE_TOP_STATUS_Y = 14.0
+LARGE_TOP_STATUS_SCALE = 0.9 * 1.3
+LARGE_LFA_OFF_SCALE = 0.9
+LARGE_TOP_STATUS_Y = 14.0 - TURN_SIGNAL_CENTER_Y * (LARGE_TOP_STATUS_SCALE - LARGE_LFA_OFF_SCALE)
 COMPACT_SCENE_ZOOM = 1.15
 COMPACT_SCENE_WIDTH_SCALE = 1.3 * 1.5 * 0.8
 LARGE_SCENE_WIDTH_SCALE = 1.3
@@ -845,7 +846,7 @@ class ClusterUiRenderer:
         rl.rl_scalef(self.width / DESIGN_WIDTH, self.height / DESIGN_HEIGHT, 1.0)
         try:
             with self._panel_region("status"):
-                self._draw_text("AUTO HOLD", DESIGN_WIDTH * 0.5, 180.0 + 30.0 / 0.7 if self._compact_panel else 230.0,
+                self._draw_text("AUTO HOLD", DESIGN_WIDTH * 0.5, 180.0 + 30.0 / 0.7 if self._compact_panel else 230.0 + 30.0 / 0.85,
                                 36.0, color, anchor="center")
         finally:
             rl.rl_pop_matrix()
@@ -985,12 +986,15 @@ class ClusterUiRenderer:
     @contextmanager
     def _panel_region(self, region: str) -> Iterator[None]:
         if not self._compact_panel:
+            lfa_progress = getattr(self, "_acc_layout_progress", None)
+            lfa_progress = 1.0 if lfa_progress is None else lfa_progress
             center_x, center_y, scale, origin_x, origin_y = {
                 "speed": (225.0, 360.0, 0.9, SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y),
                 "gear": (1675.0, 360.0, 0.82, GEAR_STATUS_CENTER_X, GEAR_STATUS_CENTER_Y),
                 "status": (960.0, 0.0, 0.85, 960.0, 0.0),
                 "top_status": (960.0, LARGE_TOP_STATUS_Y, LARGE_TOP_STATUS_SCALE, 960.0, 0.0),
-                "lfa": (960.0, LARGE_TOP_STATUS_Y, LARGE_TOP_STATUS_SCALE, 960.0, 0.0),
+                "lfa": (960.0, 14.0 + (LARGE_TOP_STATUS_Y - 14.0) * lfa_progress,
+                        LARGE_LFA_OFF_SCALE + (LARGE_TOP_STATUS_SCALE - LARGE_LFA_OFF_SCALE) * lfa_progress, 960.0, 0.0),
             }[region]
             rl.rl_push_matrix()
             rl.rl_translatef(center_x, center_y, 0.0)
@@ -3135,7 +3139,7 @@ class ClusterUiRenderer:
                     gear_text[:2],
                     GEAR_STATUS_CENTER_X,
                     GEAR_STATUS_CENTER_Y,
-                    GEAR_STATUS_FONT_SIZE * (1.2 if self._compact_panel else 1.3),
+                    GEAR_STATUS_FONT_SIZE * (1.2 if self._compact_panel else 1.3 * 1.5),
                     WHITE,
                     anchor="center",
                 )
@@ -3376,7 +3380,7 @@ class ClusterUiRenderer:
             icon_scale *= off_scale
             icon_size *= off_scale
             detail_font_size *= off_scale
-            icon_center_y += 50.0 / LARGE_TOP_STATUS_SCALE * off_progress
+            icon_center_y += 50.0 / LARGE_LFA_OFF_SCALE * off_progress
         # Anchor the angle text to the icon's current bottom edge so it never
         # slides over the wheel while the icon moves and resizes.
         top_row_text_gap = TOP_STATUS_DETAIL_CENTER_Y - (TURN_SIGNAL_CENTER_Y + icon_size * 0.5)
@@ -3444,7 +3448,7 @@ class ClusterUiRenderer:
         # Orbitron renders wider per point size than the previous KaiGen font.
         # Font size is fixed at the previous max instead of scaling with speed, so the
         # digit block's height/position never shifts as speed changes.
-        speed_font_size = 165 * (1.2 if self._compact_panel else 1.3)
+        speed_font_size = 165 * (1.2 if self._compact_panel else 1.3 * 1.1)
 
         self._draw_fixed_width_speed_digits(
             speed_value, SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y, speed_font_size, theme.text
@@ -3614,6 +3618,8 @@ class ClusterUiRenderer:
             native_x = DESIGN_WIDTH * 0.5 + (cx - DESIGN_WIDTH * 0.5) * 0.7
             native_x += -100.0 if side == "left" else 100.0
             cx = DESIGN_WIDTH * 0.5 + (native_x - DESIGN_WIDTH * 0.5) / COMPACT_TOP_STATUS_SCALE
+        else:
+            cx += (33.0 if side == "left" else -10.0) / LARGE_TOP_STATUS_SCALE
         cy = TURN_SIGNAL_CENTER_Y
         texture = self._left_turn_signal_texture if side == "left" else self._right_turn_signal_texture
         tint = WHITE if lit else theme.muted

@@ -79,5 +79,8 @@ def test_hold_label_alternates_color_at_half_second(now, color, compact):
     namespace["_draw_auto_hold"](renderer, SimpleNamespace(auto_brake_hold_active=False))
     assert calls == [] and matrices == []
     namespace["_draw_auto_hold"](renderer, SimpleNamespace(auto_brake_hold_active=True))
-    assert calls == [(("AUTO HOLD", 960.0, 180.0 + 30.0 / 0.7 if compact else 230.0, 36.0, color), {"anchor": "center"})]
+    y = calls[0][0][2]
+    assert calls == [(("AUTO HOLD", 960.0, 180.0 + 30.0 / 0.7 if compact else 230.0 + 30.0 / .85, 36.0, color), {"anchor": "center"})]
+    if not compact:
+        assert (y - 230.) * .85 == pytest.approx(30.)
     assert matrices == ["push", "pop"]

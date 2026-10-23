@@ -96,9 +96,9 @@ def region_method(matrix):
                  and isinstance(node.targets[0], ast.Name)
                  and node.targets[0].id in ("SPEED_VALUE_CENTER_X", "SPEED_VALUE_CENTER_Y", "GEAR_STATUS_CENTER_X", "GEAR_STATUS_CENTER_Y",
                                            "COMPACT_TOP_STATUS_SCALE", "COMPACT_TOP_STATUS_Y",
-                                           "LARGE_TOP_STATUS_SCALE", "LARGE_TOP_STATUS_Y")]
+                                           "LARGE_TOP_STATUS_SCALE", "LARGE_TOP_STATUS_Y", "LARGE_LFA_OFF_SCALE")]
     method = next(node for node in RENDERER.body if isinstance(node, ast.FunctionDef) and node.name == "_panel_region")
-    namespace = {"rl": matrix, "contextmanager": contextmanager, "DESIGN_HEIGHT": 720}
+    namespace = {"rl": matrix, "contextmanager": contextmanager, "DESIGN_HEIGHT": 720, "TURN_SIGNAL_CENTER_Y": 94}
     module = ast.Module(body=[
         ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), *constants, method,
     ], type_ignores=[])
@@ -128,8 +128,8 @@ def test_compact_native_centers_and_undistorted_sizes(region, source, target, sc
     ("speed", (255, 350), (225, 360), .9),
     ("gear", (1615, 350), (1675, 360), .82),
     ("status", (960, 0), (960, 0), .85),
-    ("top_status", (960, 0), (960, 14), .9),
-    ("lfa", (960, 0), (960, 14), .9),
+    ("top_status", (960, 94), (960, 98.6), 1.17),
+    ("lfa", (960, 94), (960, 98.6), 1.17),
 ])
 def test_large_panel_matches_new_background_and_keeps_aspect_ratio(region, source, target, scale):
     matrix = Matrix()
@@ -138,6 +138,14 @@ def test_large_panel_matches_new_background_and_keeps_aspect_ratio(region, sourc
         assert matrix.transform[:2] == pytest.approx((scale, scale))
     assert matrix.transform == (1, 1, 0, 0)
     assert matrix.stack == []
+
+
+@pytest.mark.parametrize("progress", [0., .5, 1.])
+def test_large_lfa_keeps_acc_off_scale_and_blends_to_enlarged_top_row(progress):
+    matrix = Matrix()
+    with region_method(matrix)(SimpleNamespace(_compact_panel=False, _acc_layout_progress=progress), "lfa"):
+        assert matrix.transform[:2] == pytest.approx((.9 + .27 * progress,) * 2)
+        assert matrix.point(960, 94) == pytest.approx((960, 98.6))
 
 
 def test_compact_status_row_stays_between_side_panels_and_above_road():
@@ -214,6 +222,19 @@ def test_compact_turn_signals_move_one_hundred_native_pixels_outward(side, origi
                  "DESIGN_WIDTH": 1920, "COMPACT_TOP_STATUS_SCALE": .91}
     exec(compile(ast.Module(body=[block], type_ignores=[]), "<turn signal position>", "exec"), namespace)
     assert 960 + (namespace["cx"] - 960) * .91 == pytest.approx(target)
+
+
+@pytest.mark.parametrize("side,original,offset", [("left", 595, 33), ("right", 1325, -10)])
+def test_large_turn_signals_match_background_clearances(side, original, offset):
+    method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "_draw_turn_signal")
+    block = next(n for n in method.body if isinstance(n, ast.If) and ast.unparse(n.test) == "self._compact_panel")
+    namespace = {"self": SimpleNamespace(_compact_panel=False), "side": side, "cx": original,
+                 "LARGE_TOP_STATUS_SCALE": 1.17}
+    exec(compile(ast.Module(body=[block], type_ignores=[]), "<large turn signal position>", "exec"), namespace)
+    assert (namespace["cx"] - original) * 1.17 == pytest.approx(offset)
+    left_gap = 960 + (595 - 960) * 1.17 + 33 + (21 - 64) * 1.17 - 449
+    right_gap = 1490 - (960 + (1325 - 960) * 1.17 - 10 + (104 - 64) * 1.17)
+    assert abs(left_gap - right_gap) < 1
 
 
 @pytest.mark.parametrize("compact", [False, True])
@@ -348,7 +369,7 @@ def test_speed_and_gear_fonts_increase_exactly_twenty_percent_on_compact_panel(c
                       and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "speed_font_size")
     namespace = {"self": SimpleNamespace(_compact_panel=compact)}
     exec(compile(ast.Module(body=[assignment], type_ignores=[]), "<speed font>", "exec"), namespace)
-    assert namespace["speed_font_size"] == pytest.approx(198 if compact else 214.5)
+    assert namespace["speed_font_size"] == pytest.approx(198 if compact else 235.95)
     unit = next(n for n in speed.body if isinstance(n, ast.Assign)
                 and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "unit_font_size")
     assert ast.literal_eval(unit.value) == 24
@@ -358,4 +379,4 @@ def test_speed_and_gear_fonts_increase_exactly_twenty_percent_on_compact_panel(c
                 and isinstance(n.func, ast.Attribute) and n.func.attr == "_draw_text")
     size = eval(compile(ast.Expression(body=draw.args[3]), "<gear font>", "eval"),
                 {**namespace, "GEAR_STATUS_FONT_SIZE": 100})
-    assert size == pytest.approx(120 if compact else 130)
+    assert size == pytest.approx(120 if compact else 195)

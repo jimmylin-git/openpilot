@@ -45,16 +45,20 @@ for portrait output. The 9.2-inch panel and previews without a USB product ID
 retain their existing orientation; HUD design coordinates remain unchanged.
 Speed and gear are centered at (225, 360) and (1675, 360) on the
 1920x720 canvas, with uniform 0.9x and 0.82x HUD scales respectively.
-Speed digits and gear text are enlarged another 30% within those regions;
+Speed digits use a 1.43x font multiplier (1.3x then another 10%);
+gear text uses 1.95x (1.3x then another 50%) within those regions;
 the speed unit and the 9.2-inch fonts are unchanged.
 MEM/CPU occupy the upper left panel at x=295, y=70/100; TEMP occupies the upper
 right at x=1620, y=80, with metric fonts enlarged 10%. The top icon/detail row
-uses a uniform 0.9x scale and a 14-pixel downward offset, including its
-model-name scrolling clip and the ACC-off LFA animation. AUTO HOLD uses
-a separate 0.85x scale below the top details.
+uses a uniform 1.17x scale (30% larger than 0.9x), preserving the icon
+centerline at y=98.6, including its model-name scrolling clip. The ACC-off LFA region
+retains its 0.9x scale and blends to 1.17x when engaged. AUTO HOLD uses
+a separate 0.85x scale below the top details and is moved down 30 pixels.
+The 12.3-inch turn signals are inset 33 pixels on the left and 10 on the right
+after scaling, matching their visible clearances to the asymmetric background frame.
 Only the ACC-off central LFA wheel and angle are enlarged another 1.5x,
 with the wheel center moved down 50 pixels; both changes blend out during
-the transition to the unchanged engaged LFA icon.
+the transition to the enlarged engaged LFA icon.
 The 3D scene is stretched horizontally by 1.3x without changing camera
 field of view or vertical proportions. Both radar labels and vehicle badges
 follow that projection. The scene is clipped to x=440–1480, y=205–720
