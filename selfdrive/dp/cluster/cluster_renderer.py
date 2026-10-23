@@ -3135,7 +3135,7 @@ class ClusterUiRenderer:
                     gear_text[:2],
                     GEAR_STATUS_CENTER_X,
                     GEAR_STATUS_CENTER_Y,
-                    GEAR_STATUS_FONT_SIZE * (1.2 if self._compact_panel else 1.0),
+                    GEAR_STATUS_FONT_SIZE * (1.2 if self._compact_panel else 1.3),
                     WHITE,
                     anchor="center",
                 )
@@ -3444,7 +3444,7 @@ class ClusterUiRenderer:
         # Orbitron renders wider per point size than the previous KaiGen font.
         # Font size is fixed at the previous max instead of scaling with speed, so the
         # digit block's height/position never shifts as speed changes.
-        speed_font_size = 165 * (1.2 if self._compact_panel else 1.0)
+        speed_font_size = 165 * (1.2 if self._compact_panel else 1.3)
 
         self._draw_fixed_width_speed_digits(
             speed_value, SPEED_VALUE_CENTER_X, SPEED_VALUE_CENTER_Y, speed_font_size, theme.text

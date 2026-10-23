@@ -348,7 +348,7 @@ def test_speed_and_gear_fonts_increase_exactly_twenty_percent_on_compact_panel(c
                       and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "speed_font_size")
     namespace = {"self": SimpleNamespace(_compact_panel=compact)}
     exec(compile(ast.Module(body=[assignment], type_ignores=[]), "<speed font>", "exec"), namespace)
-    assert namespace["speed_font_size"] == pytest.approx(198 if compact else 165)
+    assert namespace["speed_font_size"] == pytest.approx(198 if compact else 214.5)
     unit = next(n for n in speed.body if isinstance(n, ast.Assign)
                 and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "unit_font_size")
     assert ast.literal_eval(unit.value) == 24
@@ -358,4 +358,4 @@ def test_speed_and_gear_fonts_increase_exactly_twenty_percent_on_compact_panel(c
                 and isinstance(n.func, ast.Attribute) and n.func.attr == "_draw_text")
     size = eval(compile(ast.Expression(body=draw.args[3]), "<gear font>", "eval"),
                 {**namespace, "GEAR_STATUS_FONT_SIZE": 100})
-    assert size == pytest.approx(120 if compact else 100)
+    assert size == pytest.approx(120 if compact else 130)

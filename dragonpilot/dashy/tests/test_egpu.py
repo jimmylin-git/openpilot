@@ -211,6 +211,23 @@ def test_production_server_wires_both_endpoints():
   assert "app.router.add_post('/api/egpu', egpu.post_action)" in routes
 
 
+def test_egpu_entry_stays_above_settings_panel_and_outside_hud():
+  from html.parser import HTMLParser
+
+  class EntryParser(HTMLParser):
+    def handle_starttag(self, tag, attrs):
+      values = dict(attrs)
+      if tag == "a" and values.get("href") == "/pages/egpu.html":
+        self.entry = values
+
+  parser = EntryParser()
+  source = (WEB / "index.html").read_text(encoding="utf-8")
+  parser.feed(source)
+  assert "z-index:1100" in parser.entry["style"]
+  assert "bottom:16px" in parser.entry["style"]
+  assert source.index('href="/pages/egpu.html"') < source.index('id="app-container"')
+
+
 def test_tdx_removed_but_traffic_stop_and_gps_remain():
   for path in ["selfdrive/ui/onroad/hud_renderer.py", "selfdrive/ui/mici/onroad/hud_renderer.py"]:
     source = (ROOT / path).read_text(encoding="utf-8")

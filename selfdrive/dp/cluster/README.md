@@ -45,6 +45,8 @@ for portrait output. The 9.2-inch panel and previews without a USB product ID
 retain their existing orientation; HUD design coordinates remain unchanged.
 Speed and gear are centered at (245, 360) and (1675, 360) on the
 1920x720 canvas, with uniform 0.9x and 0.82x HUD scales respectively.
+Speed digits and gear text are enlarged another 30% within those regions;
+the speed unit and the 9.2-inch fonts are unchanged.
 MEM/CPU occupy the upper left panel at x=295, y=70/100; TEMP occupies the upper
 right at x=1620, y=80, with metric fonts enlarged 10%. The top icon/detail row
 uses a uniform 0.9x scale and a 14-pixel downward offset, including its
