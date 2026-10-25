@@ -334,8 +334,8 @@ class EgpuModelManager:
     active = get_active_bundle(self.params)
     if self.params.get(P_ACTIVE_BUNDLE) is not None and active is None:
       self.params.remove(P_ACTIVE_BUNDLE)
-    elif active is not None and not model_compiled(active["sha256"]):
-      cloudlog.warning(f"egpu: active model {active['short_name']} not compiled for this tinygrad, recompiling")
+    elif active is not None and not (model_compiled(active["sha256"]) and warps_present()):
+      cloudlog.warning(f"egpu: active model {active['short_name']} has incomplete model/warp cache for this tinygrad, recompiling")
       self.params.remove(P_ACTIVE_BUNDLE)
       if self.params.get(P_DOWNLOAD_REF) is None:
         self.params.put(P_DOWNLOAD_REF, active["ref"])

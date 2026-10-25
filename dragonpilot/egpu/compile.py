@@ -24,6 +24,7 @@ Both produce one artifact shape: {'metadata', 'run', 'input_specs', 'output_spec
 """
 import argparse
 import hashlib
+from graphlib import CycleError, TopologicalSorter
 import math
 import os
 import pickle
@@ -71,7 +72,8 @@ def compile_jit(function, make_inputs, benchmark_runs: int, *, out_of_band: bool
     return results
 
   run(jit, 42, 3)
-  with tempfile.TemporaryDirectory() as directory:
+  # The manager runs in the model directory on /data; avoid system temp space for full-size weights.
+  with tempfile.TemporaryDirectory(dir=".") as directory:
     path = str(Path(directory) / "jit.pkl")
     if out_of_band:
       dump_pickle(jit, path)
@@ -174,6 +176,10 @@ def compile_model_cmd(onnx: str, out: str, benchmark_runs: int) -> None:
     outputs = runner(allocate_inputs(specs))
     output_specs = {name: (tuple(value.shape), np.dtype(_to_np_dtype(value.dtype)).name, Device.DEFAULT)
                     for name, value in outputs.items()}
+    state_names = [name for name in specs if STATE_OUTPUT_PREFIX + name in output_specs]
+    for name in state_names:
+      if specs[name] != output_specs[STATE_OUTPUT_PREFIX + name]:
+        raise ValueError(f"state input/output specification mismatch: {name}")
 
     def make_inputs(seed):
       rng = np.random.default_rng(seed)
@@ -181,17 +187,34 @@ def compile_model_cmd(onnx: str, out: str, benchmark_runs: int) -> None:
       def initialize(arrays):
         for value in arrays.values():
           value[...] = rng.integers(0, 256, value.shape, dtype=np.uint8) if value.dtype == np.uint8 else rng.standard_normal(value.shape)
-      return (), allocate_inputs(specs, initialize) | {'output_buffers': allocate_inputs(output_specs)}
+      inputs = allocate_inputs(specs, initialize)
+      buffers = allocate_inputs({name: spec for name, spec in output_specs.items()
+                                 if name not in {STATE_OUTPUT_PREFIX + state for state in state_names}})
+      buffers.update({STATE_OUTPUT_PREFIX + name: inputs[name] for name in state_names})
+      return (), inputs | {'output_buffers': buffers}
 
     def run(output_buffers, **inputs):
-      outputs = runner(inputs)
+      outputs = {name: Tensor(value.uop) for name, value in runner(inputs).items()}
+      # Break only cyclic state dependencies, not every state: the scheduler orders the remaining reads before writes.
+      while True:
+        dependencies = {name: {other for other in state_names if other != name and
+                               inputs[other].uop.storage_base in outputs[STATE_OUTPUT_PREFIX + name].uop.toposort()}
+                        for name in state_names}
+        try:
+          tuple(TopologicalSorter(dependencies).static_order())
+          break
+        except CycleError as error:
+          name = min(error.args[1][:-1], key=lambda n: inputs[n].numel() * inputs[n].dtype.itemsize)
+          snapshot = inputs[name].clone().realize()
+          replacement = {inputs[name].uop.storage_base: snapshot.uop}
+          outputs = {key: Tensor(value.uop.substitute(replacement, walk=True)) for key, value in outputs.items()}
       Tensor.realize(*(output_buffers[name].assign(value) for name, value in outputs.items()))
 
     jit = compile_jit(run, make_inputs, benchmark_runs, out_of_band=True)
     artifact = {'metadata': {'metadata': properties, 'input_shapes': {n: s[0] for n, s in specs.items()},
                              'output_shapes': output_shapes},
                 'run': jit, 'input_specs': specs, 'output_specs': output_specs, 'layout': 'stateful',
-                'state_inputs': [n for n in specs if STATE_OUTPUT_PREFIX + n in output_specs]}
+                'state_inputs': state_names}
     _atomic_dump(artifact, out, dump_pickle, out_of_band=True)
     return
 

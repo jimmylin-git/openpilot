@@ -42,11 +42,32 @@ v2 改成**下載模型的 onnx、在車上自己編譯一次**，warp 永遠編
   枚舉順序；不寫入 UT3G 韌體。
 - 獨立 `modeld_egpu`、首次輸出監測、停輸出監測及本趟單向 stock fallback 不變。
   不加入官方 onroad cycle 重試，不改控制邏輯、Jetlink 版本、AGNOS 或另一份 `tinygrad_repo`。
-- 新快取鍵為 `tg02e69816v2`。舊 `tg9cd40014v1` 編譯檔不會被載入，也不主動刪除；
+- 新快取鍵為 `tg02e69816v4`。舊 `tg9cd40014v1` 與 HCQ2 `tg02e69816v2`／`v3`
+  編譯檔不會被載入，也不主動刪除；
   `egpu_manager` 沿用既有流程在 offroad 重編使用中的模型，ONNX 可重用。
   取消、清快取或刪除模型仍依現有操作語意執行。
-- 本地 vendor 差異只有 UT3G Dual USB ID，以及延後解析 `ops_disk.py` 的 Linux `io_uring`
-  回傳型別註記（讓 Windows CPU 測試可載入；不改 Linux 執行行為）。
+- 本地 vendor 差異為 UT3G Dual USB ID、延後解析 `ops_disk.py` 的 Linux `io_uring`
+  回傳型別註記（讓 Windows CPU 測試可載入；不改 Linux 執行行為），以及
+  `schedule/prepare.py` 在反向折疊 movement 前恢復來源的 logical shape。
+  後者修正 `IMAGE=1`、`FLOAT16=1`、`OPENPILOT_HACKS=1` 下，flattened STORE
+  目標被直接當成二維來源轉置所造成的 `IndexError: dim=1 out of range [-1, 0]`；
+  已用矩陣乘法編譯、JIT 序列化與數值回讀在 CPU 重現並回歸驗證。
+  尚無車機日誌能確認現場編譯失敗是否為同一原因。
+- HCQ2 在匯入 tinygrad 時讀取 `DEV`，因此 `modeld_egpu` 必須在 `tg_env.check()`
+  之前設定 `DEV=QCOM;USB+AMD:LLVM`，保持 QCOM 為預設，並明確選用 AMD 的 USB／LLVM。
+  新版 out-of-band loader 把權重搬到 `Device.DEFAULT`，不沿用序列化時的裝置；
+  runner 僅在載入大模型時以 AMD context 載入，完成後恢復原本的 QCOM 預設。
+- stateful 模型在編譯與執行時都讓 `next_state_*` 使用同一個 state Tensor，
+  不配置完整第二組 state Buffer，也不做 Buffer swap。編譯器先固定所有輸出的 UOp，
+  避免 Python Tensor 物件被 assign 改寫後影響其他輸出。
+  state 依賴無環時交由排程器安排讀後寫；交叉依賴成環時，從環中選最小的 state
+  建立暫存快照並替換讀取來源，直到解除循環。這是必要的 GPU 局部暫存，不經 USB，
+  不代表所有模型都能完全不需要暫存。回歸測試逐幀確認 state Buffer 位址固定且交換舊值正確。
+- active 模型的完整性檢查同時檢查模型與兩份 warp；缺 warp 也會重新排入 offroad
+  準備流程，不覆蓋使用者已排入的另一個模型選擇。
+- 編譯驗證的暫存 JIT／權重放在編譯工作目錄（manager 設為 `/data/media/0/models/egpu`），
+  不再落到系統預設暫存區；完整模型可能達數百 MB，不能假設 `/tmp` 有足夠容量或不占 RAM。
+  成功與一般例外離開時皆由 TemporaryDirectory 清理。
 
 升級分支：`dpegpu-cluster-hcq2`。原始回復點：
 `dpegpu-cluster@678c5c114205f7be40d2aaab57e500d5103e8735`。
@@ -63,6 +84,13 @@ python -m pytest -o addopts='' --confcutdir=selfdrive/modeld/tests selfdrive/mod
 編譯檔；runner 測試只替換不在本次升級範圍的輸出解析器／硬體訊息依賴。這不是
 完整車用模型或 QCOM／AMD 硬體驗證。上車前仍需停車測試完整模型重編、
 冷開機／離線載入、首張真實相機輸入、持續輸出及 USB 失聯 fallback，再量測延遲、掉幀及功耗。
+本機也應以 `IMAGE=1 FLOAT16=1 OPENPILOT_HACKS=1 NOLOCALS=1 JIT_BATCH_SIZE=0`
+環境變數執行同一測試命令；仍以 CPU 執行，不代表 QCOM 硬體驗證。
+warp 回歸涵蓋兩種完整相機尺寸與 512×256 輸出，另有不同預設裝置下的模型載入測試。
+2026-10-25 本機提交前驗證：以上命令在一般 CPU 與上述最佳化旗標下各為
+101 passed；兩次均有缺少 C++ pytest plugin 所產生的 `cpp_files`／`cpp_harness`
+設定警告。新增反例涵蓋三個 state 成環、密集交叉依賴、無環依賴、state 內部反序，
+以及形狀／型別不相容時拒絕 alias。此結果不包含完整車用模型或實機 GPU 執行。
 
 ### dpegpu-cluster：車機更新保護
 
@@ -203,7 +231,7 @@ fallback 啟動的 stock modeld 會讀取 `dp_egpu_failed`，強制停用內建 
 | `dragonpilot/egpu/manager.py` | 常駐 `egpu_manager`：在線偵測；offroad 每小時用 `jetlink_adapter.refresh_catalog` 更新共用清單（失敗後 30 秒退避）、pointer → onnx → 編譯 → 啟用、刪除單一模型、清快取、使用中模型失效時自動重編 |
 | `dragonpilot/egpu/tg_env.py` | 把隨附 tinygrad 放到 sys.path 最前面、AMD 韌體優先讀 `/lib/firmware/*.zst` |
 | `dragonpilot/egpu/compile.py` | 車上編譯：`warp`（QCOM）與 `model`（eGPU；stateful 原樣，queued 包佇列） |
-| `dragonpilot/egpu/runner.py` | `EgpuModelState`：QCOM warp → 單次上傳 → eGPU 模型、state aliasing、hidden state 回授、`get_action`（sunnypilot modeld_v2：有 action head 讀 action，否則 plan；gen≥11 走 mlsim；bundle 的 lat/long 平滑；保留 `dp_lat_offset_cm`） |
+| `dragonpilot/egpu/runner.py` | `EgpuModelState`：QCOM warp → 單次上傳 → eGPU 模型、編譯期 state alias、hidden state 回授、`get_action`（sunnypilot modeld_v2：有 action head 讀 action，否則 plan；gen≥11 走 mlsim；bundle 的 lat/long 平滑；保留 `dp_lat_offset_cm`） |
 | `dragonpilot/egpu/modeld_egpu.py` | 行程進入點 |
 | `dragonpilot/egpu/tinygrad_spm/` | 隨附 sunnypilot@9cd40014（含 LICENSE、VERSION） |
 | `dragonpilot/selfdrive/ui/egpu_ui.py` | 狀態文字/顏色、圖示（沿用 jetlink 的 chestnut 圖示）、failover 說明、處理狀態文字、模型標記 |
@@ -247,8 +275,8 @@ fallback 啟動的 stock modeld 會讀取 `dp_egpu_failed`，強制停用內建 
 | `dp_egpu_loading` / `running` / `failed` | BOOL CLEAR_ON_MANAGER_START＋CLEAR_ON_OFFROAD_TRANSITION | 本趟大模型狀態 |
 
 磁碟配置（`/data/media/0/models/`）：
-- `egpu/warp_<相機>_512x256_tg02e69816v2.pkl`（須重新編譯）
-- `egpu/model_<sha16>_tg02e69816v2.pkl`（須重新編譯）
+- `egpu/warp_<相機>_512x256_tg02e69816v4.pkl`（須重新編譯）
+- `egpu/model_<sha16>_tg02e69816v4.pkl`（須重新編譯）
 - `egpu/compile.log`
 - `jetlink/<sha16>.onnx`（與 jetlink 共用）
 
@@ -274,7 +302,7 @@ fallback 啟動的 stock modeld 會讀取 `dp_egpu_failed`，強制停用內建 
     - **即時排程改到載入完成後**：sunnypilot／zoompilot 都是先 `config_realtime_process(7, 54)` 再載入大模型。但隨附 tinygrad 等待 GPU 的地方（`support/hcq2.py` 的 `hcq_fence`，註解寫著「TODO: timeout?」）沒有逾時、也不讓出 CPU。GPU 不回應時，它會以 FIFO 54 在第 7 核空轉，載入逾時的檢查排不到 CPU，畫面就一直停在「載入中」也不報錯。v5.2 改成載入完才設即時排程。
     - **載入逾時 60→120 秒**：UT3G 作者在 C3XL＋UT3G 上實測載入 71.5～75.6 秒（`sunnypilot/modeld_v2/egpu_loader.py` 的 `C3XL_MODEL_LOAD_TIMEOUT = 120`）。60 秒在 UT3G 上一定會逾時。
     - **先等 PCIe 連上 L0**：比照 zoompilot `chestnut/flash.py` 的 `link_up`。橋接晶片在 USB 上出現時，後面的顯示卡不一定已經可用（各車 12 V 不同）。編譯前與載入前最多等 15 秒；送出的請求和 tinygrad 每次開啟裝置時送的完全一樣（0xF3=1、讀 0xB450），都不會寫入永久設定。
-    - **`DEV=QCOM`**：同 UT3G 作者的 `configure_default_device`，讓 tinygrad 的預設裝置掃描不去碰 USB 上的 AMD GPU。
+    - **`DEV=QCOM;USB+AMD:LLVM`（HCQ2）**：預設裝置保留 QCOM，另明確指定 AMD 的 USB／LLVM；大模型權重載入時暫時切換至 AMD context。
     - **`XDG_CACHE_HOME=/data/cache`**：同 UT3G 作者。C3XL 的 /home 是重開就清空的 overlay；tinygrad 在 /lib/firmware 找不到 AMD 韌體時會上網下載並快取在那裡，不改的話每次開機都要重新下載（沒網路就卡住）。
     - **編譯固定在第 7 核**：比照 zoompilot 的 `taskset -c 7`。AGNOS 把第 7 核用 isolcpus 隔離，長時間編譯時不會拖慢 UI、WiFi。
     - **對照發現**：UT3G 作者分支內附的 tinygrad，`ops_amd.py` 也只列 `ADD1:0001`／`3801:0001`，沒有 `ADD1:0002`；它的 tinygrad 也比我們的舊（有 `AMD_USB_POLL_US` 輪詢睡眠，我們這版沒有）。所以他實際能跑 UT3G 的 tinygrad，跟壓縮檔裡這份可能不同，這點無法從原始碼確認。

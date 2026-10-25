@@ -17,16 +17,16 @@ import os
 import threading
 import time
 
-tg_env.check()
 # UT3G author's sp branch (sunnypilot/modeld_v2/egpu_loader.py configure_default_device): keep tinygrad's
-# default-device scan off the USB AMD GPU; every tensor here names its device anyway
-os.environ.setdefault('DEV', 'QCOM')
+# default on QCOM, with an explicit USB/LLVM target for AMD. HCQ2 reads DEV at import time.
+os.environ.setdefault('DEV', 'QCOM;USB+AMD:LLVM')
 # openpilot #38992: a 100 W power limit for the chestnut, set by tinygrad when it boots the device, which then
 # leaves the clocks to the SMU (~1.2 GHz / ~31 W / ~5 A for the big model). dp: AmyJeanes/openpilot-upstream@e9fa764
 # (pin the top clocks under that limit: ~37 ms instead of ~42 ms, but ~12 A bursts at the chestnut's input) is
 # deliberately NOT applied: a car without a high-voltage system cannot supply it. Without this variable at all
 # tinygrad pins the top clocks with no limit, the highest draw of the three.
 os.environ.setdefault('AM_POWER_LIMIT', '100')
+tg_env.check()
 
 from setproctitle import setproctitle
 from openpilot.common.params import Params

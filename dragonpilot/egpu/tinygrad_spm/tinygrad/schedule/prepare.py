@@ -43,6 +43,8 @@ def walk_mop(u:UOp):
   return u
 
 def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
+  # STORE destinations can be flattened while their values still carry logical dimensions.
+  after = after.reshape(src.shape)
   if (x:=src).op is Ops.CAST and x.dtype == dtypes.half and FLOAT16: x, after = x.src[0], after.cast(dtypes.float)
   while True:
     if x.op is Ops.PERMUTE: x, after = x.src[0], after.permute(argsort(x.marg))

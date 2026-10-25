@@ -72,6 +72,32 @@ def test_timeout_constants_cover_loading_and_first_output():
   assert namespace["MODEL_OUTPUT_TIMEOUT"] == 5
 
 
+@pytest.mark.parametrize("model_present,warps_present,pending", [
+  (True, True, None), (False, True, None), (True, False, None), (False, False, None), (True, False, "user-selection"),
+])
+def test_partial_compile_cache_is_repaired_without_replacing_user_request(model_present, warps_present, pending):
+  active = {"ref": "selected-model", "sha256": "sha", "short_name": "selected"}
+  values = {"active": active}
+  if pending is not None:
+    values["download"] = pending
+  warnings = []
+  params = SimpleNamespace(get=values.get, remove=lambda key: values.pop(key, None), put=values.__setitem__)
+  namespace = load_definitions(
+    "dragonpilot/egpu/manager.py",
+    ["validate_active"],
+    {"get_active_bundle": lambda params: params.get("active"), "P_ACTIVE_BUNDLE": "active", "P_DOWNLOAD_REF": "download",
+     "model_compiled": lambda sha: model_present, "warps_present": lambda: warps_present,
+     "cloudlog": SimpleNamespace(warning=warnings.append)},
+  )
+  namespace["validate_active"](SimpleNamespace(params=params))
+  if model_present and warps_present:
+    assert values == {"active": active}
+    assert not warnings
+  else:
+    assert values == {"download": pending or active["ref"]}
+    assert len(warnings) == 1
+
+
 @pytest.mark.parametrize("builtin", [False, True])
 def test_builtin_initializes_watchdog_before_camera_wait_and_stock_clears_it(builtin):
   tree = ast.parse((ROOT / "selfdrive/modeld/modeld.py").read_text(encoding="utf-8"))

@@ -8,8 +8,8 @@ Per frame:
   2. the crops and the scalars (desire pulse, traffic convention, action_t, and for a queued graph the
      fed-back hidden state) go into one host buffer, uploaded to the eGPU in one copy: only ~0.4 MB
      crosses USB, not the 2 x 3.5 MB NV12 frames
-  3. the model JIT on the eGPU; its history (stateful: state_* <- next_state_*, aliased in place as in
-     sunnypilot-master selfdrive/modeld/modeld.py; queued: the wrapped JIT's own queues) stays there
+  3. the model JIT on the eGPU; its history (stateful: state_* <- next_state_* via compile-time aliases;
+     queued: the wrapped JIT's own queues) stays there
 
 Ported from: sunnypilot-master selfdrive/modeld/modeld.py ModelState (input_view, pack_inputs, state
 aliasing, run, warmup), AmyJeanes/sunnypilot@173d90b (from_blob frames on the warp device, prev_feat
@@ -20,6 +20,7 @@ import math
 import pickle
 
 import numpy as np
+from tinygrad import Context
 from tinygrad.tensor import Tensor
 from tinygrad.device import Buffer, Device
 from tinygrad.dtype import _from_np_dtype
@@ -33,6 +34,7 @@ from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, get_curvature_from_plan, smooth_value
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
+from dragonpilot.egpu.constants import TG_FLAGS_AMD
 
 STATEFUL_FRAME = 'new_img'
 DRIVING_OUTPUT = 'outputs'
@@ -72,7 +74,9 @@ class EgpuModelState:
       raise RuntimeError(f"warp {warp_pkl} is for another camera than {cam_w}x{cam_h}")
 
     cloudlog.warning(f"egpu: loading {model_pkl}")
-    art = load_pickle(model_pkl, out_of_band=True)
+    # HCQ2 streams out-of-band weights onto Device.DEFAULT, not the device saved in the artifact.
+    with Context(DEV=TG_FLAGS_AMD["DEV"]):
+      art = load_pickle(model_pkl, out_of_band=True)
     self.layout = art['layout']
     self.run_model = art['run']
     self.specs = {name: (tuple(shape), np.dtype(dtype), device) for name, (shape, dtype, device) in art['input_specs'].items()}
@@ -97,11 +101,10 @@ class EgpuModelState:
     self._pack()
 
     self.outputs = {name: Tensor(np.zeros(shape, dtype=dtype), device=device).realize()
-                    for name, (shape, dtype, device) in art['output_specs'].items()}
-    for name in self.state_names:
-      if (nxt := 'next_' + name) in self.outputs:
-        state = self.state[name]
-        self.outputs[nxt] = input_view(state._buffer(), state.shape, state.dtype, 0)
+                    for name, (shape, dtype, device) in art['output_specs'].items()
+                    if name not in {'next_' + state for state in self.state_names}}
+    if self.layout == 'stateful':
+      self.outputs.update({'next_' + name: self.state[name] for name in self.state_names})
     self.parser = Parser()
     self.prev_desire = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
     self.stage = "initialized"

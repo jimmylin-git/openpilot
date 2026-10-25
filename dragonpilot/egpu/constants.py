@@ -53,7 +53,7 @@ AUTO_RETRY_S = 600  # a failed automatic download (network) is retried this long
 #   model : USB+AMD, one per ONNX (stateful #38916 graphs as-is, queued graphs wrapped with their queues)
 # ---------------------------------------------------------------------------------------------
 VENDORED_TINYGRAD_REF = "02e698160eed1751738212144a7ea2cfb160b3f1"
-COMPILE_VERSION = 2  # bump when compile.py changes what it produces
+COMPILE_VERSION = 4  # stateful JIT captures in-place state aliases
 CACHE_TAG = f"tg{VENDORED_TINYGRAD_REF[:8]}v{COMPILE_VERSION}"
 
 # sunnypilot-master selfdrive/modeld/SConscript tg_flags (comma) / chestnut_tg_flags without FRAME_DEV=CPU

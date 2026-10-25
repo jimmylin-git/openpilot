@@ -4,3 +4,4 @@ Vendored: tinygrad/ package + examples/openpilot/{helpers,compile_onnx,compile_w
 Used ONLY by dragonpilot/egpu (modeld_egpu.py and compile.py), never by dp's own processes.
 Local patch: retain ADD1:0002 UT3G Dual enumeration in tinygrad/runtime/ops_amd.py.
 Local patch: defer the Linux-only io_uring return annotation in ops_disk.py for Windows CPU validation.
+Local patch: restore logical source shape before folding moved AFTERs in schedule/prepare.py.
