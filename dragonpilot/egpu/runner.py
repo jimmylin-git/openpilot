@@ -1,6 +1,6 @@
 """
 dp - EgpuModelState: runs a model compiled on this device by dragonpilot/egpu/compile.py. Import ONLY
-from modeld_egpu.py (tinygrad here must be the vendored sunnypilot tinygrad, see tg_env.py).
+from modeld_egpu.py (tinygrad here must be the pinned HCQ2 tinygrad, see tg_env.py).
 
 Per frame:
   1. warp, on QCOM: each camera buffer handed in place (Tensor.from_blob, cached per ring-buffer slot),
@@ -41,8 +41,8 @@ MIN_LAT_CONTROL_SPEED = 0.3
 
 
 def input_view(buffer: Buffer, shape: tuple[int, ...], dtype, offset: int) -> Tensor:
-  view = buffer.view(math.prod(shape), dtype, offset).ensure_allocated()
-  return Tensor(UOp.from_buffer(view)).reshape(shape)
+  view = buffer.view(math.prod(shape) * dtype.itemsize, offset).ensure_allocated()
+  return Tensor(UOp.from_buffer(view, dtype)).reshape(shape)
 
 
 def output_slices(metadata: dict) -> dict[str, slice]:
@@ -72,8 +72,7 @@ class EgpuModelState:
       raise RuntimeError(f"warp {warp_pkl} is for another camera than {cam_w}x{cam_h}")
 
     cloudlog.warning(f"egpu: loading {model_pkl}")
-    with open(model_pkl, 'rb') as f:
-      art = load_pickle(f, out_of_band=True)
+    art = load_pickle(model_pkl, out_of_band=True)
     self.layout = art['layout']
     self.run_model = art['run']
     self.specs = {name: (tuple(shape), np.dtype(dtype), device) for name, (shape, dtype, device) in art['input_specs'].items()}
@@ -168,6 +167,8 @@ class EgpuModelState:
     self.input_device.copy_from(self.input_host)
     self._set_stage("AMD inference")
     self.run_model(output_buffers=self.outputs, **self.inputs)
+    if err := Device[self.model_device].error_state.host.view(fmt='q')[0]:
+      raise RuntimeError(f"egpu: model device failed with {err}")
 
     self._set_stage("AMD output readback")
     model_output = self.outputs[DRIVING_OUTPUT].numpy().reshape(-1)

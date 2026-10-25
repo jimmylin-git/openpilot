@@ -1,5 +1,5 @@
 """
-dp - egpu: put the vendored sunnypilot tinygrad (tinygrad_spm/) first on sys.path.
+dp - egpu: put the pinned HCQ2 tinygrad (tinygrad_spm/) first on sys.path.
 
 Must run before anything imports tinygrad, in a fresh interpreter (modeld_egpu.py and compile.py are
 started as their own processes for exactly this reason: manager preimports dp's processes, whose

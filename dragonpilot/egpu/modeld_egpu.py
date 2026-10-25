@@ -4,7 +4,7 @@ dp - modeld_egpu: dp's modeld main loop driving a big model compiled on this dev
 
 Started by manager as a NativeProcess (cwd dragonpilot/egpu, `<manager python> ./modeld_egpu.py`), i.e. a
 fresh interpreter: manager preimports every PythonProcess module, so a forked one would inherit dp's
-tinygrad from tinygrad_repo. Here nothing is imported yet, so tg_env can put the vendored sunnypilot
+tinygrad from tinygrad_repo. Here nothing is imported yet, so tg_env can put the pinned HCQ2
 tinygrad (tinygrad_spm/, the one compile.py used) first on sys.path.
 
 Failure handling (sunnypilot: "big model unavailable until the next drive"): a load that fails or
@@ -18,7 +18,6 @@ import threading
 import time
 
 tg_env.check()
-os.environ.setdefault('HCQDEV_WAIT_TIMEOUT_MS', '3000')  # sunnypilot modeld with a chestnut present (no-op on this tinygrad)
 # UT3G author's sp branch (sunnypilot/modeld_v2/egpu_loader.py configure_default_device): keep tinygrad's
 # default-device scan off the USB AMD GPU; every tensor here names its device anyway
 os.environ.setdefault('DEV', 'QCOM')

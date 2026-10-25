@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 dp - egpu: compile a big driving model for this device's eGPU, on this device, with the vendored
-sunnypilot tinygrad. Run as its own process by egpu_manager (offroad only, eGPU plugged in):
+pinned HCQ2 tinygrad. Run as its own process by egpu_manager (offroad only, eGPU plugged in):
 
   compile.py warp  --cam 1928x1208 --out warp.pkl      (DEV=QCOM ...)      the camera warp, once per camera
   compile.py model --onnx x.onnx   --out model.pkl     (DEV=USB+AMD:LLVM)  one per ONNX
@@ -14,7 +14,7 @@ Here it is a separate QCOM warp JIT, as sunnypilot-master splits them and as jet
 
 Both graph layouts in the wild are handled (jetlink spec.py):
   stateful (openpilot #38916, Cinque Terre V3 onwards): new_img + state_* in, next_state_* out.
-    compiled as-is with sunnypilot-master's examples/openpilot/compile_onnx.py (every input on the eGPU)
+    compiled as-is with the pinned ONNX runner (every input on the eGPU)
   queued (up to Cinque Terre V2): img/big_img/features_buffer/desire_pulse history stacks in.
     wrapped in a JIT that keeps the history queues on the eGPU and takes new_img, as AmyJeanes'
     make_run_policy / upstream selfdrive/modeld/compile_modeld.py (get_policy_npy_shapes,
@@ -23,8 +23,12 @@ Both graph layouts in the wild are handled (jetlink spec.py):
 Both produce one artifact shape: {'metadata', 'run', 'input_specs', 'output_specs', 'layout', 'state_inputs'}.
 """
 import argparse
+import hashlib
 import math
 import os
+import pickle
+import tempfile
+import time
 from pathlib import Path
 
 import tg_env  # (this script's dir is sys.path[0]; tg_env puts the vendored tinygrad first and drops it)
@@ -41,10 +45,55 @@ def log(msg: str) -> None:
   print(f"[egpu compile] {msg}", flush=True)
 
 
+def compile_jit(function, make_inputs, benchmark_runs: int, *, out_of_band: bool = False):
+  from tinygrad import Tensor, Device, TinyJit
+  from tinygrad.nn.state import get_parameters
+  from examples.openpilot.helpers import dump_pickle, load_pickle
+
+  if benchmark_runs < 1:
+    raise ValueError("benchmark_runs must be at least 1")
+  jit = TinyJit(function, prune=True)
+
+  def run(fn, seed, count):
+    args, kwargs = make_inputs(seed)
+    results = []
+    for i in range(count):
+      Device.default.synchronize()
+      start = time.perf_counter()
+      output = fn(*args, **kwargs)
+      if tensors := get_parameters(output):
+        Tensor.realize(*tensors)
+      Device.default.synchronize()
+      log(f"validation {seed} [{i + 1}/{count}]: {(time.perf_counter() - start) * 1e3:.2f} ms")
+      # Recurrent state can be large; retain exact-content digests rather than several full copies.
+      results.append([(t.shape, t.dtype, hashlib.sha256(memoryview(t.numpy()).cast('B')).digest())
+                      for t in get_parameters((output, args, kwargs))])
+    return results
+
+  run(jit, 42, 3)
+  with tempfile.TemporaryDirectory() as directory:
+    path = str(Path(directory) / "jit.pkl")
+    if out_of_band:
+      dump_pickle(jit, path)
+    else:
+      with open(path, 'wb') as f:
+        pickle.dump(jit, f)
+    loaded = load_pickle(path, out_of_band=out_of_band)
+    for seed in (42, 43):
+      expected = run(function, seed, max(3, benchmark_runs))
+      actual = run(loaded, seed, max(3, benchmark_runs))
+      for ref_step, actual_step in zip(expected, actual, strict=True):
+        for ref, value in zip(ref_step, actual_step, strict=True):
+          if ref != value:
+            raise AssertionError(f"serialized JIT differs from reference (seed={seed})")
+  return jit
+
+
 # ---------------------------------------------------------------------------------------------- warp
 def compile_warp_cmd(cam_w: int, cam_h: int, out: str, benchmark_runs: int, model_size=None) -> None:
+  from tinygrad import Device
   from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
-  from examples.openpilot.compile_warp import NV12Frame, compile_warp
+  from examples.openpilot.compile_warp import NV12Frame, make_frame_prepare
   from examples.openpilot.helpers import dump_pickle
   from dragonpilot.egpu.constants import MODEL_INPUT_SIZE
   model_size = tuple(model_size or MODEL_INPUT_SIZE)
@@ -52,8 +101,20 @@ def compile_warp_cmd(cam_w: int, cam_h: int, out: str, benchmark_runs: int, mode
   log(f"warp {cam_w}x{cam_h} -> {model_size} on {os.environ.get('DEV')}")
   # one frame per call: the runner hands each camera buffer in place (Tensor.from_blob), no 2x3 MB copy;
   # transforms on the host (NPY), as the DM warp does
-  artifact = compile_warp(frame, model_size, layout='yuv420', frames=1, transform_device='NPY', benchmark_runs=benchmark_runs)
-  artifact['metadata'] = {'camera': (cam_w, cam_h), 'model_size': model_size}
+  specs = {'input_frame': ((frame.size,), np.dtype(np.uint8).str, Device.DEFAULT),
+           'M_inv': ((3, 3), np.dtype(np.float32).str, 'NPY')}
+
+  def make_inputs(seed):
+    from examples.openpilot.helpers import allocate_inputs
+    rng = np.random.default_rng(seed)
+
+    def initialize(arrays):
+      arrays['input_frame'][:] = rng.integers(0, 256, (frame.size,), dtype=np.uint8)
+      arrays['M_inv'][:] = np.eye(3, dtype=np.float32) + rng.standard_normal((3, 3)) * .01
+    return (), allocate_inputs(specs, initialize)
+
+  jit = compile_jit(make_frame_prepare(frame, *model_size), make_inputs, benchmark_runs)
+  artifact = {'run': jit, 'input_specs': specs, 'metadata': {'camera': (cam_w, cam_h), 'model_size': model_size}}
   _atomic_dump(artifact, out, dump_pickle, out_of_band=False)
 
 
@@ -96,8 +157,9 @@ def queued_shapes(input_shapes: dict, frame_skip: int) -> dict:
 def compile_model_cmd(onnx: str, out: str, benchmark_runs: int) -> None:
   from tinygrad import Tensor, Device
   from tinygrad.nn.onnx import OnnxRunner
-  from examples.openpilot.compile_onnx import compile_onnx, onnx_metadata
-  from examples.openpilot.helpers import allocate_inputs, compile_jit, dump_pickle
+  from tinygrad.dtype import _to_np_dtype
+  from examples.openpilot.compile_onnx import onnx_metadata
+  from examples.openpilot.helpers import allocate_inputs, dump_pickle
 
   properties, output_shapes = onnx_metadata(onnx)
   if 'output_slices' not in properties:
@@ -106,11 +168,30 @@ def compile_model_cmd(onnx: str, out: str, benchmark_runs: int) -> None:
   graph_inputs = dict(runner.graph_inputs)
 
   if STATEFUL_FRAME in graph_inputs:
-    del runner
-    log(f"stateful graph (#38916) on {os.environ.get('DEV')}: compile_onnx, every input on the device")
-    artifact = compile_onnx(Path(onnx), device_inputs=('*',), benchmark_runs=benchmark_runs, out_of_band=True)
-    artifact['layout'] = 'stateful'
-    artifact['state_inputs'] = [n for n in artifact['input_specs'] if STATE_OUTPUT_PREFIX + n in artifact['output_specs']]
+    log(f"stateful graph (#38916) on {os.environ.get('DEV')}: every input on the device")
+    specs = {name: (tuple(spec.shape), np.dtype(_to_np_dtype(spec.dtype)).name, Device.DEFAULT)
+             for name, spec in graph_inputs.items()}
+    outputs = runner(allocate_inputs(specs))
+    output_specs = {name: (tuple(value.shape), np.dtype(_to_np_dtype(value.dtype)).name, Device.DEFAULT)
+                    for name, value in outputs.items()}
+
+    def make_inputs(seed):
+      rng = np.random.default_rng(seed)
+
+      def initialize(arrays):
+        for value in arrays.values():
+          value[...] = rng.integers(0, 256, value.shape, dtype=np.uint8) if value.dtype == np.uint8 else rng.standard_normal(value.shape)
+      return (), allocate_inputs(specs, initialize) | {'output_buffers': allocate_inputs(output_specs)}
+
+    def run(output_buffers, **inputs):
+      outputs = runner(inputs)
+      Tensor.realize(*(output_buffers[name].assign(value) for name, value in outputs.items()))
+
+    jit = compile_jit(run, make_inputs, benchmark_runs, out_of_band=True)
+    artifact = {'metadata': {'metadata': properties, 'input_shapes': {n: s[0] for n, s in specs.items()},
+                             'output_shapes': output_shapes},
+                'run': jit, 'input_specs': specs, 'output_specs': output_specs, 'layout': 'stateful',
+                'state_inputs': [n for n in specs if STATE_OUTPUT_PREFIX + n in output_specs]}
     _atomic_dump(artifact, out, dump_pickle, out_of_band=True)
     return
 
@@ -166,8 +247,11 @@ def compile_model_cmd(onnx: str, out: str, benchmark_runs: int) -> None:
 
 def _atomic_dump(artifact, out: str, dump, out_of_band: bool) -> None:
   tmp = out + ".tmp"
-  with open(tmp, 'wb') as f:
-    dump(artifact, f, out_of_band=out_of_band)
+  if out_of_band:
+    dump(artifact, tmp)
+  else:
+    with open(tmp, 'wb') as f:
+      pickle.dump(artifact, f)
   os.replace(tmp, out)
   log(f"wrote {out} ({os.path.getsize(out) / 1e6:.1f} MB)")
 

@@ -1,4 +1,6 @@
-sunnypilot/tinygrad @ 9cd40014f651ac2472b3b5fc3b12178ab4bb1c66 (2026-09-16)
-= sunnypilot-master tinygrad_repo (2026-10-14 snapshot, verified identical), = tinygrad_ref of sunnypilot driving_models_chestnut_v27.json
+commaai/tinygrad @ 02e698160eed1751738212144a7ea2cfb160b3f1
+= commaai/openpilot #39085 (2026-10-14), HCQ2 runtime and byte-based Buffer API
 Vendored: tinygrad/ package + examples/openpilot/{helpers,compile_onnx,compile_warp}.py
 Used ONLY by dragonpilot/egpu (modeld_egpu.py and compile.py), never by dp's own processes.
+Local patch: retain ADD1:0002 UT3G Dual enumeration in tinygrad/runtime/ops_amd.py.
+Local patch: defer the Linux-only io_uring return annotation in ops_disk.py for Windows CPU validation.

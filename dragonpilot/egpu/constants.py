@@ -46,14 +46,14 @@ DEFAULT_REF = DEFAULT_BUNDLE["ref"]
 AUTO_RETRY_S = 600  # a failed automatic download (network) is retried this long after
 
 # ---------------------------------------------------------------------------------------------
-# On-device compile. The vendored tinygrad is sunnypilot/tinygrad@9cd40014 (= sunnypilot-master's
-# tinygrad_repo); the compiled pkls only load with it, so its ref is part of every cache key.
+# On-device compile. The vendored tinygrad is pinned to commaai/openpilot #39085's HCQ2 runtime;
+# compiled pkls only load with it, so its ref is part of every cache key.
 #   warp  : QCOM, one per camera, model-independent: only the warped crop crosses USB (AmyJeanes/
 #           sunnypilot@173d90b / commaai#38862 idea, here as a separate warp JIT like sunnypilot-master)
 #   model : USB+AMD, one per ONNX (stateful #38916 graphs as-is, queued graphs wrapped with their queues)
 # ---------------------------------------------------------------------------------------------
-VENDORED_TINYGRAD_REF = "9cd40014f651ac2472b3b5fc3b12178ab4bb1c66"
-COMPILE_VERSION = 1  # bump when compile.py changes what it produces
+VENDORED_TINYGRAD_REF = "02e698160eed1751738212144a7ea2cfb160b3f1"
+COMPILE_VERSION = 2  # bump when compile.py changes what it produces
 CACHE_TAG = f"tg{VENDORED_TINYGRAD_REF[:8]}v{COMPILE_VERSION}"
 
 # sunnypilot-master selfdrive/modeld/SConscript tg_flags (comma) / chestnut_tg_flags without FRAME_DEV=CPU

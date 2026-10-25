@@ -6,7 +6,7 @@ Layout:
   usb.py          eGPU presence detection (sysfs)
   bundles.py      catalog merge, local state (ONNX / compiled / active), routing decision
   manager.py      daemon: presence param, catalog fetch, ONNX download (jetlink registry), compile, delete, clear
-  tg_env.py       puts the vendored sunnypilot tinygrad (tinygrad_spm/) first on sys.path, in a fresh interpreter
+  tg_env.py       puts the pinned HCQ2 tinygrad (tinygrad_spm/) first on sys.path, in a fresh interpreter
   compile.py      on-device compile: QCOM warp JIT per camera + eGPU model JIT per ONNX (stateful or queued)
   runner.py       EgpuModelState: QCOM warp -> crop over USB -> eGPU model
   modeld_egpu.py  entry point, executed as a NativeProcess (fresh interpreter, vendored tinygrad)

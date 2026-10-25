@@ -1,4 +1,4 @@
-# eGPU 大模型移植說明 v2：sunnypilot → openpilot-dp0111pre（含 Jetlink v11）
+# eGPU 大模型移植說明：sunnypilot v2 與 HCQ2 後端升級（含 Jetlink v11）
 
 > 來源：`sunnypilot-master`（2026-10-14 快照）的 chestnut / eGPU 功能（模型管理、大模型選擇器、設定頁、側邊欄與行車圖示）
 > 依據：`AmyJeanes/sunnypilot@173d90b`（port commaai/openpilot#38862：warp 在 QCOM、只送裁切影像過 USB）
@@ -25,6 +25,44 @@ v2 改成**下載模型的 onnx、在車上自己編譯一次**，warp 永遠編
 ---
 
 ## 1. 機器上的 tinygrad（兩份，互相隔離）
+
+### dpegpu-cluster-hcq2：完整 eGPU 後端升級
+
+本節是目前版本；其餘 v1／v2 比較與舊版測量保留作為歷史背景，不代表新版已通過實車驗證。
+
+- eGPU 專用 tinygrad 整包固定為 `commaai/tinygrad@02e698160eed1751738212144a7ea2cfb160b3f1`，
+  對應 `commaai/openpilot#39085`。包含 HCQ2、USB short transfer／fail-fast、失聯結束等待、
+  輪詢逾時及 byte-based Buffer API。`tinygrad_spm` 目錄名稱保留以免破壞現有啟動路徑；
+  內附 `VERSION` 記錄來源與本地修改。
+- 一起調整 `compile.py` 與 `runner.py`：使用新版 ONNX／warp primitives、新版 out-of-band
+  Buffer 權重儲存／載入、byte-based views，以及推論後的裝置 error state 檢查。
+  編譯時對兩組隨機輸入逐幀比較原始函式和序列化後 JIT，包含可變歷史／狀態。
+- 保留 queued 與 stateful 模型、QCOM warp、相機零拷貝映射、只上傳裁切影像、
+  AMD 100 W 設定、離線韌體讀取及快取。保留 `ADD1:0001`、`3801:0001`、`ADD1:0002`
+  枚舉順序；不寫入 UT3G 韌體。
+- 獨立 `modeld_egpu`、首次輸出監測、停輸出監測及本趟單向 stock fallback 不變。
+  不加入官方 onroad cycle 重試，不改控制邏輯、Jetlink 版本、AGNOS 或另一份 `tinygrad_repo`。
+- 新快取鍵為 `tg02e69816v2`。舊 `tg9cd40014v1` 編譯檔不會被載入，也不主動刪除；
+  `egpu_manager` 沿用既有流程在 offroad 重編使用中的模型，ONNX 可重用。
+  取消、清快取或刪除模型仍依現有操作語意執行。
+- 本地 vendor 差異只有 UT3G Dual USB ID，以及延後解析 `ops_disk.py` 的 Linux `io_uring`
+  回傳型別註記（讓 Windows CPU 測試可載入；不改 Linux 執行行為）。
+
+升級分支：`dpegpu-cluster-hcq2`。原始回復點：
+`dpegpu-cluster@678c5c114205f7be40d2aaab57e500d5103e8735`。
+回復整個分支／升級 commit，勿只還原 tinygrad：編譯器、runner 和快取格式必須成套。
+在未清除舊快取且模型選擇不變時，舊版可再使用舊鍵的編譯檔；否則須停車重編。
+
+本機後端回歸測試需 Python 3.11+、numpy、onnx、pytest：
+
+```sh
+python -m pytest -o addopts='' --confcutdir=selfdrive/modeld/tests selfdrive/modeld/tests/test_egpu_hcq2.py selfdrive/modeld/tests/test_egpu_startup.py selfdrive/modeld/tests/test_egpu_disconnect.py selfdrive/modeld/tests/test_usbgpu_device_ids.py selfdrive/modeld/tests/test_startup_guards.py -q --tb=short
+```
+
+`test_egpu_hcq2.py` 在隔離 Python 子程序使用真實 CPU runtime、合成 ONNX、模型與 warp
+編譯檔；runner 測試只替換不在本次升級範圍的輸出解析器／硬體訊息依賴。這不是
+完整車用模型或 QCOM／AMD 硬體驗證。上車前仍需停車測試完整模型重編、
+冷開機／離線載入、首張真實相機輸入、持續輸出及 USB 失聯 fallback，再量測延遲、掉幀及功耗。
 
 ### dpegpu-cluster：車機更新保護
 
@@ -61,7 +99,7 @@ Jetlink。模型清單仍共用，背景處理結果以狀態欄為準，送出�
 | tinygrad | 位置 | 誰用 |
 | --- | --- | --- |
 | dp 原本的 | `tinygrad_repo/` | 小模型、DM、jetlink 的 comma 端 warp、scons 建置 |
-| sunnypilot@9cd40014 | `dragonpilot/egpu/tinygrad_spm/`（`tinygrad/` 套件＋`examples/openpilot/{helpers,compile_onnx,compile_warp}.py`，約 18 MB） | **只有** `compile.py`（編譯）與 `modeld_egpu.py`（執行），兩者都是全新直譯器 |
+| commaai@02e69816（HCQ2） | `dragonpilot/egpu/tinygrad_spm/`（`tinygrad/` 套件＋`examples/openpilot/{helpers,compile_onnx,compile_warp}.py`） | **只有** `compile.py`（編譯）與 `modeld_egpu.py`（執行），兩者都是全新直譯器 |
 
 為什麼要全新直譯器：`system/manager/process.py` 的 `prepare()` 會在 manager 內 preimport 所有 PythonProcess，fork 出來的子行程繼承 dp 的 `tinygrad`。所以 `modeld_egpu` 是 **NativeProcess**，`compile.py` 由 `egpu_manager` 以 subprocess 啟動；兩者第一行 `import tg_env` 把隨附版放到 `sys.path[0]`，並 assert 真的載到隨附版。
 
@@ -91,7 +129,7 @@ fallback 啟動的 stock modeld 會讀取 `dp_egpu_failed`，強制停用內建 
 
 回歸測試：`pytest selfdrive/modeld/tests/test_egpu_startup.py selfdrive/modeld/tests/test_egpu_disconnect.py`。這些修正補上初始化交接與失敗處理缺口，不等同已根治底層 `NPY hang`；接著 Chestnut 的冷開機、首次真實影像及斷線 fallback 仍需在裝置驗證。
 
-編譯結果的快取鍵含 tinygrad ref（`tg9cd40014v1`）：之後若更新隨附 tinygrad，舊編譯檔自動作廢、使用中的模型自動重編。
+編譯結果的快取鍵含 tinygrad ref（目前 `tg02e69816v2`）：更新隨附 tinygrad 時不載入舊編譯檔，使用中的模型在 offroad 重編。
 
 ---
 
@@ -99,10 +137,10 @@ fallback 啟動的 stock modeld 會讀取 `dp_egpu_failed`，強制停用內建 
 
 | 結構 | 模型 | 編譯方式 |
 | --- | --- | --- |
-| **stateful**（openpilot #38916，2026-09-15 起） | Cinque Terre V3、Mountain Dew V2 Preview、ResAction Preview，以及之後的新模型 | 原樣用 sunnypilot-master 的 `examples/openpilot/compile_onnx.py`（`--device-input *`、out-of-band），所有輸入放在 eGPU；`state_*` 由 `next_state_*` 原地更新（照 sunnypilot-master `ModelState` 的 aliasing） |
+| **stateful**（openpilot #38916，2026-09-15 起） | Cinque Terre V3、Mountain Dew V2 Preview、ResAction Preview，以及相容圖結構的新模型 | 用固定版 `OnnxRunner` 編譯、out-of-band 儲存，所有輸入放在 eGPU；`state_*` 由 `next_state_*` 原地更新 |
 | **queued**（到 Cinque Terre V2 為止） | Lebowski、Tee Time、BMRLNAP 系列、Sad、CTM、CTMV2 | `compile.py` 包一層 JIT：歷史佇列（img / big_img / features / desire）留在 eGPU 上，邏輯照 Amy／上游 `compile_modeld.py` 的 `make_input_queues` / `shift_and_sample`；hidden state 由 runner 回授（同 Amy 的 `prev_feat`） |
 
-**warp**：sunnypilot-master 的 `examples/openpilot/compile_warp.py`，`--layout yuv420 --frames 1`，transform 在 host（NPY），用 `DEV=QCOM` 編。每個相機解析度一份（tici/3X 1928×1208、mici 1344×760），**與模型無關，整台車只編一次**。執行時相機 buffer 以 `Tensor.from_blob` 就地交給 warp（照 Amy commit），不複製整張影格。
+**warp**：固定版 `examples/openpilot/compile_warp.py` 的 `make_frame_prepare`，單幀 yuv420，transform 在 host（NPY），用 `DEV=QCOM` 編。每個相機解析度一份（tici/3X 1928×1208、mici 1344×760），**與模型無關，每個後端版本各編一次**。執行時相機 buffer 以 `Tensor.from_blob` 就地交給 warp，不複製整張影格。
 
 **每幀資料流**：相機 NV12（留在 comma）→ QCOM warp → 兩張 6×128×256 裁切（約 393 KB）＋純量（desire、traffic convention、action_t，queued 另加 hidden state 64 KB）→ **一次** host→eGPU 上傳 → eGPU 模型 JIT → 輸出回 host 解析。
 
@@ -110,7 +148,8 @@ fallback 啟動的 stock modeld 會讀取 `dp_egpu_failed`，強制停用內建 
 
 ## 2b. eGPU 功耗：採用 #38992 的 100 W 上限，**刻意不採用** AmyJeanes/openpilot-upstream@e9fa764
 
-隨附 tinygrad（`tinygrad_spm` @9cd40014）`amdev.py` 開機時的行為（已對照原始碼）：
+以下為原 `tinygrad_spm@9cd40014` 的設定與歷史量測；HCQ2 保留相同 `AM_POWER_LIMIT=100`
+設定及 SMU 自調邏輯，新版的實際時脈、電流與推論時間仍需重新量測：
 
 | 設定 | tinygrad 行為 | 大模型實測（Amy，3X） | chestnut 輸入電流 |
 | --- | --- | --- | --- |
@@ -208,8 +247,8 @@ fallback 啟動的 stock modeld 會讀取 `dp_egpu_failed`，強制停用內建 
 | `dp_egpu_loading` / `running` / `failed` | BOOL CLEAR_ON_MANAGER_START＋CLEAR_ON_OFFROAD_TRANSITION | 本趟大模型狀態 |
 
 磁碟配置（`/data/media/0/models/`）：
-- `egpu/warp_<相機>_512x256_tg9cd40014v1.pkl`（各約 0.5 MB）
-- `egpu/model_<sha16>_tg9cd40014v1.pkl`（約等於 onnx 大小）
+- `egpu/warp_<相機>_512x256_tg02e69816v2.pkl`（須重新編譯）
+- `egpu/model_<sha16>_tg02e69816v2.pkl`（須重新編譯）
 - `egpu/compile.log`
 - `jetlink/<sha16>.onnx`（與 jetlink 共用）
 
