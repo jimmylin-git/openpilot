@@ -21,6 +21,10 @@ tapered body, sloped dark windows, roof, wheel faces and rear lamps, drawn with
 source body colors and confidence opacity are retained. Existing Cybertruck
 model selection and unclassified radar-point cubes are unchanged. This shape
 does not imply vehicle-type classification or a detected braking state.
+Detected-vehicle car markers are enlarged 50% in width, length and height on
+both TR panels, after applying their minimum dimensions. Their longitudinal/
+lateral centers and base elevation are unchanged; ego models and full-size
+car fallbacks retain their existing dimensions.
 Live offroad mode displays P as the default gear; onroad retains the actual gear.
 DP **Display Mode** now includes **TR-9.2** (USB PID `0x0092`,
 1920x462) and **TR-12.3** (USB PID `0x0123`, 1920x720).

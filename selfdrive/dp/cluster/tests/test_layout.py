@@ -13,7 +13,8 @@ RENDERER = next(node for node in TREE.body if isinstance(node, ast.ClassDef) and
 
 @pytest.mark.parametrize("yaw", [0.0, math.pi / 2, -0.7])
 @pytest.mark.parametrize("confidence", [0.0, 1.0])
-def test_vehicle_car_marker_preserves_pose_footprint_and_confidence(yaw, confidence):
+@pytest.mark.parametrize("dimensions", [(2.0, 4.5, 1.5), (0.5, 1.0, 0.5)])
+def test_vehicle_car_marker_enlarges_dimensions_by_half_preserving_base_and_confidence(yaw, confidence, dimensions):
     names = {"_draw_vehicle_marker", "_draw_vehicle_car"}
     methods = [node for node in RENDERER.body if isinstance(node, ast.FunctionDef) and node.name in names]
     namespace = {"Vec3": lambda x, y, z: SimpleNamespace(x=x, y=y, z=z),
@@ -24,20 +25,31 @@ def test_vehicle_car_marker_preserves_pose_footprint_and_confidence(yaw, confide
     renderer = SimpleNamespace(_draw_quad=lambda *args: quads.append(args))
     renderer._draw_vehicle_car = lambda *args: namespace["_draw_vehicle_car"](renderer, *args)
     vehicle = SimpleNamespace(center=SimpleNamespace(x=3.0, y=20.0), right_x=math.cos(yaw), right_y=math.sin(yaw),
-                              forward_x=-math.sin(yaw), forward_y=math.cos(yaw), width_m=2.0, length_m=4.5,
-                              height_m=1.5, confidence=confidence, body_color=(100, 160, 200, 220),
+                              forward_x=-math.sin(yaw), forward_y=math.cos(yaw), width_m=dimensions[0], length_m=dimensions[1],
+                              height_m=dimensions[2], confidence=confidence, body_color=(100, 160, 200, 220),
                               side_color=(80, 130, 160, 200), rear_color=(70, 110, 140, 200),
                               top_highlight=(130, 180, 220, 235))
     namespace["_draw_vehicle_marker"](renderer, vehicle)
     assert len(quads) == 16
     assert all(quad[-1][3] == int(80 + 150 * confidence) for quad in quads)
-    width, length, height = 2.0 * 0.68, 4.5 * 0.64, 1.5 * 0.45
+    width = max(0.55, dimensions[0] * 0.68) * 1.5
+    length = max(1.05, dimensions[1] * 0.64) * 1.5
+    original_height = max(0.42, dimensions[2] * 0.45)
+    height = original_height * 1.5
+    base_z = dimensions[2] * 0.32 - original_height * 0.5
+    lateral, longitudinal, elevations = [], [], []
     for quad in quads:
         for point in quad[:4]:
             dx, dy = point.x - 3.0, point.y - 20.0
-            assert abs(dx * vehicle.right_x + dy * vehicle.right_y) <= width * 0.5 + 0.003
-            assert abs(dx * vehicle.forward_x + dy * vehicle.forward_y) <= length * 0.5 + 0.003
-            assert 1.5 * 0.32 - height * 0.5 <= point.z <= 1.5 * 0.32 + height * 0.5 + 1e-9
+            lateral.append(dx * vehicle.right_x + dy * vehicle.right_y)
+            longitudinal.append(dx * vehicle.forward_x + dy * vehicle.forward_y)
+            elevations.append(point.z)
+            assert abs(lateral[-1]) <= width * 0.5 + 0.003
+            assert abs(longitudinal[-1]) <= length * 0.5 + 0.003
+            assert base_z <= point.z <= base_z + height + 1e-9
+    assert max(lateral) - min(lateral) == pytest.approx(width)
+    assert max(longitudinal) - min(longitudinal) == pytest.approx(length + 0.002)
+    assert max(elevations) == pytest.approx(base_z + height)
     assert any(quad[-1][:3] == (35, 48, 60) for quad in quads)
     assert any(quad[-1][:3] == (210, 46, 40) for quad in quads)
 

@@ -2009,12 +2009,15 @@ class ClusterUiRenderer:
 
     def _draw_vehicle_marker(self, vehicle: VehicleBox) -> None:
         alpha = int(80 + 150 * clamp(vehicle.confidence, 0.0, 1.0))
+        width = max(0.55, vehicle.width_m * 0.68)
+        length = max(1.05, vehicle.length_m * 0.64)
+        height = max(0.42, vehicle.height_m * 0.45)
         self._draw_vehicle_car(
             vehicle,
-            max(0.55, vehicle.width_m * 0.68),
-            max(1.05, vehicle.length_m * 0.64),
-            max(0.42, vehicle.height_m * 0.45),
-            vehicle.height_m * 0.32 - max(0.42, vehicle.height_m * 0.45) * 0.5,
+            width * 1.5,
+            length * 1.5,
+            height * 1.5,
+            vehicle.height_m * 0.32 - height * 0.5,
             alpha,
         )
 
