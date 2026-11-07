@@ -26,6 +26,38 @@ v2 改成**下載模型的 onnx、在車上自己編譯一次**，warp 永遠編
 
 ## 1. 機器上的 tinygrad（兩份，互相隔離）
 
+### dpegpu-cluster：dp0111pre 雷達與 AEM 更新
+
+來源固定為 `herizon1054/openpilot@3dbce448b3087758d3cae2057c4e7236462d1b3b`。
+更新 `radard.py`／`radard_ext.py` 的車道線、切入、大型車、靜止／爬行救援與目標續接；
+僅 Toyota 載入擴充，非 Toyota 保留原廠 Track／前車選擇。此品牌閘門不是 TSS2 專屬。
+靜止救援需要視覺佐證，進入車速為嚴格的 30–130 km/h 範圍，通常連續 20 個模型幀確認；
+已採用目標有不同的維持條件。這不代表能辨識所有靜止車或保證高速停住。
+
+AEM 更新為上游 v17：停止線條件優先，其次方向燈，再依車速選模式；
+方向燈熄滅保持 1 秒，停止線覆寫在扣除偏移後的方向盤角度超過 20 度時取消，
+回正保持 1 秒後恢復。移除舊側向加速度過彎覆寫。planner 傳入方向燈及校正後角度，
+保留本分支的 eGPU／Jetlink、cluster、OCM、Traffic Stop 與其他 planner 修改。
+
+本地相對上游的一項修正：兩側車道線信心度足夠時，以車道線中心判斷目標側，
+不以可能漂移到旁車上的模型路徑判斷。測試重現上游在右側線外目標與路徑重合時
+選錯左車道線、讓目標通過閘門的問題；左右及彎道偏移案例皆納入回歸。
+測試執行正式雷達／AEM 原始碼，不是前次的離線 gate 複本；Windows 以 AST 載入
+隔離通訊／硬體依賴，Kalman 與濾波計算仍使用正式 Python 實作。
+尚未執行真實行車 log 回放、閉迴路模擬或車機測試，不將單元測試通過視為實車安全驗證。
+
+驗證結果：
+
+- `python -m pytest -o addopts='' --confcutdir=selfdrive/controls/tests selfdrive/controls/tests/test_radar_aem_port.py selfdrive/controls/tests/test_control_port.py -q --tb=short`：
+  **75 passed**（正式雷達整幀更新、前車選擇／撤銷、ID 續接、車道線、切入、大型車、品牌閘門、AEM 與 planner）。
+- 上游 `dragonpilot/selfdrive/controls/lib/test_aem.py`：**27 passed**。Windows 直接匯入缺少
+  `openpilot.common` 套件映射；使用 session runner 映射工作區套件並僅替換 realtime 的 `DT_MDL` 匯入
+  （值從正式原始碼讀取），AEM 與測試本身不替換。Linux 的正常工作區可直接執行該 pytest 檔案。
+- `python -m pytest -o addopts='' --confcutdir=selfdrive/dp/cluster/tests selfdrive/dp/cluster/tests -q --tb=short`：
+  **202 passed、145 subtests passed**。
+- 新雷達整合測試及兩個 radar 檔案 Ruff 通過；其餘修改檔案對比 HEAD 無新增 lint 問題。
+  Python 語法與 diff 空白檢查通過。Pytest 僅有 Windows 缺少 C++ plugin 的既有設定警告。
+
 ### dpegpu-cluster：車機更新保護
 
 更新器下載到 staging 後，「安裝」會重啟並套用 finalized 版本。`.overlay_init`

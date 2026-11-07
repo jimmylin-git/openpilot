@@ -273,7 +273,8 @@ def planner_setup(monkeypatch):
   planner.aem.get_mode.side_effect = lambda mode: mode
   lead = SimpleNamespace(status=False)
   sm = {
-    'carState': SimpleNamespace(vEgo=120 / 3.6, vCruise=100, aEgo=0, steeringAngleDeg=0, standstill=False),
+    'carState': SimpleNamespace(vEgo=120 / 3.6, vCruise=100, aEgo=0, steeringAngleDeg=0, standstill=False,
+                               leftBlinker=False, rightBlinker=False),
     'carControl': SimpleNamespace(orientationNED=[0, 0, 0]),
     'controlsState': SimpleNamespace(longControlState=1, forceDecel=False),
     'selfdriveState': SimpleNamespace(experimentalMode=False, personality=1, enabled=True),
