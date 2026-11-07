@@ -2009,13 +2009,14 @@ class ClusterUiRenderer:
 
     def _draw_vehicle_marker(self, vehicle: VehicleBox) -> None:
         alpha = int(80 + 150 * clamp(vehicle.confidence, 0.0, 1.0))
-        marker_center = rl.Vector3(vehicle.center.x, vehicle.center.y, vehicle.height_m * 0.32)
-        marker_size = rl.Vector3(
+        self._draw_vehicle_car(
+            vehicle,
             max(0.55, vehicle.width_m * 0.68),
             max(1.05, vehicle.length_m * 0.64),
             max(0.42, vehicle.height_m * 0.45),
+            vehicle.height_m * 0.32 - max(0.42, vehicle.height_m * 0.45) * 0.5,
+            alpha,
         )
-        rl.draw_cube_v(marker_center, marker_size, rl_color(vehicle.body_color, alpha))
 
 
     def _draw_radar_point(self, point: RadarPointMarker) -> None:
@@ -2283,65 +2284,57 @@ class ClusterUiRenderer:
         )
 
     def _draw_vehicle_box(self, vehicle: VehicleBox) -> None:
-        half_width = vehicle.width_m * 0.5
-        half_length = vehicle.length_m * 0.5
-        z0 = 0.035
-        z1 = vehicle.height_m + z0
+        self._draw_vehicle_car(vehicle, vehicle.width_m, vehicle.length_m, vehicle.height_m, 0.035)
+
+    def _draw_vehicle_car(
+        self, vehicle: VehicleBox, width: float, length: float, height: float, base_z: float, alpha: int | None = None,
+    ) -> None:
+        half_width, half_length = width * 0.5, length * 0.5
 
         def corner(local_x: float, local_y: float, z: float) -> Vec3:
             return Vec3(
                 vehicle.center.x + vehicle.right_x * local_x + vehicle.forward_x * local_y,
                 vehicle.center.y + vehicle.right_y * local_x + vehicle.forward_y * local_y,
-                z,
+                base_z + z * height,
             )
 
-        base = (
-            corner(-half_width, -half_length, z0),
-            corner(half_width, -half_length, z0),
-            corner(half_width, half_length, z0),
-            corner(-half_width, half_length, z0),
-        )
-        top = (
-            corner(-half_width, -half_length, z1),
-            corner(half_width, -half_length, z1),
-            corner(half_width, half_length, z1),
-            corner(-half_width, half_length, z1),
-        )
-        self._draw_quad(base[0], base[1], top[1], top[0], vehicle.rear_color)
-        self._draw_quad(base[1], base[2], top[2], top[1], vehicle.side_color)
-        self._draw_quad(base[2], base[3], top[3], top[2], vehicle.body_color)
-        self._draw_quad(base[3], base[0], top[0], top[3], vehicle.side_color)
-        self._draw_quad(top[0], top[1], top[2], top[3], vehicle.body_color)
+        def ring(w: float, rear: float, front: float, z: float) -> tuple[Vec3, ...]:
+            return (corner(-w, rear, z), corner(w, rear, z), corner(w, front, z), corner(-w, front, z))
 
-        inset = 0.22
-        highlight = tuple(
-            Vec3(
-                point.x + (vehicle.center.x - point.x) * inset,
-                point.y + (vehicle.center.y - point.y) * inset,
-                point.z + 0.006,
+        def color(value: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+            return value if alpha is None else (*value[:3], alpha)
+
+        def sides(bottom: tuple[Vec3, ...], top: tuple[Vec3, ...], colors: tuple) -> None:
+            for i in range(4):
+                j = (i + 1) % 4
+                self._draw_quad(bottom[i], bottom[j], top[j], top[i], color(colors[i]))
+
+        body_bottom = ring(half_width * 0.92, -half_length * 0.96, half_length * 0.96, 0.16)
+        body_top = ring(half_width, -half_length, half_length, 0.56)
+        sides(body_bottom, body_top, (vehicle.rear_color, vehicle.side_color, vehicle.body_color, vehicle.side_color))
+        self._draw_quad(*body_top, color(vehicle.body_color))
+        cabin = ring(half_width * 0.89, -half_length * 0.62, half_length * 0.56, 0.565)
+        roof = ring(half_width * 0.72, -half_length * 0.30, half_length * 0.25, 1.0)
+        glass = (35, 48, 60, vehicle.body_color[3])
+        sides(cabin, roof, (glass, glass, glass, glass))
+        self._draw_quad(*roof, color(vehicle.top_highlight))
+
+        # Wheel faces remain inside the original target footprint.
+        for side in (-1, 1):
+            x = side * half_width
+            for y in (-half_length * 0.60, half_length * 0.60):
+                points = (
+                    corner(x, y - length * 0.09, 0.02), corner(x, y + length * 0.09, 0.02),
+                    corner(x, y + length * 0.09, 0.30), corner(x, y - length * 0.09, 0.30),
+                )
+                self._draw_quad(*(points if side == 1 else points[::-1]), color((24, 26, 29, vehicle.body_color[3])))
+        for side in (-1, 1):
+            x0, x1 = sorted((side * half_width * 0.48, side * half_width * 0.86))
+            self._draw_quad(
+                corner(x0, -half_length - 0.002, 0.40), corner(x1, -half_length - 0.002, 0.40),
+                corner(x1, -half_length - 0.002, 0.49), corner(x0, -half_length - 0.002, 0.49),
+                color((210, 46, 40, vehicle.body_color[3])),
             )
-            for point in top
-        )
-        self._draw_quad(highlight[0], highlight[1], highlight[2], highlight[3], vehicle.top_highlight)
-
-        outline = rl_color(vehicle.outline_color)
-        edge_points = base + top
-        edges = (
-            (0, 1),
-            (1, 2),
-            (2, 3),
-            (3, 0),
-            (4, 5),
-            (5, 6),
-            (6, 7),
-            (7, 4),
-            (0, 4),
-            (1, 5),
-            (2, 6),
-            (3, 7),
-        )
-        for start, end in edges:
-            rl.draw_line_3d(vec3(edge_points[start]), vec3(edge_points[end]), outline)
 
     def _draw_quad(
         self,

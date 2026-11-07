@@ -15,6 +15,12 @@ indicators. Lead-departure detection and the `READY TO GO` reminder have been
 removed; normal radar/lead visualization is unchanged. This removal alone does
 not establish the cause of cluster freezes.
 Manager autorun targets 20 FPS (offroad rendering remains 1 FPS).
+Vehicle markers and the box fallback now use a lightweight car silhouette:
+tapered body, sloped dark windows, roof, wheel faces and rear lamps, drawn with
+16 quads and no additional model assets or engine. Marker pose, dimensions,
+source body colors and confidence opacity are retained. Existing Cybertruck
+model selection and unclassified radar-point cubes are unchanged. This shape
+does not imply vehicle-type classification or a detected braking state.
 Live offroad mode displays P as the default gear; onroad retains the actual gear.
 DP **Display Mode** now includes **TR-9.2** (USB PID `0x0092`,
 1920x462) and **TR-12.3** (USB PID `0x0123`, 1920x720).

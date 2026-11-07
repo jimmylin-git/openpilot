@@ -11,6 +11,36 @@ ROOT = Path(__file__).resolve().parents[1]
 TREE = ast.parse((ROOT / "cluster_renderer.py").read_text(encoding="utf-8"))
 RENDERER = next(node for node in TREE.body if isinstance(node, ast.ClassDef) and node.name == "ClusterUiRenderer")
 
+@pytest.mark.parametrize("yaw", [0.0, math.pi / 2, -0.7])
+@pytest.mark.parametrize("confidence", [0.0, 1.0])
+def test_vehicle_car_marker_preserves_pose_footprint_and_confidence(yaw, confidence):
+    names = {"_draw_vehicle_marker", "_draw_vehicle_car"}
+    methods = [node for node in RENDERER.body if isinstance(node, ast.FunctionDef) and node.name in names]
+    namespace = {"Vec3": lambda x, y, z: SimpleNamespace(x=x, y=y, z=z),
+                 "VehicleBox": object, "clamp": lambda value, low, high: max(low, min(high, value))}
+    exec("from __future__ import annotations\n", namespace)
+    exec(compile(ast.Module(body=methods, type_ignores=[]), "<vehicle car>", "exec"), namespace)
+    quads = []
+    renderer = SimpleNamespace(_draw_quad=lambda *args: quads.append(args))
+    renderer._draw_vehicle_car = lambda *args: namespace["_draw_vehicle_car"](renderer, *args)
+    vehicle = SimpleNamespace(center=SimpleNamespace(x=3.0, y=20.0), right_x=math.cos(yaw), right_y=math.sin(yaw),
+                              forward_x=-math.sin(yaw), forward_y=math.cos(yaw), width_m=2.0, length_m=4.5,
+                              height_m=1.5, confidence=confidence, body_color=(100, 160, 200, 220),
+                              side_color=(80, 130, 160, 200), rear_color=(70, 110, 140, 200),
+                              top_highlight=(130, 180, 220, 235))
+    namespace["_draw_vehicle_marker"](renderer, vehicle)
+    assert len(quads) == 16
+    assert all(quad[-1][3] == int(80 + 150 * confidence) for quad in quads)
+    width, length, height = 2.0 * 0.68, 4.5 * 0.64, 1.5 * 0.45
+    for quad in quads:
+        for point in quad[:4]:
+            dx, dy = point.x - 3.0, point.y - 20.0
+            assert abs(dx * vehicle.right_x + dy * vehicle.right_y) <= width * 0.5 + 0.003
+            assert abs(dx * vehicle.forward_x + dy * vehicle.forward_y) <= length * 0.5 + 0.003
+            assert 1.5 * 0.32 - height * 0.5 <= point.z <= 1.5 * 0.32 + height * 0.5 + 1e-9
+    assert any(quad[-1][:3] == (35, 48, 60) for quad in quads)
+    assert any(quad[-1][:3] == (210, 46, 40) for quad in quads)
+
 
 @pytest.mark.parametrize("product_id,rotated", [(None, False), (0x0092, False), (0x0123, True)])
 def test_output_rotation_is_only_enabled_for_12p3_usb(product_id, rotated):
