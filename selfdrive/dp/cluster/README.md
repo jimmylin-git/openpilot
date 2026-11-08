@@ -25,6 +25,13 @@ Detected-vehicle car markers are enlarged 50% in width, length and height on
 both TR panels, after applying their minimum dimensions. Their longitudinal/
 lateral centers and base elevation are unchanged; ego models and full-size
 car fallbacks retain their existing dimensions.
+Live and route-replay lane transitions begin at the model's
+`laneChangeStarting` state, not after the maneuver finishes. The road grid
+slides with a smootherstep curve over 0.85 seconds while the ego car stays
+centered; preparing/blinker-only states do not start the slide. Completion
+does not play a second recenter animation. An interrupted slide returns
+smoothly to its original lane. This is display-only, shared by both TR panels,
+and does not change lane-change control or report physical maneuver progress.
 Live offroad mode displays P as the default gear; onroad retains the actual gear.
 DP **Display Mode** now includes **TR-9.2** (USB PID `0x0092`,
 1920x462) and **TR-12.3** (USB PID `0x0123`, 1920x720).

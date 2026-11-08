@@ -116,7 +116,6 @@ LANE_CHANGE_REINDEX_PEAK_THRESHOLD = 0.22
 LANE_CHANGE_REINDEX_RESET_THRESHOLD = -0.08
 CONTINUOUS_LANE_CHANGE_REBASE_PROGRESS = 0.12
 LANE_CHANGE_MODEL_DIRECT_ONLY = True
-MODEL_DIRECT_LANE_SETTLE_MIN_PROGRESS = 0.65
 LONGITUDINAL_PERSONALITY_GAPS = {
     "aggressive": 1,
     "standard": 2,
@@ -2086,8 +2085,8 @@ class RouteLogParser:
         return clamp(max(fade_progress, timer_progress, desire_progress), 0.0, 0.78)
 
     def _model_direct_lane_change_values(self, event_t: float) -> tuple[str | None, str, float, float, bool]:
-        self.lane_change_started_t = None
         self.lane_change_continuation_active = False
+        previous_state = self.lane_change_previous_state
         self.lane_change_previous_state = self.lane_change_state
         self.lane_change_peak_directional_observed_offset = 0.0
 
@@ -2106,33 +2105,32 @@ class RouteLogParser:
         self.lane_change_recenter_direction = None
         self.lane_change_recenter_started_t = None
         self.lane_change_recenter_start_progress = 1.0
-        self.active_lane_change_direction = direction
-
         if self.lane_change_state == "preLaneChange":
+            self.lane_change_started_t = None
+            self.active_lane_change_direction = direction
             self.lane_change_last_progress = 0.0
             return direction, "preparing", 0.0, 1.0, False
 
-        progress = self._model_direct_lane_change_value(direction)
+        if (
+            self.lane_change_started_t is None
+            or self.active_lane_change_direction != direction
+            or (previous_state == "laneChangeFinishing" and self.lane_change_state == "laneChangeStarting")
+        ):
+            self.lane_change_started_t = event_t
+        self.active_lane_change_direction = direction
+        progress = clamp(
+            (event_t - self.lane_change_started_t) / MODEL_DIRECT_LANE_RECENTER_SECONDS,
+            0.0,
+            1.0,
+        )
         self.lane_change_last_progress = progress
         return direction, "changing", progress, 1.0, False
-
-    def _model_direct_lane_change_value(self, direction: str) -> float:
-        if self.lane_change_state == "laneChangeStarting":
-            # The model desire for the active lane change fades out as the
-            # maneuver completes, so visual position uses the complementary
-            # value without timer or recenter synthesis.
-            if direction == "left":
-                return 1.0 - self.lane_change_desire_left_prob
-            return 1.0 - self.lane_change_desire_right_prob
-        if self.lane_change_state == "laneChangeFinishing":
-            return 1.0
-        return 0.0
 
     def _model_direct_recenter_values(self, event_t: float) -> tuple[str, str, float, float, bool] | None:
         if (
             self.lane_change_recenter_direction is None
             and self.active_lane_change_direction is not None
-            and self.lane_change_last_progress >= MODEL_DIRECT_LANE_SETTLE_MIN_PROGRESS
+            and 0.0 < self.lane_change_last_progress < 1.0
         ):
             self.lane_change_recenter_direction = self.active_lane_change_direction
             self.lane_change_recenter_started_t = event_t
@@ -2146,6 +2144,7 @@ class RouteLogParser:
         return None
 
     def _clear_model_direct_lane_change_state(self) -> None:
+        self.lane_change_started_t = None
         self.active_lane_change_direction = None
         self.lane_change_last_progress = 0.0
         self.lane_change_recenter_direction = None
@@ -2318,8 +2317,10 @@ def route_lane_animation_values(
 
     if frame.lane_change_phase == "changing":
         if LANE_CHANGE_MODEL_DIRECT_ONLY:
-            ego_lane_offset = direction_sign * smootherstep(frame.lane_change_progress)
-            return ego_lane_offset, 0.0, 0.0, highlight_lane_offset, True
+            blend = smootherstep(frame.lane_change_progress)
+            lane_grid_offset = -direction_sign * blend
+            highlight_lane_offset = direction_sign * (1.0 - blend)
+            return 0.0, lane_grid_offset, lane_grid_offset, highlight_lane_offset, True
 
         lane_grid_offset = 0.0
         if frame.lane_change_continuation:
@@ -2347,6 +2348,9 @@ def route_lane_animation_values(
     if frame.lane_change_phase == "recentering":
         recenter_blend = smootherstep(frame.lane_change_progress)
         start_ego_offset = direction_sign * smootherstep(frame.lane_change_recenter_start_progress)
+        if LANE_CHANGE_MODEL_DIRECT_ONLY:
+            lane_grid_offset = -start_ego_offset * (1.0 - recenter_blend)
+            return observed_ego_lane_offset * recenter_blend, lane_grid_offset, lane_grid_offset, None, True
         lane_grid_offset = -direction_sign * recenter_blend
         ego_lane_offset = start_ego_offset * (1.0 - recenter_blend) + observed_ego_lane_offset * recenter_blend
         return ego_lane_offset, lane_grid_offset, lane_grid_offset, None, True
