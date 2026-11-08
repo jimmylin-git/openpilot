@@ -65,7 +65,11 @@ def find_bundle(bundles: list[dict], ref: str) -> dict | None:
 
 
 def pointer_for(params: Params, ref: str) -> dict | None:
-  """{oid, size} of a ref's ONNX if known: ours, else jetlink's cache of the same lookups"""
+  """Catalog pins override old lookups in either accelerator's pointer cache."""
+  from jetlink.registry.catalog import pinned_pointers
+  catalog = params.get(JETLINK_CATALOG_PARAM)
+  if isinstance(catalog, dict) and (pin := pinned_pointers(catalog).get(ref)) is not None:
+    return pin
   for key in (P_POINTERS, JETLINK_POINTERS_PARAM):
     try:
       cache = params.get(key)

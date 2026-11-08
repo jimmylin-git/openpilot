@@ -13,10 +13,10 @@ PC = not os.path.isfile('/TICI')
 # dragonpilot/jetlink_adapter refresh_catalog(): sunnypilot's chestnut catalogs (the pinned one and every
 # newer version) + zoompilot/jetlink's extra list, as the jetlink phone/Mac apps list them; it also
 # resolves each model's ONNX pointer into JetlinkModelPointers. A refresh from either the Jetlink panel or
-# the eGPU panel updates both. Nothing but names and the comma openpilot commit (`ref`) is used:
+# the eGPU panel updates both. Names, the comma commit (`ref`) and optional ONNX pins are used:
 # sunnypilot's own pkls are for other tinygrads and send whole frames over USB.
 # ---------------------------------------------------------------------------------------------
-JETLINK_CATALOG_PARAM = "JetlinkCatalog"          # jetlink_adapter KEYS.catalog, {bundles: [...]}
+JETLINK_CATALOG_PARAM = "JetlinkCatalog"          # jetlink_adapter KEYS.catalog, {bundles: [...], pointers: {ref: {oid, size}}}
 MODEL_SOURCE_LABEL = "與 Jetlink 共用"
 
 MANIFEST_CACHE_TIMEOUT_S = 3600

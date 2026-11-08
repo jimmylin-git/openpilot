@@ -26,6 +26,28 @@ v2 改成**下載模型的 onnx、在車上自己編譯一次**，warp 永遠編
 
 ## 1. 機器上的 tinygrad（兩份，互相隔離）
 
+### dpegpu-cluster：新模型 ONNX 解析更新
+
+移植 `herizon1054/openpilot:dp0111jetlink@84acc0ca7cd21aa528c65d2039bce6dc627f9f67`
+的 registry 修正：依最新 export 解析 ONNX，不再先選 PR 中的舊 export；
+明確指定的新 export 尚未上傳時報錯，避免誤下載另一個舊模型。
+額外清單若提供合法 `pointers`（commit、SHA-256、正整數大小），更新時覆蓋
+Jetlink 指標快取；eGPU 也優先採用清單固定指標，避免自己的舊快取遮蔽修正。
+未提供固定指標的模型仍沿用 commit／patch／HuggingFace 解析流程。
+
+更新程式後先在 eGPU 或 Jetlink 頁面「更新清單」，再重新下載。
+額外清單 404 不阻擋 sunnypilot 清單；其他網路錯誤仍回報並保留原清單。
+保留 API 2、tinygrad、QCOM warp、USB 執行與 SHA-256／續傳驗證；
+此更新不保證每個新模型都能在目前 tinygrad 編譯，也不會解決憑證、
+網路逾時、磁碟空間或尚未上傳 ONNX 的問題。
+
+離線回歸：`python -m pytest -o addopts='' --confcutdir=selfdrive/modeld/tests selfdrive/modeld/tests/test_egpu_registry.py selfdrive/modeld/tests/test_egpu_startup.py selfdrive/modeld/tests/test_egpu_disconnect.py -q --tb=short`：
+**66 passed**（新 registry 測試 23 項）。原本解析方法在 4 個新 export 回歸案例失敗，
+移植後皆通過。`python -m pytest -o addopts='' --confcutdir=dragonpilot/dashy/tests dragonpilot/dashy/tests/test_egpu.py -q --tb=short`：
+**56 passed**。registry、Jetlink Models 與新測試 Ruff 通過，adapter／bundles 無新增 lint 問題。
+測試使用正式 registry／Jetlink Models，以及 AST 載入正式 adapter／eGPU 方法以隔離
+Windows 上的 Params／硬體依賴；未執行車機完整模型下載、編譯與推論驗證。
+
 ### dpegpu-cluster：dp0111pre 雷達與 AEM 更新
 
 來源固定為 `herizon1054/openpilot@3dbce448b3087758d3cae2057c4e7236462d1b3b`。

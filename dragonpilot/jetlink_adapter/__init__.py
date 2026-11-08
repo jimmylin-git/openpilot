@@ -54,7 +54,7 @@ MODES = ('off', 'usb', 'ios')
 
 # the params jetlink reads and writes, all declared in common/params_keys.h.
 # dp: no model manager; the big-model slot ({ref, displayName}, unset = follow the
-# far end) and the catalog ({bundles}) are dp's own params
+# far end) and the catalog ({bundles, pointers}) are dp's own params
 _Keys = namedtuple('_Keys', 'link offroad progress spec pointers big_model catalog charge_phone')
 KEYS = _Keys(link='JetlinkLink', offroad='IsOffroad', progress='AcceleratorProgress', spec='JetlinkSpec',
              pointers='JetlinkModelPointers', big_model='JetlinkBigModel', catalog='JetlinkCatalog',
@@ -354,9 +354,10 @@ def pick_model(ref: str | None, params=None) -> None:
 def refresh_catalog(params=None, resolve: bool = True) -> int:
   """Fetch sunnypilot's chestnut catalogs (the pinned one, every newer one and
   zoompilot's extras, as the phone apps do), keep its big models, and resolve
-  each one's sha256 and size from comma's LFS pointer once. Network, seconds to
+  each one's sha256 and size from comma's LFS pointer once, unless the catalog
+  pins it (pins replace old lookups even with resolve=False). Network, seconds to
   a minute: run it off the UI thread. Returns the number of models listed."""
-  from jetlink.registry.catalog import fetch_catalogs, REQUIRED_SELECTOR_VERSION
+  from jetlink.registry.catalog import fetch_catalogs, pinned_pointers, REQUIRED_SELECTOR_VERSION
   from jetlink.registry.lfs import fetch_pointer
   from openpilot.common.params import Params
   params = params or Params()
@@ -365,10 +366,13 @@ def refresh_catalog(params=None, resolve: bool = True) -> int:
              and str(b.get('minimum_selector_version')) == str(REQUIRED_SELECTOR_VERSION)]
   if not bundles:
     raise RuntimeError("the catalog lists no big model")
-  params.put(KEYS.catalog, {'bundles': bundles})
+  pins = pinned_pointers(merged)
+  params.put(KEYS.catalog, {'bundles': bundles, 'pointers': pins}, block=True)
+  pointers = params.get(KEYS.pointers)
+  pointers = dict(pointers) if isinstance(pointers, dict) else {}
+  pointers.update(pins)
+  params.put(KEYS.pointers, pointers, block=True)
   if resolve:
-    pointers = params.get(KEYS.pointers)
-    pointers = dict(pointers) if isinstance(pointers, dict) else {}
     for b in bundles:
       if b['ref'] in pointers:
         continue
