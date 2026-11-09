@@ -1764,8 +1764,7 @@ class ClusterUiRenderer:
                 self._draw_strip(strip)
             self._profile_add("draw_scene.road_edges", profile_stage)
             profile_stage = self._profile_start()
-            for strip in scene.lane_markings:
-                self._draw_strip(strip)
+            self._draw_lane_markings(scene)
             self._profile_add("draw_scene.lane_markings", profile_stage)
             profile_stage = self._profile_start()
             for strip in scene.planned_path:
@@ -1957,6 +1956,15 @@ class ClusterUiRenderer:
             right_far = rl.Vector3(next_right.x + x_offset_m, next_right.y, next_right.z)
             rl.draw_triangle_3d(left_near, right_near, right_far, color)
             rl.draw_triangle_3d(left_near, right_far, left_far, color)
+
+    def _draw_lane_markings(self, scene: ClusterScene) -> None:
+        rl.rl_push_matrix()
+        try:
+            rl.rl_translatef(0.0, -scene.lane_marking_scroll_m, 0.0)
+            for strip in scene.lane_markings:
+                self._draw_strip(strip)
+        finally:
+            rl.rl_pop_matrix()
 
     def _triangle_strip_points_for(self, strip: MeshStrip, count: int):
         key = (id(strip.left), id(strip.right))

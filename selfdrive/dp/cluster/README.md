@@ -32,6 +32,16 @@ centered; preparing/blinker-only states do not start the slide. Completion
 does not play a second recenter animation. An interrupted slide returns
 smoothly to its original lane. This is display-only, shared by both TR panels,
 and does not change lane-change control or report physical maneuver progress.
+The four fixed lane boundaries use dashed paint (5.2 m paint / 4.2 m gap).
+Both TR panels scroll the dashes toward the ego car at a fixed 18 m/s
+(15 times the ground grid's unchanged 1.2 m/s) whenever the vehicle is moving, independent of driving speed;
+stopping pauses the animation. This is a stylized display, not recognition of
+the actual road's solid/dashed marking type. Lane colors, blind-spot warnings
+and lateral lane-change transitions are unchanged.
+Animation reuses fixed lane geometry and cached native vertex arrays; only a
+shared drawing-matrix translation changes each frame. One extra dash period
+at the distant end maintains coverage as the geometry scrolls. No per-phase
+geometry cache, extra textures, animation thread or increased frame rate is used.
 Live offroad mode displays P as the default gear; onroad retains the actual gear.
 DP **Display Mode** now includes **TR-9.2** (USB PID `0x0092`,
 1920x462) and **TR-12.3** (USB PID `0x0123`, 1920x720).

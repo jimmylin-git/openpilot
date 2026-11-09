@@ -384,6 +384,7 @@ class ClusterScene:
     radar_points: tuple[RadarPointMarker, ...]
     vehicles: tuple[VehicleBox, ...]
     ground_grid: tuple[MeshStrip, ...] = ()
+    lane_marking_scroll_m: float = 0.0
 
 
 def vec3_with_x_offset(vec: Vec3, x_offset_m: float) -> Vec3:
@@ -3503,11 +3504,12 @@ def build_cluster_scene(
     lane_offset_ms = 0.0
     lane_collect_ms = 0.0
     bsd_marking_offsets = bsd_lane_marking_offsets(state)
+    lane_marking_scroll_m = (ground_scroll_m * 15.0) % (LANE_DASH_LENGTH_M + LANE_DASH_GAP_M)
     fixed_lane_markings = (
-        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[0], BLUE_SOFT, "solid", width=5),
-        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[1], BLUE, "solid", width=7),
-        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[2], BLUE, "solid", width=7),
-        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[3], BLUE_SOFT, "solid", width=5),
+        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[0], BLUE_SOFT, "dashed", width=5),
+        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[1], BLUE, "dashed", width=7),
+        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[2], BLUE, "dashed", width=7),
+        LaneMarking(FIXED_THREE_LANE_MARKING_OFFSETS[3], BLUE_SOFT, "dashed", width=5),
     )
     for marking in fixed_lane_markings:
         marking_specs = (
@@ -3531,7 +3533,8 @@ def build_cluster_scene(
             NO_STEERING_CURVE,
             lane_width_m,
             road_start_m,
-            road_end_m,
+            # One extra period keeps the distant end covered during GPU translation.
+            road_end_m + LANE_DASH_LENGTH_M + LANE_DASH_GAP_M,
             marking_specs,
             marking.style,
         )
@@ -3716,6 +3719,7 @@ def build_cluster_scene(
         road_edges=road_edges,
         highlight_lanes=tuple(highlight_lanes),
         lane_markings=lane_markings,
+        lane_marking_scroll_m=lane_marking_scroll_m,
         planned_path=tuple(planned_path),
         radar_points=tuple(radar_points),
         vehicles=tuple(vehicles),
