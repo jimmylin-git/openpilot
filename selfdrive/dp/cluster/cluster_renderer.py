@@ -2023,7 +2023,7 @@ class ClusterUiRenderer:
         width = max(0.55, vehicle.width_m * 0.68)
         length = max(1.05, vehicle.length_m * 0.64)
         height = max(0.42, vehicle.height_m * 0.45)
-        scale = 1.5 * (1.2 if self._compact_panel else 1.0)
+        scale = 1.5 * (1.2 * 0.9 if self._compact_panel else 1.0)
         self._draw_vehicle_car(
             vehicle,
             width * scale,

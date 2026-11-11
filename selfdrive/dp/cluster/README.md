@@ -28,6 +28,9 @@ car fallbacks retain their existing dimensions.
 TR-9.2 surrounding-car markers receive another 20% size increase, retaining
 their centers and base elevation. This does not resize lane markings, roads,
 ego models, labels or TR-12.3 markers.
+TR-9.2 surrounding-car markers are then reduced 10% from that enlarged size,
+with their centers and base elevation retained; TR-12.3, ego vehicles and lane
+geometry are unchanged.
 Live and route-replay lane transitions begin at the model's
 `laneChangeStarting` state, not after the maneuver finishes. The road grid
 slides with a smootherstep curve over 0.85 seconds while the ego car stays
