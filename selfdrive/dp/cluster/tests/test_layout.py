@@ -14,7 +14,8 @@ RENDERER = next(node for node in TREE.body if isinstance(node, ast.ClassDef) and
 @pytest.mark.parametrize("yaw", [0.0, math.pi / 2, -0.7])
 @pytest.mark.parametrize("confidence", [0.0, 1.0])
 @pytest.mark.parametrize("dimensions", [(2.0, 4.5, 1.5), (0.5, 1.0, 0.5)])
-def test_vehicle_car_marker_enlarges_dimensions_by_half_preserving_base_and_confidence(yaw, confidence, dimensions):
+@pytest.mark.parametrize("compact", [False, True])
+def test_vehicle_car_marker_enlarges_dimensions_preserving_base_and_confidence(yaw, confidence, dimensions, compact):
     names = {"_draw_vehicle_marker", "_draw_vehicle_car"}
     methods = [node for node in RENDERER.body if isinstance(node, ast.FunctionDef) and node.name in names]
     namespace = {"Vec3": lambda x, y, z: SimpleNamespace(x=x, y=y, z=z),
@@ -22,7 +23,7 @@ def test_vehicle_car_marker_enlarges_dimensions_by_half_preserving_base_and_conf
     exec("from __future__ import annotations\n", namespace)
     exec(compile(ast.Module(body=methods, type_ignores=[]), "<vehicle car>", "exec"), namespace)
     quads = []
-    renderer = SimpleNamespace(_draw_quad=lambda *args: quads.append(args))
+    renderer = SimpleNamespace(_compact_panel=compact, _draw_quad=lambda *args: quads.append(args))
     renderer._draw_vehicle_car = lambda *args: namespace["_draw_vehicle_car"](renderer, *args)
     vehicle = SimpleNamespace(center=SimpleNamespace(x=3.0, y=20.0), right_x=math.cos(yaw), right_y=math.sin(yaw),
                               forward_x=-math.sin(yaw), forward_y=math.cos(yaw), width_m=dimensions[0], length_m=dimensions[1],
@@ -32,10 +33,11 @@ def test_vehicle_car_marker_enlarges_dimensions_by_half_preserving_base_and_conf
     namespace["_draw_vehicle_marker"](renderer, vehicle)
     assert len(quads) == 16
     assert all(quad[-1][3] == int(80 + 150 * confidence) for quad in quads)
-    width = max(0.55, dimensions[0] * 0.68) * 1.5
-    length = max(1.05, dimensions[1] * 0.64) * 1.5
+    scale = 1.5 * (1.2 if compact else 1.0)
+    width = max(0.55, dimensions[0] * 0.68) * scale
+    length = max(1.05, dimensions[1] * 0.64) * scale
     original_height = max(0.42, dimensions[2] * 0.45)
-    height = original_height * 1.5
+    height = original_height * scale
     base_z = dimensions[2] * 0.32 - original_height * 0.5
     lateral, longitudinal, elevations = [], [], []
     for quad in quads:
@@ -299,7 +301,7 @@ def test_road_clipping_matches_panel_and_cleans_up(compact):
     with pytest.raises(RuntimeError, match="draw failed"):
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "<road clipping>", "exec"),
              {"self": renderer, "rl": rl, "scene": None, "state": None, "DESIGN_WIDTH": 1920, "DESIGN_HEIGHT": 720})
-    assert events == ([(560, 125, 800, 337), "draw", "end"] if compact else [(440, 205, 1040, 515), "draw", "end"])
+    assert events == ([(510, 125, 900, 337), "draw", "end"] if compact else [(440, 205, 1040, 515), "draw", "end"])
 
 
 @pytest.mark.parametrize("compact", [False, True])
@@ -312,7 +314,7 @@ def test_scene_zoom_is_uniform_and_compact_only(compact, fov):
                  "scene": SimpleNamespace(camera=SimpleNamespace(fovy_deg=fov)), "math": math}
     exec(compile(ast.Module(body=[constant, *method.body[:2]], type_ignores=[]), "<scene zoom>", "exec"), namespace)
     magnification = math.tan(math.radians(fov) / 2) / math.tan(math.radians(namespace["fovy_deg"]) / 2)
-    assert magnification == pytest.approx(1.15 if compact else 1.)
+    assert magnification == pytest.approx(1.15 * 1.3 if compact else 1.)
     camera = method.body[2].value
     assert ast.unparse(camera.args[3]) == "fovy_deg"
 
@@ -322,12 +324,13 @@ def test_panel_projection_grows_only_horizontal_axis(compact):
     method = next(n for n in RENDERER.body if isinstance(n, ast.FunctionDef) and n.name == "_draw_scene")
     start = next(i for i, n in enumerate(method.body) if isinstance(n, ast.Assign)
                  and ast.unparse(n.targets[0]) == "projection")
-    nodes = method.body[start:start + 3]
-    projection = SimpleNamespace(m0=2., m5=3., m10=4.)
+    nodes = method.body[start:start + 4]
+    projection = SimpleNamespace(m0=2., m5=3., m9=0., m10=4.)
     written = []
     namespace = {
         "self": SimpleNamespace(_compact_panel=compact), "COMPACT_SCENE_WIDTH_SCALE": 1.56,
         "LARGE_SCENE_WIDTH_SCALE": 1.3,
+        "COMPACT_SCENE_Y_OFFSET_PX": -80.,
         "rl": SimpleNamespace(rl_get_matrix_projection=lambda: projection,
                               rl_set_matrix_projection=lambda matrix: written.append(matrix)),
     }
@@ -337,6 +340,7 @@ def test_panel_projection_grows_only_horizontal_axis(compact):
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "<horizontal zoom>", "exec"), namespace)
     assert projection.m0 == pytest.approx(3.12 if compact else 2.6)
     assert (projection.m5, projection.m10) == (3., 4.)
+    assert projection.m9 == pytest.approx(-160. / 462. if compact else 0.)
     assert len(written) == 1
 
 

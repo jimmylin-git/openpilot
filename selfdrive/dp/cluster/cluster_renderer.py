@@ -167,7 +167,8 @@ COMPACT_TOP_STATUS_Y = -14.0
 LARGE_TOP_STATUS_SCALE = 0.9 * 1.3
 LARGE_LFA_OFF_SCALE = 0.9
 LARGE_TOP_STATUS_Y = 14.0 - TURN_SIGNAL_CENTER_Y * (LARGE_TOP_STATUS_SCALE - LARGE_LFA_OFF_SCALE)
-COMPACT_SCENE_ZOOM = 1.15
+COMPACT_SCENE_ZOOM = 1.15 * 1.3
+COMPACT_SCENE_Y_OFFSET_PX = -80.0
 COMPACT_SCENE_WIDTH_SCALE = 1.3 * 1.5 * 0.8
 LARGE_SCENE_WIDTH_SCALE = 1.3
 TOP_STATUS_DETAIL_CENTER_Y = (
@@ -973,7 +974,7 @@ class ClusterUiRenderer:
         profile_stage = self._profile_start()
         if self._compact_panel:
             sx, sy = self.width / 1920.0, self.height / 462.0
-            rl.begin_scissor_mode(round(560 * sx), round(125 * sy), round(800 * sx), round(337 * sy))
+            rl.begin_scissor_mode(round(510 * sx), round(125 * sy), round(900 * sx), round(337 * sy))
         else:
             sx, sy = self.width / DESIGN_WIDTH, self.height / DESIGN_HEIGHT
             rl.begin_scissor_mode(round(440 * sx), round(205 * sy), round(1040 * sx), round(515 * sy))
@@ -1745,6 +1746,8 @@ class ClusterUiRenderer:
         rl.begin_mode_3d(camera)
         projection = rl.rl_get_matrix_projection()
         projection.m0 *= COMPACT_SCENE_WIDTH_SCALE if self._compact_panel else LARGE_SCENE_WIDTH_SCALE
+        if self._compact_panel:
+            projection.m9 += 2.0 * COMPACT_SCENE_Y_OFFSET_PX / 462.0
         rl.rl_set_matrix_projection(projection)
         self._profile_add("draw_scene.begin_mode_3d", profile_stage)
         rl.rl_push_matrix()
@@ -2020,11 +2023,12 @@ class ClusterUiRenderer:
         width = max(0.55, vehicle.width_m * 0.68)
         length = max(1.05, vehicle.length_m * 0.64)
         height = max(0.42, vehicle.height_m * 0.45)
+        scale = 1.5 * (1.2 if self._compact_panel else 1.0)
         self._draw_vehicle_car(
             vehicle,
-            width * 1.5,
-            length * 1.5,
-            height * 1.5,
+            width * scale,
+            length * scale,
+            height * scale,
             vehicle.height_m * 0.32 - height * 0.5,
             alpha,
         )
@@ -2085,6 +2089,8 @@ class ClusterUiRenderer:
                 project_ms += (time.perf_counter() - project_stage) * 1000.0
             if screen is None:
                 continue
+            if self._compact_panel:
+                screen.y += COMPACT_SCENE_Y_OFFSET_PX * self.height / 462.0
             if profile_enabled:
                 layout_stage = time.perf_counter()
             distance = radar_point_distance_label(point) if radar_info_shows_distance(radar_info_mode) else ""
@@ -2216,6 +2222,8 @@ class ClusterUiRenderer:
                 project_ms += (time.perf_counter() - project_stage) * 1000.0
             if screen is None:
                 continue
+            if self._compact_panel:
+                screen.y += COMPACT_SCENE_Y_OFFSET_PX * self.height / 462.0
 
             if profile_enabled:
                 layout_stage = time.perf_counter()

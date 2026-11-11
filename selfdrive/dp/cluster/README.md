@@ -25,6 +25,9 @@ Detected-vehicle car markers are enlarged 50% in width, length and height on
 both TR panels, after applying their minimum dimensions. Their longitudinal/
 lateral centers and base elevation are unchanged; ego models and full-size
 car fallbacks retain their existing dimensions.
+TR-9.2 surrounding-car markers receive another 20% size increase, retaining
+their centers and base elevation. This does not resize lane markings, roads,
+ego models, labels or TR-12.3 markers.
 Live and route-replay lane transitions begin at the model's
 `laneChangeStarting` state, not after the maneuver finishes. The road grid
 slides with a smootherstep curve over 0.85 seconds while the ego car stays
@@ -94,9 +97,12 @@ The 9.2-inch panel retains its own HUD placement, not a vertically squeezed
 12.3-inch layout: speed and gear are centered at (250, 240) and (1660, 240)
 in its native 1920x462 canvas. Text/icons retain their aspect ratios; the
 central status row is uniformly reduced and inset, while the road/vehicle
-layer is clipped to the central area below it (native x=560–1360,
-y=125–462), near the side-frame inner edges and below the top-row labels.
-The compact 3D camera applies a uniform 1.15x perspective zoom, followed by
+layer is clipped to the central area below it (native x=510–1410,
+y=125–462), extended 50 pixels on each side to reveal more road and vehicles.
+The compact 3D camera applies a uniform 1.495x perspective zoom (1.15x enlarged
+another 30%), followed by
+an upward screen-space shift of 80 native pixels for the 3D scene and its labels,
+without moving the HUD or changing the scene's clipping area, and
 an additional 1.56x horizontal projection stretch (1.3x, then 1.5x, then 0.8x) to roads and vehicles;
 projected radar labels follow the same horizontal stretch. The system metrics stay in
 the side panels, with MEM/CPU centered at x=310 and TEMP at x=1610 and
