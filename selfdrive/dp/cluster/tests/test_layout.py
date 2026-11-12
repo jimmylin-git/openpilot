@@ -34,7 +34,7 @@ def test_vehicle_car_marker_enlarges_dimensions_preserving_base_and_confidence(y
     assert len(quads) == 16
     assert all(quad[-1][3] == int(80 + 150 * confidence) for quad in quads)
     scale = 1.5 * (1.2 * 0.9 if compact else 1.0)
-    width = max(0.55, dimensions[0] * 0.68) * scale
+    width = max(0.55, dimensions[0] * 0.68) * scale * 0.8
     length = max(1.05, dimensions[1] * 0.64) * scale
     original_height = max(0.42, dimensions[2] * 0.45)
     height = original_height * scale

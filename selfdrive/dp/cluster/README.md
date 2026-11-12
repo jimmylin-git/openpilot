@@ -21,9 +21,15 @@ tapered body, sloped dark windows, roof, wheel faces and rear lamps, drawn with
 source body colors and confidence opacity are retained. Existing Cybertruck
 model selection and unclassified radar-point cubes are unchanged. This shape
 does not imply vehicle-type classification or a detected braking state.
-The 3D scene displays only modelV2 lead predictions whose probability reaches
-the existing 80% threshold. It includes the 0, 2 and 4 second lead predictions,
-which need not represent different vehicles; radar-only vehicles are hidden.
+The 3D scene displays modelV2 lead predictions whose probability reaches
+the 50% display threshold. This uses the raw model probability, not radard's
+filtered probability or its full lead-selection logic; following control is
+unchanged. Radar-only display thresholds are unchanged.
+It includes the 0, 2 and 4 second lead predictions,
+which need not represent different vehicles. Radar-only vehicles are also
+displayed using the existing radar classification and stability filters.
+Radar leads/tracks matching a model prediction cannot bypass its probability
+cutoff, including in detail mode.
 Radar tracks may still supplement matched model predictions with speed data,
 but do not replace their model probability. Live stability and hold/fade
 smoothing remain active, so the display can lag the latest model output.
@@ -39,6 +45,8 @@ ego models, labels or TR-12.3 markers.
 TR-9.2 surrounding-car markers are then reduced 10% from that enlarged size,
 with their centers and base elevation retained; TR-12.3, ego vehicles and lane
 geometry are unchanged.
+Surrounding-car markers on both panels are then narrowed by 20%; their length,
+height, center and base elevation are unchanged. The ego vehicle is unchanged.
 Live and route-replay lane transitions begin at the model's
 `laneChangeStarting` state, not after the maneuver finishes. The road grid
 slides with a smootherstep curve over 0.85 seconds while the ego car stays
@@ -618,9 +626,9 @@ selected debug view remains visible.
 boxes only, `3` speed for all vehicle boxes and raw radar points, and `4` speed
 and distance for all. `ClusterHudRadarDisplay=0` averages nearby radar points
 and allows them to supplement matching model predictions; `1` keeps points
-unmerged for detail checks and disables that speed merge. Neither mode renders
-radar-only vehicle boxes or point markers in the 3D scene, including rear-corner
-detections. Vehicle metric labels sit closer to the box top.
+unmerged for detail checks and disables that speed merge. Both modes render
+eligible radar-only vehicles; raw point cubes stay hidden. Vehicle metric labels
+sit closer to the box top.
 The default drive camera sits closer to the ego roof, lower than the earlier
 high view, tilted downward, and shifted `5m` forward so route/live scene space
 is easier to see. Detected vehicles, radar points, and desired-distance markers

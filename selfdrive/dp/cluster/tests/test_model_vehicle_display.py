@@ -21,7 +21,7 @@ def make_state(vehicles=(), radar_points=(), radar_display_mode=0):
 def test_model_probability_controls_display_even_with_high_confidence_radar(radar_display_mode):
     radar = DetectedVehicle("TARGET", 25.0, 0.0, source="radarState", probability=1.0, primary=True)
     point = RadarPoint("R1", 25.0, 0.0, source="liveTracks", probability=1.0, relative_speed_mps=-2.0)
-    low = DetectedVehicle("M1", 25.0, 0.0, source="modelV2.leadsV3", probability=0.79, primary=True)
+    low = DetectedVehicle("M1", 25.0, 0.0, source="modelV2.leadsV3", probability=0.49, primary=True)
     frame = scene.build_cluster_scene(make_state((radar, low), (point,), radar_display_mode))
     assert len(frame.vehicles) == 1
 
@@ -32,18 +32,38 @@ def test_model_probability_controls_display_even_with_high_confidence_radar(rada
     assert frame.vehicles[1].raw_probability == pytest.approx(0.9)
 
 
-def test_radar_only_vehicle_is_hidden():
+@pytest.mark.parametrize("radar_display_mode", [0, 1])
+def test_radar_only_vehicles_are_restored(radar_display_mode):
     radar = DetectedVehicle("TARGET", 25.0, 0.0, source="radarState", probability=1.0, primary=True)
     point = RadarPoint("R1", 40.0, 3.6, source="liveTracks", probability=1.0, relative_speed_mps=-1.0)
-    frame = scene.build_cluster_scene(make_state((radar,), (point,)))
-    assert len(frame.vehicles) == 1
+    frame = scene.build_cluster_scene(make_state((radar,), (point,), radar_display_mode))
+    assert len(frame.vehicles) == 3
+    assert any(vehicle.label == "TARGET" for vehicle in frame.vehicles)
+    assert any(vehicle.longitudinal_m == 40.0 for vehicle in frame.vehicles)
 
 
-@pytest.mark.parametrize(("probability", "visible"), [(0.7999, False), (0.8, True), (0.8001, True)])
-def test_existing_probability_threshold(probability, visible):
+@pytest.mark.parametrize("radar_display_mode", [0, 1])
+def test_neighbor_survives_when_model_lead_is_below_threshold(radar_display_mode):
+    lead = DetectedVehicle("M1", 25.0, 0.0, source="modelV2.leadsV3", probability=0.49, primary=True)
+    point = RadarPoint("R1", 40.0, 3.6, source="liveTracks", probability=1.0, relative_speed_mps=-1.0)
+    frame = scene.build_cluster_scene(make_state((lead,), (point,), radar_display_mode))
+    assert len(frame.vehicles) == 2
+    assert frame.vehicles[1].longitudinal_m == 40.0
+    assert frame.vehicles[1].label != "M1"
+
+
+@pytest.mark.parametrize(("probability", "visible"), [(0.4999, False), (0.5, True), (0.5001, True), (0.6, True)])
+def test_model_probability_threshold(probability, visible):
     lead = DetectedVehicle("M1", 25.0, 0.0, source="modelV2.leadsV3", probability=probability, primary=True)
     frame = scene.build_cluster_scene(make_state((lead,)))
     assert (len(frame.vehicles) == 2) is visible
+
+
+def test_model_probability_still_controls_fade_above_threshold():
+    lead = DetectedVehicle("M1", 25.0, 0.0, source="modelV2.leadsV3", probability=0.6, primary=True)
+    frame = scene.build_cluster_scene(make_state((lead,)))
+    assert frame.vehicles[1].confidence == pytest.approx(0.5)
+    assert frame.vehicles[1].raw_probability == pytest.approx(0.6)
 
 
 def test_all_model_predictions_can_be_displayed():

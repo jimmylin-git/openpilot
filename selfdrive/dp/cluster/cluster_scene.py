@@ -67,7 +67,8 @@ LANE_CENTER_LOCK_END = 0.45
 # Detected front vehicle boxes below this modelV2 confidence are hidden
 # entirely instead of drawn faintly. Lane lines always render at a fixed
 # 3-lane layout regardless of confidence (see build_cluster_scene()).
-FRONT_VEHICLE_MIN_CONFIDENCE = 0.80
+FRONT_VEHICLE_MIN_CONFIDENCE = 0.50
+RADAR_VEHICLE_MIN_DISPLAY_CONFIDENCE = 0.80
 # Detected vehicles fade out smoothly as confidence drops toward the cutoff
 # above, instead of popping to/from full opacity.
 FRONT_VEHICLE_FADE_RANGE = 0.20
@@ -3392,8 +3393,13 @@ def build_cluster_scene(
     camera = scene_camera(state, lane_width_m, 0.0)
 
     display_radar_points = radar_points_for_display(state)
+    display_detected_vehicles = detected_vehicles_without_zero_radar_samples(state.detected_vehicles)
+    model_vehicles = tuple(vehicle for vehicle in display_detected_vehicles if vehicle.source.startswith("modelV2"))
+    # A matched radar lead must not bypass the model's probability cutoff.
     display_detected_vehicles = tuple(
-        vehicle for vehicle in state.detected_vehicles if vehicle.source.startswith("modelV2")
+        vehicle for vehicle in display_detected_vehicles
+        if vehicle.source.startswith("modelV2")
+        or not any(detected_vehicles_same_front_vehicle(vehicle, model) for model in model_vehicles)
     )
     if display_radar_points is not state.radar_points or display_detected_vehicles != state.detected_vehicles:
         state = replace(state, radar_points=display_radar_points, detected_vehicles=display_detected_vehicles)
@@ -3410,6 +3416,16 @@ def build_cluster_scene(
             * lane_width_m
         )
     camera_active = state.surround_view_active
+    selected_radar_vehicle_points = tuple(
+        point
+        for point in radar_vehicle_points(state, lane_width_m)
+        if radar_vehicle_confidence(point) >= RADAR_VEHICLE_MIN_DISPLAY_CONFIDENCE
+        and not any(radar_point_close_to_detected_vehicle(point, model) for model in model_vehicles)
+    )
+    selected_radar_vehicle_boxes = tuple(
+        radar_vehicle_box(point, state, lane_width_m, theme)
+        for point in selected_radar_vehicle_points
+    )
     route_mode = data_geometry_mode_for_state(state)
     road_start_m = (
         SURROUND_ROAD_REAR_M if state.surround_view_active
@@ -3420,11 +3436,13 @@ def build_cluster_scene(
         else ROAD_FAR_M
     )
     road_steps = ROAD_STEPS_SURROUND if camera_active else ROAD_STEPS_MODEL if route_mode else ROAD_STEPS_SIM
-    if state.detected_vehicles and not camera_active:
+    if (state.detected_vehicles or selected_radar_vehicle_boxes) and not camera_active:
         nearest_detected_y = min(
             (render_scene_forward_m(vehicle.longitudinal_m) for vehicle in state.detected_vehicles),
             default=ROAD_FAR_M,
         )
+        nearest_radar_y = min((vehicle.center.y for vehicle in selected_radar_vehicle_boxes), default=ROAD_FAR_M)
+        nearest_detected_y = min(nearest_detected_y, nearest_radar_y)
         candidate_road_start_m = max(-35.0, nearest_detected_y - DRIVE_VIEW_REAR_ROAD_MARGIN_M)
         road_start_m = min(road_start_m, max(DRIVE_VIEW_ROAD_START_M, candidate_road_start_m))
     profile_scene_add(profile_add, "scene.build.setup", profile_stage)
@@ -3639,9 +3657,21 @@ def build_cluster_scene(
                 for locked in locked_vehicle_boxes
             )
         )
+        visible_radar_vehicle_boxes = tuple(
+            vehicle_box_with_x_offset(box, relative_scene_x_offset_m)
+            for point, box in zip(selected_radar_vehicle_points, selected_radar_vehicle_boxes, strict=True)
+            if not radar_point_hidden_by_detected_vehicle(point, visible_detected_vehicles, state)
+            and point_in_forward_display_lanes(point, lane_width_m, state)
+            and not any(
+                abs(box.center.x - locked.center.x) <= max(box.width_m, locked.width_m) * 0.85
+                and abs(box.center.y - locked.center.y) <= max(box.length_m, locked.length_m) * 0.85
+                for locked in locked_vehicle_boxes
+            )
+        )
         vehicles = (
             ego_vehicle,
             *non_overlapping_detected_vehicle_boxes,
+            *visible_radar_vehicle_boxes,
         )
     else:
         vehicles = (ego_vehicle,)
@@ -3666,7 +3696,7 @@ def build_cluster_scene(
     planned_path: tuple[MeshStrip, ...] = ()
 
     profile_stage = profile_scene_start(profile_add)
-    # Radar points can supplement model leads but are not rendered separately.
+    # Classified radar vehicles are rendered above; raw point cubes stay hidden.
     radar_points: tuple[RadarPointMarker, ...] = ()
     profile_scene_add(profile_add, "scene.build.radar_points", profile_stage)
 
