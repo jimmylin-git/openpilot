@@ -12,7 +12,7 @@ Cluster is ported from `dev261007XL-onemiless-cluster` at
 `877c57240d277c4c0e279451b905e7cc40f05cc7`, including the latest speed-limit
 icon aspect-ratio fix, USB output, native H.264 encoding, settings, radar/lead
 indicators. Lead-departure detection and the `READY TO GO` reminder have been
-removed; normal radar/lead visualization is unchanged. This removal alone does
+removed. This removal alone does
 not establish the cause of cluster freezes.
 Manager autorun targets 20 FPS (offroad rendering remains 1 FPS).
 Vehicle markers and the box fallback now use a lightweight car silhouette:
@@ -21,6 +21,14 @@ tapered body, sloped dark windows, roof, wheel faces and rear lamps, drawn with
 source body colors and confidence opacity are retained. Existing Cybertruck
 model selection and unclassified radar-point cubes are unchanged. This shape
 does not imply vehicle-type classification or a detected braking state.
+The 3D scene displays only modelV2 lead predictions whose probability reaches
+the existing 80% threshold. It includes the 0, 2 and 4 second lead predictions,
+which need not represent different vehicles; radar-only vehicles are hidden.
+Radar tracks may still supplement matched model predictions with speed data,
+but do not replace their model probability. Live stability and hold/fade
+smoothing remain active, so the display can lag the latest model output.
+Lead probability is not a general adjacent-vehicle detection confidence, and
+the scene is not a complete view of surrounding traffic.
 Detected-vehicle car markers are enlarged 50% in width, length and height on
 both TR panels, after applying their minimum dimensions. Their longitudinal/
 lateral centers and base elevation are unchanged; ego models and full-size
@@ -608,15 +616,11 @@ selected debug view remains visible.
 `ClusterHudRadarInfo` controls world radar/vehicle speed and distance labels:
 `0` off, `1` speed for vehicle boxes only, `2` speed and distance for vehicle
 boxes only, `3` speed for all vehicle boxes and raw radar points, and `4` speed
-and distance for all. `ClusterHudRadarDisplay` controls raw radar point
-presentation: `0` averages nearby points with nearly matching speed/position,
-and hides raw radar vehicle boxes that overlap already-rendered detected
-vehicles such as front-center `radarState` leads; `1` leaves raw points
-unmerged for detail checks, including radar vehicle candidate boxes and
-radar-to-detected-vehicle speed merges. Vehicle/radar metric labels sit closer
-to the point/box top so speed and distance are less high above the vehicle.
-`LR`/`RR` rear-corner detections render as normal vehicle boxes at their actual
-detected positions. The older fixed rear-tire-depth 2D arrow/label is removed.
+and distance for all. `ClusterHudRadarDisplay=0` averages nearby radar points
+and allows them to supplement matching model predictions; `1` keeps points
+unmerged for detail checks and disables that speed merge. Neither mode renders
+radar-only vehicle boxes or point markers in the 3D scene, including rear-corner
+detections. Vehicle metric labels sit closer to the box top.
 The default drive camera sits closer to the ego roof, lower than the earlier
 high view, tilted downward, and shifted `5m` forward so route/live scene space
 is easier to see. Detected vehicles, radar points, and desired-distance markers
@@ -642,19 +646,15 @@ first; route replay/raw-CAN fallback also decodes `0x162`/`0x1EA` through the
 Hyundai CAN-FD DBC instead of hand-coded bit positions.
 Road/lane/radar geometry still starts far enough behind that rendered bound so
 the rear lane-start seam sits below the visible bottom edge.
-Front-center `radarState` lead overlap uses a wider vehicle-sized tolerance
-than corner radar overlap, and default mode also collapses overlapping
-front-center detected vehicle boxes so source-split front radar/model
-reflections merge cleanly.
 `ClusterHudRadarSourceColor` controls vehicle box colors:
 `0` keeps all vehicle boxes gray, while `1` uses source colors: radar track
 vehicles yellow, `radarState` front/SCC radar leads red, camera-sourced vehicle
 leads light blue, comma model leads dark blue, and ADAS corner detections from
 `0x162`/`0x1EA` green.
-The locked front vehicle (`radarState.leadOne`, `DetectedVehicle.primary`)
+The primary model prediction (`DetectedVehicle.primary`)
 only renders green while ACC is actually engaged
-(`state.cruise_display_state == "engaged"`); `leadOne` can be populated by
-openpilot even while cruise is off/paused, so `vehicle_box()` gates the green
+(`state.cruise_display_state == "engaged"`); model leads can be populated
+even while cruise is off/paused, so `vehicle_box()` gates the green
 highlight on an `acc_active` flag (derived from `cruise_display_state` at the
 `build_cluster_scene()` call site) instead of `primary` alone, and falls back
 to the normal source color otherwise.
