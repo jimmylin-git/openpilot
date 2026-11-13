@@ -30,6 +30,7 @@ from cluster_models import (
 from cluster_route_replay import PRIUS_TSS2_GEAR_ADDRESS, PRIUS_TSS2_PLATFORM, RouteLogParser, finite_float, frame_to_state, safe_get, safe_optional_float
 from cluster_scene import (
     FRONT_VEHICLE_LANE_RANGE_LANES,
+    FRONT_VEHICLE_MIN_CONFIDENCE,
     LANE_RANGE_EXIT_HYSTERESIS_LANES,
     radar_point_is_vehicle_candidate,
     vehicle_lane_offset_from_lateral,
@@ -97,8 +98,10 @@ LIVE_SCENE_SMOOTHING_TAU_SECONDS = 0.16
 LIVE_VEHICLE_HOLD_SECONDS = 0.30
 LIVE_VEHICLE_FADE_SECONDS = 0.30
 LIVE_VEHICLE_FADE_MIN_PROBABILITY = 0.8001
+MODEL_PROBABILITY_EXIT_THRESHOLD = 0.40
+MODEL_PROBABILITY_GRACE_SECONDS = 0.20
 RADAR_STATE_TARGET2_STABLE_SECONDS = 0.25
-RADAR_POINT_STABLE_SECONDS = 0.10
+RADAR_POINT_STABLE_SECONDS = 0.20
 MODEL_LEAD_STABLE_SECONDS = 0.18
 # radarPoint has no upstream fusion/smoothing like detected_vehicles, so a point
 # that just cleared the stability filter can still vanish on the very next liveTracks
@@ -187,6 +190,7 @@ class OpenpilotLiveSource:
         self._last_radar_filter_update_t = -999.0
         self._radar_missing_since: dict[tuple[str, str], float] = {}
         self._lane_range_visible: dict[tuple[str, str], bool] = {}
+        self._model_probability_low_since: dict[tuple[str, str], float] = {}
         self._filter_log_file = None
         self._filter_log_disabled = not vehicle_diagnostic_log_enabled()
         self.start_t = time.monotonic()
@@ -629,7 +633,7 @@ class OpenpilotLiveSource:
         previous_t = self._smoothed_state_t
         if previous is None or previous_t is None:
             tagged_vehicles, tagged_radar_points = self._apply_lane_range_hysteresis(
-                state.detected_vehicles, state.radar_points, state
+                state.detected_vehicles, state.radar_points, state, now
             )
             state = replace(state, detected_vehicles=tagged_vehicles, radar_points=tagged_radar_points)
             self._smoothed_state = state
@@ -663,10 +667,12 @@ class OpenpilotLiveSource:
             fade = 1.0 - (
                 (missing_for - LIVE_VEHICLE_HOLD_SECONDS) / LIVE_VEHICLE_FADE_SECONDS
             )
-            faded_probability = LIVE_VEHICLE_FADE_MIN_PROBABILITY + (
-                max(LIVE_VEHICLE_FADE_MIN_PROBABILITY, vehicle.probability)
-                - LIVE_VEHICLE_FADE_MIN_PROBABILITY
-            ) * clamp(fade, 0.0, 1.0)
+            fade_floor = (
+                FRONT_VEHICLE_MIN_CONFIDENCE if vehicle.source.startswith("modelV2")
+                else LIVE_VEHICLE_FADE_MIN_PROBABILITY
+            )
+            floor = min(fade_floor, vehicle.probability)
+            faded_probability = floor + (vehicle.probability - floor) * clamp(fade, 0.0, 1.0)
             smoothed_vehicles += (replace(vehicle, probability=faded_probability, render_phase="fading"),)
 
         active_vehicle_keys = {
@@ -763,7 +769,7 @@ class OpenpilotLiveSource:
             radar_points=smoothed_radar_points,
         )
         tagged_vehicles, tagged_radar_points = self._apply_lane_range_hysteresis(
-            smoothed.detected_vehicles, smoothed.radar_points, smoothed
+            smoothed.detected_vehicles, smoothed.radar_points, smoothed, now
         )
         smoothed = replace(smoothed, detected_vehicles=tagged_vehicles, radar_points=tagged_radar_points)
         self._smoothed_state = smoothed
@@ -775,12 +781,21 @@ class OpenpilotLiveSource:
         vehicles: tuple[DetectedVehicle, ...],
         radar_points: tuple[RadarPoint, ...],
         state: ClusterUiState,
+        now: float,
     ) -> tuple[tuple[DetectedVehicle, ...], tuple[RadarPoint, ...]]:
+        previous_models = {
+            (vehicle.label, vehicle.source): vehicle
+            for vehicle in (() if self._smoothed_state is None else self._smoothed_state.detected_vehicles)
+            if vehicle.source.startswith("modelV2")
+        }
         tagged_vehicles = tuple(
             replace(
                 vehicle,
                 in_display_lanes=self._lane_range_hysteresis_visible(
                     (vehicle.label, vehicle.source), vehicle.longitudinal_m, vehicle.lateral_m, state
+                ),
+                model_probability_retained=self._retain_model_probability(
+                    vehicle, previous_models.get((vehicle.label, vehicle.source)), now
                 ),
             )
             for vehicle in vehicles
@@ -805,7 +820,28 @@ class OpenpilotLiveSource:
         self._lane_range_visible = {
             key: visible for key, visible in self._lane_range_visible.items() if key in active_keys
         }
+        self._model_probability_low_since = {
+            key: since for key, since in self._model_probability_low_since.items() if key in active_keys
+        }
         return tagged_vehicles, tagged_radar_points
+
+    def _retain_model_probability(
+        self, vehicle: DetectedVehicle, previous: DetectedVehicle | None, now: float
+    ) -> bool:
+        if not vehicle.source.startswith("modelV2"):
+            return False
+        key = (vehicle.label, vehicle.source)
+        if vehicle.probability >= FRONT_VEHICLE_MIN_CONFIDENCE:
+            self._model_probability_low_since.pop(key, None)
+            return False
+        was_visible = previous is not None and (
+            previous.probability >= FRONT_VEHICLE_MIN_CONFIDENCE or previous.model_probability_retained
+        ) and abs(vehicle.longitudinal_m - previous.longitudinal_m) <= 8.0 and abs(vehicle.lateral_m - previous.lateral_m) <= 1.5
+        if not was_visible or vehicle.probability < MODEL_PROBABILITY_EXIT_THRESHOLD:
+            self._model_probability_low_since.pop(key, None)
+            return False
+        since = self._model_probability_low_since.setdefault(key, now)
+        return now - since < MODEL_PROBABILITY_GRACE_SECONDS
 
     def _lane_range_hysteresis_visible(
         self,

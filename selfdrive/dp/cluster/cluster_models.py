@@ -122,6 +122,7 @@ class DetectedVehicle:
     # OpenpilotLiveSource), in which case callers fall back to the raw
     # threshold check.
     in_display_lanes: bool | None = None
+    model_probability_retained: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -2695,7 +2695,7 @@ def model_line_lateral_at(
     return ordered[-1].lateral_m + lateral_shift_m
 
 
-def front_vehicle_display_confidence(probability: float) -> float | None:
+def front_vehicle_display_confidence(probability: float, retained: bool = False) -> float | None:
     """Maps a detected front-vehicle's raw probability to a display alpha
     fade, or None if it should not be drawn at all.
 
@@ -2703,7 +2703,7 @@ def front_vehicle_display_confidence(probability: float) -> float | None:
     it, the box fades in smoothly over FRONT_VEHICLE_FADE_RANGE instead of
     popping straight to full opacity.
     """
-    if probability < FRONT_VEHICLE_MIN_CONFIDENCE:
+    if probability < FRONT_VEHICLE_MIN_CONFIDENCE and not retained:
         return None
     return smoothstep(
         clamp(
@@ -3394,12 +3394,17 @@ def build_cluster_scene(
 
     display_radar_points = radar_points_for_display(state)
     display_detected_vehicles = detected_vehicles_without_zero_radar_samples(state.detected_vehicles)
-    model_vehicles = tuple(vehicle for vehicle in display_detected_vehicles if vehicle.source.startswith("modelV2"))
-    # A matched radar lead must not bypass the model's probability cutoff.
-    display_detected_vehicles = tuple(
+    model_vehicles = tuple(
         vehicle for vehicle in display_detected_vehicles
         if vehicle.source.startswith("modelV2")
-        or not any(detected_vehicles_same_front_vehicle(vehicle, model) for model in model_vehicles)
+        and front_vehicle_display_confidence(vehicle.probability, vehicle.model_probability_retained) is not None
+        and vehicle_in_forward_display_lanes(vehicle, lane_width_m, state)
+    )
+    # Only a model vehicle eligible for display can suppress a radar vehicle.
+    display_detected_vehicles = tuple(
+        vehicle for vehicle in display_detected_vehicles
+        if (vehicle in model_vehicles if vehicle.source.startswith("modelV2")
+            else not any(detected_vehicles_same_front_vehicle(vehicle, model) for model in model_vehicles))
     )
     if display_radar_points is not state.radar_points or display_detected_vehicles != state.detected_vehicles:
         state = replace(state, radar_points=display_radar_points, detected_vehicles=display_detected_vehicles)
@@ -3601,10 +3606,10 @@ def build_cluster_scene(
         visible_detected_vehicles = tuple(
             vehicle
             for vehicle in render_detected_vehicles
-            if front_vehicle_display_confidence(vehicle.probability) is not None
+            if front_vehicle_display_confidence(vehicle.probability, vehicle.model_probability_retained) is not None
         )
         detected_vehicle_boxes_with_confidence = tuple(
-            (detected, front_vehicle_display_confidence(detected.probability))
+            (detected, front_vehicle_display_confidence(detected.probability, detected.model_probability_retained))
             for detected in visible_detected_vehicles
         )
         detected_vehicle_boxes = tuple(

@@ -28,11 +28,16 @@ unchanged. Radar-only display thresholds are unchanged.
 It includes the 0, 2 and 4 second lead predictions,
 which need not represent different vehicles. Radar-only vehicles are also
 displayed using the existing radar classification and stability filters.
-Radar leads/tracks matching a model prediction cannot bypass its probability
-cutoff, including in detail mode.
+Only a model prediction eligible for display suppresses a matching radar
+lead or track; a hidden model prediction no longer hides a radar vehicle.
 Radar tracks may still supplement matched model predictions with speed data,
 but do not replace their model probability. Live stability and hold/fade
 smoothing remain active, so the display can lag the latest model output.
+In live mode a model lead already displayed can remain visible for up to
+0.20 seconds while its probability is between 40% and 50%, reducing
+threshold flicker. Below 40% it is not retained by this grace period. This
+display-only retention does not change the reported model probability, but
+existing missing-object hold/fade behavior can temporarily retain a stale lead.
 Lead probability is not a general adjacent-vehicle detection confidence, and
 the scene is not a complete view of surrounding traffic.
 Detected-vehicle car markers are enlarged 50% in width, length and height on
@@ -668,7 +673,7 @@ highlight on an `acc_active` flag (derived from `cruise_display_state` at the
 to the normal source color otherwise.
 Radar samples whose distance and left/right offset are both zero are treated as
 empty/default data and are not drawn as radar points or vehicle boxes.
-Live `radarPoint` candidates must remain present for 0.10 seconds before they
+Live `radarPoint` candidates must remain present for 0.20 seconds before they
 are displayed; `radarState` `TARGET2` candidates retain their 0.25-second
 stability delay. Vehicle log version 3 records `filter_pending`,
 `filter_passed`, `filtered`, and `filter_expired` stability events in the same
