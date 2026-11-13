@@ -515,6 +515,103 @@ def world_to_screen_label_anchor(point, camera, width: int, height: int, horizon
     return screen
 
 
+def vehicle_marker_dimensions(vehicle: VehicleBox, compact: bool) -> tuple[float, float, float, float]:
+    width = max(0.55, vehicle.width_m * 0.68)
+    length = max(1.05, vehicle.length_m * 0.64)
+    height = max(0.42, vehicle.height_m * 0.45)
+    scale = 1.5 * (1.2 * 0.9 if compact else 1.0)
+    return width * scale * 0.8, length * scale, height * scale, vehicle.height_m * 0.32 - height * 0.5
+
+
+def vehicle_screen_bounds(vehicle: VehicleBox, camera, width: int, height: int, compact: bool,
+                          model_available: bool, scene_shift_x_m: float) -> tuple[float, float, float, float] | None:
+    source_marker = vehicle.source.startswith("modelV2") or vehicle.source in ("radarState", "radarPoint")
+    use_model = model_available and not source_marker and (not vehicle.source or vehicle.primary or vehicle.cut_in)
+    if not use_model and vehicle.source and (source_marker or (not vehicle.primary and not vehicle.cut_in)):
+        box_width, box_length, box_height, base_z = vehicle_marker_dimensions(vehicle, compact)
+        box_length += 0.004
+    else:
+        box_width, box_length, box_height = vehicle.width_m, vehicle.length_m, vehicle.height_m
+        base_z = 0.035
+    forward = camera_forward(camera)
+    if forward is None:
+        return None
+    corners = []
+    for local_x in (-box_width * 0.5, box_width * 0.5):
+        for local_y in (-box_length * 0.5, box_length * 0.5):
+            for z in (base_z, base_z + box_height):
+                point = (
+                    vehicle.center.x + scene_shift_x_m + vehicle.right_x * local_x + vehicle.forward_x * local_y,
+                    vehicle.center.y + vehicle.right_y * local_x + vehicle.forward_y * local_y,
+                    z,
+                )
+                depth = ((point[0] - camera.position.x) * forward[0]
+                         + (point[1] - camera.position.y) * forward[1]
+                         + (point[2] - camera.position.z) * forward[2])
+                corners.append((point, depth))
+    near = rl.rl_get_cull_distance_near()
+    visible = [point for point, depth in corners if depth >= near]
+    if len(visible) != len(corners):
+        for index, (point, depth) in enumerate(corners):
+            for bit in (1, 2, 4):
+                other_index = index ^ bit
+                if other_index <= index:
+                    continue
+                other, other_depth = corners[other_index]
+                if (depth < near) == (other_depth < near):
+                    continue
+                fraction = (near - depth) / (other_depth - depth)
+                visible.append(tuple(point[i] + fraction * (other[i] - point[i]) for i in range(3)))
+    if not visible:
+        return None
+    points = []
+    horizontal_scale = COMPACT_SCENE_WIDTH_SCALE if compact else LARGE_SCENE_WIDTH_SCALE
+    vertical_offset = COMPACT_SCENE_Y_OFFSET_PX * height / 462.0 if compact else 0.0
+    for point in visible:
+        screen = rl.get_world_to_screen_ex(rl.Vector3(*point), camera, width, height)
+        if not math.isfinite(screen.x) or not math.isfinite(screen.y):
+            return None
+        points.append((width * 0.5 + (screen.x - width * 0.5) * horizontal_scale, screen.y + vertical_offset))
+    min_x = min(point[0] for point in points)
+    min_y = min(point[1] for point in points)
+    max_x = max(point[0] for point in points)
+    max_y = max(point[1] for point in points)
+    if compact:
+        left, top, right, bottom = 510 / 1920 * width, 125 / 462 * height, 1410 / 1920 * width, height
+    else:
+        left, top, right, bottom = 440 / DESIGN_WIDTH * width, 205 / DESIGN_HEIGHT * height, 1480 / DESIGN_WIDTH * width, height
+    min_x, min_y = max(min_x, left), max(min_y, top)
+    max_x, max_y = min(max_x, right), min(max_y, bottom)
+    if min_x >= max_x or min_y >= max_y:
+        return None
+    return min_x, min_y, max_x - min_x, max_y - min_y
+
+
+def vehicles_without_screen_overlap(vehicles: tuple[VehicleBox, ...], camera, width: int, height: int,
+                                    compact: bool, model_available: bool,
+                                    scene_shift_x_m: float) -> tuple[VehicleBox, ...]:
+    if len(vehicles) < 3:
+        return vehicles
+    selected = {0}
+    bounds = []
+    indices = sorted(
+        range(1, len(vehicles)),
+        key=lambda index: (
+            not vehicles[index].source.startswith("modelV2"),
+            not vehicles[index].primary,
+            vehicles[index].longitudinal_m if vehicles[index].longitudinal_m is not None else float("inf"),
+        ),
+    )
+    for index in indices:
+        rect = vehicle_screen_bounds(vehicles[index], camera, width, height, compact, model_available, scene_shift_x_m)
+        if rect is not None and any(rectangles_overlap(rect, existing) for existing in bounds):
+            continue
+        selected.add(index)
+        if rect is not None:
+            bounds.append(rect)
+    return tuple(vehicle for index, vehicle in enumerate(vehicles) if index in selected)
+
+
 def label_rect_inside_bounds(
     rect: tuple[float, float, float, float],
     bounds: tuple[float, float, float, float],
@@ -949,20 +1046,6 @@ class ClusterUiRenderer:
             highlight_lane_lit=self._highlight_lane_lit(state, signal_lights),
             theme=theme,
             ground_scroll_m=self._update_ground_scroll_m(state),
-        )
-        self._front_vehicle_distance_m = min(
-            (
-                vehicle.longitudinal_m
-                for vehicle in scene.vehicles
-                if (
-                    vehicle.source
-                    and vehicle.longitudinal_m is not None
-                    and math.isfinite(vehicle.longitudinal_m)
-                    and vehicle.longitudinal_m > 0.0
-                    and abs(vehicle.center.x) <= vehicle.width_m * 0.5
-                )
-            ),
-            default=None,
         )
         self._profile_add("render_world.build_scene", profile_stage)
         profile_stage = self._profile_start()
@@ -1743,6 +1826,26 @@ class ClusterUiRenderer:
             rl.CameraProjection.CAMERA_PERSPECTIVE,
         )
         profile_stage = self._profile_start()
+        scene = replace(scene, vehicles=vehicles_without_screen_overlap(
+            scene.vehicles, camera, self.width, self.height, self._compact_panel,
+            self._vehicle_model is not None, scene.scene_shift_x_m,
+        ))
+        self._profile_add("draw_scene.screen_overlap", profile_stage)
+        self._front_vehicle_distance_m = min(
+            (
+                vehicle.longitudinal_m
+                for vehicle in scene.vehicles
+                if (
+                    vehicle.source
+                    and vehicle.longitudinal_m is not None
+                    and math.isfinite(vehicle.longitudinal_m)
+                    and vehicle.longitudinal_m > 0.0
+                    and abs(vehicle.center.x) <= vehicle.width_m * 0.5
+                )
+            ),
+            default=None,
+        )
+        profile_stage = self._profile_start()
         rl.begin_mode_3d(camera)
         projection = rl.rl_get_matrix_projection()
         projection.m0 *= COMPACT_SCENE_WIDTH_SCALE if self._compact_panel else LARGE_SCENE_WIDTH_SCALE
@@ -2020,16 +2123,13 @@ class ClusterUiRenderer:
 
     def _draw_vehicle_marker(self, vehicle: VehicleBox) -> None:
         alpha = int(80 + 150 * clamp(vehicle.confidence, 0.0, 1.0))
-        width = max(0.55, vehicle.width_m * 0.68)
-        length = max(1.05, vehicle.length_m * 0.64)
-        height = max(0.42, vehicle.height_m * 0.45)
-        scale = 1.5 * (1.2 * 0.9 if self._compact_panel else 1.0)
+        width, length, height, base_z = vehicle_marker_dimensions(vehicle, self._compact_panel)
         self._draw_vehicle_car(
             vehicle,
-            width * scale * 0.8,
-            length * scale,
-            height * scale,
-            vehicle.height_m * 0.32 - height * 0.5,
+            width,
+            length,
+            height,
+            base_z,
             alpha,
         )
 

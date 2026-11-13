@@ -32,6 +32,7 @@ from cluster_scene import (
     FRONT_VEHICLE_LANE_RANGE_LANES,
     FRONT_VEHICLE_MIN_CONFIDENCE,
     LANE_RANGE_EXIT_HYSTERESIS_LANES,
+    model_position_matches,
     radar_point_is_vehicle_candidate,
     vehicle_lane_offset_from_lateral,
 )
@@ -1022,6 +1023,7 @@ class OpenpilotLiveSource:
             if (
                 abs(point.longitudinal_m - vehicle.longitudinal_m) <= longitudinal_tolerance
                 and abs(point.lateral_m - vehicle.lateral_m) <= 1.4
+                and model_position_matches(vehicle, point.longitudinal_m, point.lateral_m)
             ):
                 return True
         return False

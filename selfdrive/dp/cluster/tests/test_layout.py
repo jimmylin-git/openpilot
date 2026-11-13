@@ -18,10 +18,12 @@ RENDERER = next(node for node in TREE.body if isinstance(node, ast.ClassDef) and
 def test_vehicle_car_marker_enlarges_dimensions_preserving_base_and_confidence(yaw, confidence, dimensions, compact):
     names = {"_draw_vehicle_marker", "_draw_vehicle_car"}
     methods = [node for node in RENDERER.body if isinstance(node, ast.FunctionDef) and node.name in names]
+    dimensions_fn = next(node for node in TREE.body if isinstance(node, ast.FunctionDef)
+                         and node.name == "vehicle_marker_dimensions")
     namespace = {"Vec3": lambda x, y, z: SimpleNamespace(x=x, y=y, z=z),
                  "VehicleBox": object, "clamp": lambda value, low, high: max(low, min(high, value))}
     exec("from __future__ import annotations\n", namespace)
-    exec(compile(ast.Module(body=methods, type_ignores=[]), "<vehicle car>", "exec"), namespace)
+    exec(compile(ast.Module(body=[dimensions_fn, *methods], type_ignores=[]), "<vehicle car>", "exec"), namespace)
     quads = []
     renderer = SimpleNamespace(_compact_panel=compact, _draw_quad=lambda *args: quads.append(args))
     renderer._draw_vehicle_car = lambda *args: namespace["_draw_vehicle_car"](renderer, *args)

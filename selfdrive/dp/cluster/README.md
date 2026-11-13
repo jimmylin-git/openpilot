@@ -28,10 +28,20 @@ unchanged. Radar-only display thresholds are unchanged.
 It includes the 0, 2 and 4 second lead predictions,
 which need not represent different vehicles. Radar-only vehicles are also
 displayed using the existing radar classification and stability filters.
-Only a model prediction eligible for display suppresses a matching radar
-lead or track; a hidden model prediction no longer hides a radar vehicle.
-Radar tracks may still supplement matched model predictions with speed data,
-but do not replace their model probability. Live stability and hold/fade
+Displayed vehicle markers whose projected 3D bounding boxes overlap are
+deduplicated, preferring modelV2 predictions, then primary and nearer vehicles.
+The ego vehicle is never removed. The bounding boxes are conservative rather
+than exact silhouettes, so separate vehicles can be hidden even without their
+visible shapes touching; perspective can also make different vehicles overlap.
+Model vehicle position, speed and probability are not supplemented from radar.
+A model prediction below the display threshold does not hide a radar vehicle.
+Radar-only vehicles remain available through the existing radar filters. Live
+model stability can still use radar support; with valid `xStd` and `yStd` that
+support requires residuals within twice the standard deviations, with minimum
+allowances of 3 m longitudinal and 0.9 m lateral, as well as the existing
+position limits. Missing, nonpositive or nonfinite deviations retain the
+previous support criteria. These display heuristics are uncalibrated against
+labeled road data and do not change driving controls. Live stability and hold/fade
 smoothing remain active, so the display can lag the latest model output.
 In live mode a model lead already displayed can remain visible for up to
 0.20 seconds while its probability is between 40% and 50%, reducing

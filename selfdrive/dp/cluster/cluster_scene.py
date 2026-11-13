@@ -2146,7 +2146,9 @@ def detected_vehicles_for_display(
             (
                 index
                 for index, existing in enumerate(selected)
-                if detected_vehicles_same_front_vehicle(vehicle, existing)
+                if not vehicle.source.startswith("modelV2")
+                and not existing.source.startswith("modelV2")
+                and detected_vehicles_same_front_vehicle(vehicle, existing)
             ),
             None,
         )
@@ -2184,6 +2186,20 @@ def detected_vehicles_same_front_vehicle(left: DetectedVehicle, right: DetectedV
     return (
         abs(left.longitudinal_m - right.longitudinal_m) <= longitudinal_tolerance
         and abs(left.lateral_m - right.lateral_m) <= RADAR_FRONT_DETECTED_MERGE_LATERAL_M
+        and model_position_matches(left, right.longitudinal_m, right.lateral_m)
+        and model_position_matches(right, left.longitudinal_m, left.lateral_m)
+    )
+
+
+def model_position_matches(vehicle: DetectedVehicle, longitudinal_m: float, lateral_m: float) -> bool:
+    if not vehicle.source.startswith("modelV2"):
+        return True
+    x_std, y_std = vehicle.x_std_m, vehicle.y_std_m
+    if x_std is None or y_std is None or not math.isfinite(x_std) or not math.isfinite(y_std) or x_std <= 0.0 or y_std <= 0.0:
+        return True
+    return (
+        abs(vehicle.longitudinal_m - longitudinal_m) <= max(3.0, x_std * 2.0)
+        and abs(vehicle.lateral_m - lateral_m) <= max(0.9, y_std * 2.0)
     )
 
 
@@ -2278,8 +2294,6 @@ def radar_merge_point_for_vehicle(
 
 
 def detected_vehicle_needs_radar_merge(vehicle: DetectedVehicle) -> bool:
-    if vehicle.source.startswith("modelV2") and vehicle.longitudinal_m > 0.0:
-        return True
     return (
         vehicle.label in CORNER_RADAR_LABELS
         and vehicle.absolute_speed_kph is None
@@ -2538,7 +2552,7 @@ def radar_point_hidden_by_detected_vehicle(
     if state.radar_display_mode == CLUSTER_RADAR_DISPLAY_DETAIL:
         return False
     for vehicle in vehicles:
-        if radar_point_close_to_detected_vehicle(point, vehicle):
+        if not vehicle.source.startswith("modelV2") and radar_point_close_to_detected_vehicle(point, vehicle):
             return True
     return False
 
@@ -2559,6 +2573,7 @@ def radar_point_close_to_detected_vehicle(point: RadarPoint, vehicle: DetectedVe
     return (
         abs(point.longitudinal_m - vehicle.longitudinal_m) <= longitudinal_tolerance
         and abs(point.lateral_m - vehicle.lateral_m) <= lateral_tolerance
+        and model_position_matches(vehicle, point.longitudinal_m, point.lateral_m)
     )
 
 
@@ -3400,11 +3415,9 @@ def build_cluster_scene(
         and front_vehicle_display_confidence(vehicle.probability, vehicle.model_probability_retained) is not None
         and vehicle_in_forward_display_lanes(vehicle, lane_width_m, state)
     )
-    # Only a model vehicle eligible for display can suppress a radar vehicle.
     display_detected_vehicles = tuple(
         vehicle for vehicle in display_detected_vehicles
-        if (vehicle in model_vehicles if vehicle.source.startswith("modelV2")
-            else not any(detected_vehicles_same_front_vehicle(vehicle, model) for model in model_vehicles))
+        if not vehicle.source.startswith("modelV2") or vehicle in model_vehicles
     )
     if display_radar_points is not state.radar_points or display_detected_vehicles != state.detected_vehicles:
         state = replace(state, radar_points=display_radar_points, detected_vehicles=display_detected_vehicles)
@@ -3425,7 +3438,6 @@ def build_cluster_scene(
         point
         for point in radar_vehicle_points(state, lane_width_m)
         if radar_vehicle_confidence(point) >= RADAR_VEHICLE_MIN_DISPLAY_CONFIDENCE
-        and not any(radar_point_close_to_detected_vehicle(point, model) for model in model_vehicles)
     )
     selected_radar_vehicle_boxes = tuple(
         radar_vehicle_box(point, state, lane_width_m, theme)
@@ -3652,11 +3664,14 @@ def build_cluster_scene(
             for detected, display_confidence in detected_vehicle_boxes_with_confidence
             if display_confidence is not None
         )
-        locked_vehicle_boxes = tuple(vehicle for vehicle in detected_vehicle_boxes if vehicle.primary)
+        locked_vehicle_boxes = tuple(
+            vehicle for vehicle in detected_vehicle_boxes
+            if vehicle.primary and not vehicle.source.startswith("modelV2")
+        )
         non_overlapping_detected_vehicle_boxes = tuple(
             vehicle
             for vehicle in detected_vehicle_boxes
-            if vehicle.primary or not any(
+            if vehicle.primary or vehicle.source.startswith("modelV2") or not any(
                 abs(vehicle.center.x - locked.center.x) <= max(vehicle.width_m, locked.width_m) * 0.85
                 and abs(vehicle.center.y - locked.center.y) <= max(vehicle.length_m, locked.length_m) * 0.85
                 for locked in locked_vehicle_boxes
