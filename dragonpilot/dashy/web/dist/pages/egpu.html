@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>eGPU 管理 - Dashy</title>
+  <title>eGPU Management - Dashy</title>
   <style>
     :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #111820; color: #eef3f7; }
     body { max-width: 760px; margin: auto; padding: 22px 18px 60px; }
@@ -24,28 +24,28 @@
   </style>
 </head>
 <body>
-  <a href="/">← 返回 Dashy</a>
-  <h1>eGPU 管理</h1>
-  <p id="notice" role="status">正在讀取裝置狀態…</p>
+  <a href="/">Back to Dashy</a>
+  <h1>eGPU Management</h1>
+  <p id="notice" role="status">Loading device status...</p>
   <p id="message" role="alert"></p>
   <section>
-    <p>僅限 offroad 變更設定。選擇模型後會下載並在車機編譯，編譯需要接上 eGPU。設定沿用現有 eGPU 程序；模型路徑於下一趟 onroad 評估，不會在行車中切換。</p>
-    <label><input id="enabled" type="checkbox" disabled>啟用 eGPU 大模型</label>
-    <output id="status">讀取中…</output>
-    <label for="model">大模型</label>
+    <p>Settings can only be changed offroad. Selecting a model downloads and compiles it on the device; compilation requires a connected eGPU. Settings use the existing eGPU process. The model path is evaluated for the next drive and never switched while driving.</p>
+    <label><input id="enabled" type="checkbox" disabled>Enable eGPU big models</label>
+    <output id="status">Loading...</output>
+    <label for="model">Big model</label>
     <select id="model" disabled></select>
     <div class="actions">
-      <button id="select" disabled>套用／下載模型</button>
-      <button id="cancel" disabled>取消下載／編譯</button>
+      <button id="select" disabled>Apply / download model</button>
+      <button id="cancel" disabled>Cancel download / compilation</button>
     </div>
-    <label for="delete-model">已下載／編譯的模型</label>
+    <label for="delete-model">Downloaded / compiled models</label>
     <select id="delete-model" disabled></select>
     <div class="actions">
-      <button id="delete" class="danger" disabled>刪除選取模型</button>
-      <button id="clear" class="danger" disabled>清除快取（保留目前模型）</button>
-      <button id="refresh" disabled>更新模型清單</button>
+      <button id="delete" class="danger" disabled>Delete selected model</button>
+      <button id="clear" class="danger" disabled>Clear cache (keep active model)</button>
+      <button id="refresh" disabled>Refresh model list</button>
     </div>
-    <p>模型清單與 Jetlink 共用；此頁不啟用或變更 Jetlink。沒有新增韌體燒錄功能。</p>
+    <p>The model catalog is shared with Jetlink. This page does not enable or change Jetlink and provides no firmware flashing feature.</p>
   </section>
   <script src="/js/egpu.js"></script>
 </body>

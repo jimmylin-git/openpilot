@@ -6,8 +6,7 @@ mici/onroad/hud_renderer.py) and model_info.py. Reads ui_state.egpu_* (taken on 
 
 The icons are comma's chestnut icons, the same files the jetlink port ships
 (dragonpilot/selfdrive/assets/icons/jetlink*.png): sunnypilot draws the chestnut with them too.
-Strings are Traditional Chinese written in place, as the jetlink panel does; every character used
-is one the UI font already carries (selfdrive/ui/translations/app_zh-CHT.po), otherwise it draws "?".
+Status strings use English, matching the device UI.
 """
 from openpilot.selfdrive.ui.ui_state import ui_state, EgpuState, JetlinkState
 from dragonpilot.selfdrive.ui import jetlink_ui
@@ -18,12 +17,12 @@ from dragonpilot.egpu.constants import (ST_IDLE, ST_RESOLVING, ST_DOWNLOADING, S
 NONE_TEXT = jetlink_ui.NONE_TEXT
 
 STATE_TEXT = {
-  EgpuState.DISCONNECTED: "未連線",
-  EgpuState.NO_MODEL: "未使用",
-  EgpuState.READY: "就緒",
-  EgpuState.LOADING: "載入中",
-  EgpuState.ACTIVE: "大模型",
-  EgpuState.FAILED: "失敗",
+  EgpuState.DISCONNECTED: "Offline",
+  EgpuState.NO_MODEL: "Not in use",
+  EgpuState.READY: "Ready",
+  EgpuState.LOADING: "Loading",
+  EgpuState.ACTIVE: "Big model",
+  EgpuState.FAILED: "Failed",
 }
 
 STATE_COLOR = {
@@ -59,7 +58,7 @@ def badge_text(state: EgpuState) -> str:
 
 def model_name() -> str:
   b = ui_state.egpu_bundle
-  return b["display_name"] if b else "未選擇（由內建小模型駕駛）"
+  return b["display_name"] if b else "None selected (using built-in small model)"
 
 
 def model_state(ref: str) -> str:
@@ -75,31 +74,31 @@ def model_state(ref: str) -> str:
 def bundle_label(b: dict, state: str) -> str:
   active = ui_state.egpu_bundle
   if active and active.get("ref") == b["ref"]:
-    tag = "（使用中）"
+    tag = " (active)"
   else:
-    tag = {"compiled": "（已編譯）", "downloaded": "（已下載）"}.get(state, "")
+    tag = {"compiled": " (compiled)", "downloaded": " (downloaded)"}.get(state, "")
   return f"{b['display_name']}{tag}"
 
 
 def status_note() -> str:
   """sunnypilot's Model Status failover note, for the eGPU"""
   state = ui_state.egpu_state
-  name = (ui_state.egpu_bundle or {}).get("short_name", "大模型")
+  name = (ui_state.egpu_bundle or {}).get("short_name", "Big model")
   if state == EgpuState.DISCONNECTED:
-    return "未偵測到 eGPU。可先選擇並下載大模型，接上 eGPU 後會自動完成編譯。"
+    return "No eGPU detected. You can select and download a big model now; compilation will finish automatically when the eGPU is connected."
   if not ui_state.egpu_enabled:
-    return "eGPU 大模型已關閉，由內建小模型駕駛。"
+    return "eGPU big models are disabled. Using the built-in small model."
   if state == EgpuState.NO_MODEL:
     if ui_state.egpu_bundle is None:
-      return "已偵測到 eGPU，但尚未有編譯好的大模型，由內建小模型駕駛。"
-    return "本次行程由內建小模型駕駛（eGPU 於發動後才接上），下次發動時改用大模型。"
+      return "eGPU detected, but no compiled big model is available. Using the built-in small model."
+    return "Using the built-in small model for this drive (eGPU connected after ignition). The big model will be used at the next ignition."
   if state == EgpuState.FAILED:
-    return f"{name} 無法使用，本次行程由內建小模型駕駛，下次發動時再試。"
+    return f"{name} is unavailable. Using the built-in small model for this drive; retrying at the next ignition."
   if state == EgpuState.LOADING:
-    return f"{name} 載入中，載入完成前不會發布模型輸出。"
+    return f"{name} is loading. Model output will not be published until loading completes."
   if state == EgpuState.ACTIVE:
-    return f"{name} 正在 eGPU 上駕駛；發生錯誤時本次行程改用內建小模型。"
-  return f"下次發動將由 {name} 駕駛；載入失敗或執行錯誤時改用內建小模型。"
+    return f"Using {name} on the eGPU. On error, the built-in small model will be used for the rest of this drive."
+  return f"{name} will be used at the next ignition, with fallback to the built-in small model on loading or runtime errors."
 
 
 def _mmss(seconds) -> str:
@@ -112,23 +111,23 @@ def download_text() -> str:
   state = st.get("state", ST_IDLE)
   name = st.get("name", "")
   if state == ST_RESOLVING:
-    return f"{name} 查詢模型中"
+    return f"{name}: resolving model"
   if state == ST_DOWNLOADING:
-    return f"{name} 下載 onnx {st.get('progress', 0.0):.0f}%"
+    return f"{name}: downloading ONNX {st.get('progress', 0.0):.0f}%"
   if state == ST_COMPILING_WARP:
-    return f"編譯 warp {_mmss(st.get('elapsed'))}"
+    return f"Compiling warp {_mmss(st.get('elapsed'))}"
   if state == ST_COMPILING:
-    return f"{name} 編譯中 {_mmss(st.get('elapsed'))}"
+    return f"{name}: compiling {_mmss(st.get('elapsed'))}"
   if state == ST_WAITING_EGPU:
     if st.get("error", "").startswith("PCIe"):
-      return f"{name} 等待 eGPU 顯示卡連線（{st['error']}）"
-    return f"{name} 等待 eGPU 接上以編譯"
+      return f"{name}: waiting for eGPU connection ({st['error']})"
+    return f"{name}: connect eGPU to compile"
   if state == ST_DONE:
-    return f"{name} 已完成"
+    return f"{name}: done"
   if state == ST_FAILED:
-    return f"{name} 失敗"
+    return f"{name}: failed"
   if state == ST_CANCELLED:
-    return f"{name} 已取消"
+    return f"{name}: cancelled"
   return NONE_TEXT
 
 

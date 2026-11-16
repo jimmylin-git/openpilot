@@ -485,7 +485,7 @@ class HudRenderer(Widget):
     if not self._can_draw_top_icons:
       return
 
-    text = "紅綠燈減速中"
+    text = "Slowing for light"
     text_size = measure_text_cached(self._font_bold, text, TS_FONT_SIZE)
     icon_w = TS_LIGHT_RADIUS * 6 + TS_LIGHT_GAP * 4
     icon_h = TS_LIGHT_RADIUS * 2 + TS_LIGHT_GAP * 2

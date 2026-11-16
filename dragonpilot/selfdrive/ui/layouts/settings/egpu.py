@@ -29,13 +29,13 @@ from dragonpilot import jetlink_adapter
 from dragonpilot.selfdrive.ui import egpu_ui
 
 DESCRIPTION = "".join((
-  "在接於 comma USB 埠的 eGPU（chestnut / USB AMD GPU）上執行大模型。",
-  "模型清單與 Jetlink 共用；選擇後會下載模型的 onnx，並在本機編譯一次：",
-  "warp 在 comma 的 GPU（QCOM）上執行，只把裁切後的影像送過 USB，適合 comma 3X。",
-  "只能在熄火（offroad）時選擇、下載、編譯與刪除；編譯需要 eGPU 接上。",
+  "Run big models on an eGPU (chestnut / USB AMD GPU) connected to the comma USB port. ",
+  "The model list is shared with Jetlink. Selecting a model downloads its ONNX and compiles it locally once. ",
+  "Warp runs on the comma GPU (QCOM), sending only cropped images over USB, suitable for comma 3X. ",
+  "Selection, download, compilation and deletion are offroad-only. Compilation requires a connected eGPU.",
 ))
 
-NO_BIG_MODEL = "不使用大模型"
+NO_BIG_MODEL = "No big model"
 
 
 def _cache_size_mb() -> float:
@@ -68,29 +68,29 @@ class EgpuLayout(Widget):
     self._cache_mb = 0.0
     self._cache_at = 0.0
 
-    self._state_item = text_item("eGPU 狀態", lambda: egpu_ui.STATE_TEXT[ui_state.egpu_state],
+    self._state_item = text_item("eGPU Status", lambda: egpu_ui.STATE_TEXT[ui_state.egpu_state],
                                  description=egpu_ui.status_note)
-    self._enabled_item = toggle_item("啟用 eGPU 大模型", DESCRIPTION, initial_state=ui_state.params.get_bool(P_ENABLED),
+    self._enabled_item = toggle_item("Enable eGPU Big Models", DESCRIPTION, initial_state=ui_state.params.get_bool(P_ENABLED),
                                      callback=self._on_enabled, enabled=ui_state.is_offroad)
-    self._model_item = button_item("大模型", "選擇", callback=self._open_model_dialog, enabled=ui_state.is_offroad)
+    self._model_item = button_item("Big Model", "Select", callback=self._open_model_dialog, enabled=ui_state.is_offroad)
     self._model_item.action_item.set_value(egpu_ui.model_name)
-    self._status_item = button_item("處理狀態", "取消", callback=self._cancel,
+    self._status_item = button_item("Progress", "Cancel", callback=self._cancel,
                                     enabled=lambda: egpu_ui.busy() and ui_state.params.get(P_DOWNLOAD_REF) is not None)
     self._status_item.action_item.set_value(egpu_ui.download_text)
-    self._delete_item = button_item("刪除模型", "刪除", "選一個已下載或已編譯的模型，刪除它的編譯檔與 onnx。",
+    self._delete_item = button_item("Delete Model", "Delete", "Select a downloaded or compiled model to delete its compiled files and ONNX.",
                                     callback=self._open_delete_dialog,
                                     enabled=lambda: ui_state.is_offroad() and not egpu_ui.busy())
-    self._delete_item.action_item.set_value(lambda: f"{self._n_on_disk} 個")
+    self._delete_item.action_item.set_value(lambda: f"{self._n_on_disk} models")
     # the same refresh as the Jetlink panel's (jetlink_adapter.refresh_catalog): one list for both
-    self._refresh_item = button_item("重新整理模型清單", lambda: "讀取中" if self._refreshing else "更新",
+    self._refresh_item = button_item("Refresh Model List", lambda: "Loading" if self._refreshing else "Refresh",
                                      self._refresh_note, callback=self._refresh_models,
                                      enabled=lambda: not self._refreshing)
-    self._refresh_item.action_item.set_value(lambda: f"{len(self._bundles)} 個模型")
-    self._clear_item = button_item("清除模型快取", "清除", "刪除所有已下載的 onnx 與編譯檔，只保留目前使用中的模型。",
+    self._refresh_item.action_item.set_value(lambda: f"{len(self._bundles)} models")
+    self._clear_item = button_item("Clear Model Cache", "Clear", "Delete all downloaded ONNX and compiled files except the active model.",
                                    callback=self._clear_cache,
                                    enabled=lambda: ui_state.is_offroad() and not egpu_ui.busy())
     self._clear_item.action_item.set_value(lambda: f"{self._cache_mb:.0f} MB")
-    self._source_item = text_item("模型清單", MODEL_SOURCE_LABEL)
+    self._source_item = text_item("Model Catalog", MODEL_SOURCE_LABEL)
 
     self._scroller = Scroller([self._state_item, self._enabled_item, self._model_item, self._status_item,
                                self._delete_item, self._refresh_item, self._clear_item, self._source_item], line_separator=True, spacing=0)
@@ -104,22 +104,22 @@ class EgpuLayout(Widget):
     ui_state.params.remove(P_DOWNLOAD_REF)
 
   def _refresh_note(self) -> str:
-    return self._refresh_result or "與 Jetlink 頁面共用同一份清單；任一邊更新，兩邊都會看到。"
+    return self._refresh_result or "Shared with the Jetlink page. Refreshing either page updates both."
 
   def _refresh_models(self):
     # exactly the Jetlink panel's refresh (dragonpilot/selfdrive/ui/layouts/settings/jetlink.py _refresh_catalog)
     if self._refreshing:
       return
     self._refreshing = True
-    self._refresh_result = "更新中…"
+    self._refresh_result = "Refreshing..."
 
     def work():
       try:
         n = jetlink_adapter.refresh_catalog(ui_state.params)
         ui_state.params.put(P_MANIFEST_SYNC, int(time.monotonic_ns()))
-        self._refresh_result = f"已更新：{n} 個大模型。"
+        self._refresh_result = f"Updated: {n} big models."
       except Exception as e:
-        self._refresh_result = f"更新失敗：{e}"
+        self._refresh_result = f"Refresh failed: {e}"
       finally:
         self._refreshing = False
         self._cache_at = 0.0
@@ -130,7 +130,7 @@ class EgpuLayout(Widget):
     def _callback(result):
       if result == DialogResult.CONFIRM:
         ui_state.params.put_bool(P_CLEAR_CACHE, True)
-    gui_app.push_widget(ConfirmDialog("將刪除所有已下載的 onnx 與編譯檔，只保留目前使用中的模型。確定嗎？", "清除", callback=_callback))
+    gui_app.push_widget(ConfirmDialog("Delete all downloaded ONNX and compiled files except the active model?", "Clear", callback=_callback))
 
   # ------------------------------------------------------------------ selector
   def _push(self, title: str, options: list[str], current: str, on_pick):
@@ -161,30 +161,30 @@ class EgpuLayout(Widget):
         ui_state.params.remove(P_DOWNLOAD_REF)
       elif selection in by_label:
         ui_state.params.put(P_DOWNLOAD_REF, by_label[selection]["ref"])
-    self._push("選擇大模型", [NO_BIG_MODEL] + list(by_label), current, on_pick)
+    self._push("Select Big Model", [NO_BIG_MODEL] + list(by_label), current, on_pick)
 
   def _open_delete_dialog(self):
     on_disk = [b for b in cached_bundles(ui_state.params) if egpu_ui.model_state(b["ref"]) != "none"]
     if not on_disk:
-      gui_app.push_widget(alert_dialog("目前沒有已下載或已編譯的模型。"))
+      gui_app.push_widget(alert_dialog("No downloaded or compiled models."))
       return
     by_label = self._labels(on_disk)
-    self._push("刪除哪個模型？", list(by_label), next(iter(by_label)), lambda sel: sel in by_label and self._confirm_delete(by_label[sel]))
+    self._push("Delete Which Model?", list(by_label), next(iter(by_label)), lambda sel: sel in by_label and self._confirm_delete(by_label[sel]))
 
   def _confirm_delete(self, bundle: dict):
     active = ui_state.egpu_bundle
     is_active = bool(active and active.get("ref") == bundle["ref"])
     p = pointer_for(ui_state.params, bundle["ref"])
-    size = f"（onnx 約 {int(p['size']) / 1e6:.0f} MB）" if p else ""
-    note = "這是目前使用中的模型，刪除後改由內建小模型駕駛。" if is_active else ""
-    msg = f"刪除 {bundle['display_name']} 的編譯檔與 onnx{size}？{note}之後要再使用需重新下載並編譯。"
+    size = f" (ONNX about {int(p['size']) / 1e6:.0f} MB)" if p else ""
+    note = "This is the active model. Deleting it switches to the built-in small model. " if is_active else ""
+    msg = f"Delete compiled files and ONNX for {bundle['display_name']}{size}? {note}Using it again will require downloading and compiling it again."
 
     def _callback(result):
       if result == DialogResult.CONFIRM:
         ui_state.params.put_bool(P_AUTO_DEFAULT, False)  # a deleted default is not downloaded again by itself
         ui_state.params.put(P_DELETE_REF, bundle["ref"])
         self._cache_at = 0.0
-    gui_app.push_widget(ConfirmDialog(msg, "刪除", callback=_callback))
+    gui_app.push_widget(ConfirmDialog(msg, "Delete", callback=_callback))
 
   # ------------------------------------------------------------------ frame
   def _update_state(self):

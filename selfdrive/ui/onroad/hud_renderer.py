@@ -264,16 +264,20 @@ class HudRenderer(Widget):
     color = jetlink_ui.STATE_COLOR[state]
     if state == JetlinkState.LOADING:
       color = rl.Color(color.r, color.g, color.b, int(255 * max(0.5, opacity)))
-    size = measure_text_cached(self._font_semi_bold, label, JETLINK_LABEL_SIZE)
+    font_size = JETLINK_LABEL_SIZE
+    size = measure_text_cached(self._font_semi_bold, label, font_size)
+    if size.x > bg.width - 8:
+      font_size = int(font_size * (bg.width - 8) / size.x)
+      size = measure_text_cached(self._font_semi_bold, label, font_size)
     rl.draw_text_ex(self._font_semi_bold, label, rl.Vector2(center_x - size.x / 2, top_y + JETLINK_BADGE_H + 8),
-                    JETLINK_LABEL_SIZE, 0, color)
+                    font_size, 0, color)
 
   def user_interacting(self) -> bool:
     return self._exp_button.is_pressed
 
   def _draw_traffic_stop(self, rect: rl.Rectangle) -> None:
     """中央車速正下方：大型紅綠燈圖示 + 「紅綠燈減速中」"""
-    text = "紅綠燈減速中"
+    text = "Slowing for light"
     text_size = measure_text_cached(self._font_bold, text, TS_FONT_SIZE)
     icon_w = TS_LIGHT_RADIUS * 6 + TS_LIGHT_GAP * 4
     icon_h = TS_LIGHT_RADIUS * 2 + TS_LIGHT_GAP * 2

@@ -88,10 +88,10 @@ class Sidebar(Widget):
     self._mic_indicator_rect = rl.Rectangle(0, 0, 0, 0)
 
     # dp - jetlink
-    self._jetlink_status = MetricData("JETLINK", "未連線", Colors.GRAY)
+    self._jetlink_status = MetricData("JETLINK", "Offline", Colors.GRAY)
     self._jetlink_icons = jetlink_ui.JetlinkIcons(JETLINK_ICON_WIDTH, JETLINK_ICON_HEIGHT)
     # dp - egpu: sunnypilot's sidebar chestnut icon (same icon files and size as jetlink's) and an eGPU card
-    self._egpu_status = MetricData("eGPU", "未連線", Colors.GRAY)
+    self._egpu_status = MetricData("eGPU", "Offline", Colors.GRAY)
 
     # QR code for dashy
     self._qr = DashyQR()

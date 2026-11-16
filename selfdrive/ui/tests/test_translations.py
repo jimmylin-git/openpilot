@@ -1,6 +1,7 @@
 import json
 import re
 import string
+from importlib import import_module
 from pathlib import Path
 
 import pytest
@@ -104,3 +105,55 @@ def test_translation_entities_are_valid(po_path: Path):
   assert not matches, (
     f"{po_path.name}: found '@...;' entity typo(s): {', '.join(sorted(set(matches)))}"
   )
+
+
+@pytest.mark.parametrize("stored_language,migrated", [
+  ("zh-CHT", True),
+  ("main_zh-CHT", True),
+  ("unknown", True),
+  (None, True),
+  ("en", False),
+  ("main_en", False),
+])
+def test_saved_language_uses_english(monkeypatch, mocker, stored_language, migrated):
+  module = import_module("openpilot.system.ui.lib.multilang")
+  params = mocker.Mock()
+  params.get.return_value = stored_language
+  monkeypatch.setattr(module, "Params", lambda: params)
+
+  language = module.Multilang()
+  language.setup()
+
+  assert language.language == "en"
+  assert not language.requires_unifont()
+  assert language.tr("Change Language") == "Change Language"
+  assert language.trn("one car", "many cars", 2) == "many cars"
+  if migrated:
+    params.put.assert_called_once_with("LanguageSetting", "en", block=True)
+  else:
+    params.put.assert_not_called()
+
+
+def test_disabled_language_cannot_be_selected(monkeypatch, mocker):
+  module = import_module("openpilot.system.ui.lib.multilang")
+  params = mocker.Mock()
+  params.get.return_value = "en"
+  monkeypatch.setattr(module, "Params", lambda: params)
+  language = module.Multilang()
+  language.setup()
+
+  with pytest.raises(ValueError, match="Unsupported language"):
+    language.change_language("zh-CHT")
+
+  params.put.assert_not_called()
+  assert language.language == "en"
+  language.change_language("en")
+  params.put.assert_called_once_with("LanguageSetting", "en", block=True)
+
+
+def test_english_without_device_params(monkeypatch):
+  module = import_module("openpilot.system.ui.lib.multilang")
+  monkeypatch.setattr(module, "Params", None)
+  language = module.Multilang()
+  language.change_language("en")
+  assert language.tr("Change Language") == "Change Language"

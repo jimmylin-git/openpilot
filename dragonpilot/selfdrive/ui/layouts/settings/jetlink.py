@@ -25,19 +25,20 @@ from dragonpilot import jetlink_adapter
 from dragonpilot.selfdrive.ui import jetlink_ui
 from dragonpilot.selfdrive.ui.jetlink_ui import LINK_MODES, LINK_MODE_TITLES, LINK_PARAM, NONE_TEXT
 
-DESCRIPTION = ("在連接於 comma USB-C 埠的外部裝置（Jetson / Linux PC / Mac 走 USB，iPhone 走 iOS）上運算大模型。"
-               "開啟後會關閉 ADB；只能在熄火（offroad）時切換。連線中斷或延遲時，comma 會立刻改回自己的小模型繼續駕駛。")
+DESCRIPTION = ("Run big models on an external device connected to the comma USB-C port (USB for Jetson / Linux PC / Mac, iOS for iPhone). "
+               + "Enabling this disables ADB; changes are offroad-only. If the connection drops or lags, comma immediately falls back to its small model.")
 
 # dp: the iPhone charging toggle, sealed. The param stays declared so an older value can be cleared
 CHARGE_PARAM = "JetlinkChargePhone"
-CHARGE_SEALED_NOTE = ("comma 不會對手機供電，此功能已永久封印：曾有 comma 3（C3）因 comma 經 USB-C 為手機供電而主板燒毀，"
-                      "復刻機也出現三顆鏡頭失效、畫面凍結。iPhone 請改用車充、MagSafe 或帶 PD 輸入的 USB-C Hub 充電。")
+CHARGE_SEALED_NOTE = ("Phone charging from comma is permanently disabled. USB-C phone charging has caused motherboard damage on a comma 3 (C3), "
+                      + "and camera failures and frozen displays on clone devices. "
+                      + "Charge your iPhone using a car charger, MagSafe, or a USB-C hub with PD input.")
 
-PROGRESS_STAGES = {"connect": "連線", "fetch": "下載", "upload": "上傳", "build": "建置", "failed": "失敗"}
+PROGRESS_STAGES = {"connect": "Connecting", "fetch": "Downloading", "upload": "Uploading", "build": "Building", "failed": "Failed"}
 
 
 def _bool_text(v: bool) -> str:
-  return "是" if v else "否"
+  return "Yes" if v else "No"
 
 
 class JetlinkLayout(Widget):
@@ -53,20 +54,20 @@ class JetlinkLayout(Widget):
       selected_index=LINK_MODES.index(jetlink_ui.link_mode()),
       button_width=250, callback=self._on_link_mode)
 
-    self._state_item = text_item("連線狀態", lambda: jetlink_ui.STATE_TEXT[ui_state.jetlink_state],
+    self._state_item = text_item("Connection Status", lambda: jetlink_ui.STATE_TEXT[ui_state.jetlink_state],
                                  description=lambda: jetlink_ui.status_note(self._far['model']))
-    self._transport_item = text_item("傳輸方式", self._transport)
-    self._present_item = text_item("外部裝置在線", lambda: _bool_text(bool(ui_state.jetlink and ui_state.jetlink.present)))
-    self._port_item = text_item("USB 埠", self._port)
-    self._model_item = text_item("行車將使用", self._model)
-    self._ready_item = text_item("外部裝置已建置引擎", lambda: _bool_text(bool(ui_state.jetlink and ui_state.jetlink.ready)))
-    self._progress_item = text_item("進度", self._progress)
-    self._reason_item = text_item("無法使用原因", lambda: (ui_state.jetlink.reason if ui_state.jetlink and ui_state.jetlink.reason else NONE_TEXT))
-    self._adb_item = text_item("ADB", lambda: "已由 Jetlink 關閉" if ui_state.adb_blocked else ("開啟" if ui_state.params.get_bool("AdbEnabled") else "關閉"))
+    self._transport_item = text_item("Transport", self._transport)
+    self._present_item = text_item("External Device Online", lambda: _bool_text(bool(ui_state.jetlink and ui_state.jetlink.present)))
+    self._port_item = text_item("USB Port", self._port)
+    self._model_item = text_item("Model for Driving", self._model)
+    self._ready_item = text_item("External Engine Built", lambda: _bool_text(bool(ui_state.jetlink and ui_state.jetlink.ready)))
+    self._progress_item = text_item("Progress", self._progress)
+    self._reason_item = text_item("Unavailable Reason", lambda: (ui_state.jetlink.reason if ui_state.jetlink and ui_state.jetlink.reason else NONE_TEXT))
+    self._adb_item = text_item("ADB", lambda: "Disabled by Jetlink" if ui_state.adb_blocked else ("On" if ui_state.params.get_bool("AdbEnabled") else "Off"))
 
     # dp: phone charging is sealed (jetlink.comma.port.PHONE_CHARGING_SEALED); the toggle is gone and the
     # panel says why. A value an earlier build stored is cleared, so nothing reads as on
-    self._charge_item = text_item("iPhone 由 comma 供電", "已封印",
+    self._charge_item = text_item("Charge iPhone from comma", "Disabled",
                                   description=CHARGE_SEALED_NOTE)
     try:
       if ui_state.params.get_bool(CHARGE_PARAM):
@@ -79,10 +80,10 @@ class JetlinkLayout(Widget):
     self._menu_labels: dict[str, str | None] = {}
     self._refreshing = False
     self._refresh_result = ""
-    self._source_item = button_item("大模型來源", "選擇", description=self._source_description, callback=self._open_source_dialog)
-    self._far_end_item = text_item("外部裝置目前模型", self._far_end_loaded, description=self._far_end_built)
-    self._refresh_item = button_item("更新模型清單", lambda: "更新中…" if self._refreshing else "更新",
-                                     description=lambda: self._refresh_result or "從 sunnypilot 模型庫取得清單（與 Jetlink App 相同），用來為手機上的模型命名。",
+    self._source_item = button_item("Big Model Source", "Select", description=self._source_description, callback=self._open_source_dialog)
+    self._far_end_item = text_item("External Device Model", self._far_end_loaded, description=self._far_end_built)
+    self._refresh_item = button_item("Refresh Model List", lambda: "Refreshing..." if self._refreshing else "Refresh",
+                                     description=lambda: self._refresh_result or "Fetch the shared sunnypilot / Jetlink catalog to name models on your phone.",
                                      callback=self._refresh_catalog, enabled=lambda: not self._refreshing)
 
     self._items = [self._link_item, self._state_item, self._transport_item, self._present_item, self._port_item,
@@ -102,7 +103,7 @@ class JetlinkLayout(Widget):
     j = ui_state.jetlink
     if j is None or j.port is None:
       return NONE_TEXT
-    return "無裝置" if j.port == "empty" else "有裝置"
+    return "No device" if j.port == "empty" else "Device present"
 
   def _model(self) -> str:
     """The model that will drive: the far end's loaded one when following, else the comma's pick."""
@@ -143,15 +144,17 @@ class JetlinkLayout(Widget):
       model = j.active_model or j.model or j.default_model or NONE_TEXT
     else:
       model = NONE_TEXT
-    self._far = {'loaded': name(loaded) or "未回報",
-                 'built': ("外部裝置已建置：" + "、".join(name(b) for b in built)) if built else "外部裝置尚未回報已建置的模型（連線一次後顯示）。",
+    self._far = {'loaded': name(loaded) or "Not reported",
+                 'built': ("Built on external device: " + ", ".join(name(b) for b in built))
+                          if built else "No built models reported yet (shown after connecting).",
                  'model': model, 'following': following, 'at': now}
 
   def _source_description(self) -> str:
     if self._far['following']:
-      return "跟隨外部裝置：在手機（或 Jetson / Mac）App 上選的模型就是行車用的大模型，comma 不另外下載。"
+      return "Follow external device: use the big model selected in the phone (or Jetson / Mac) app. No separate download on comma."
     slot = ui_state.params.get(jetlink_adapter.KEYS.big_model) or {}
-    return f"由 comma 指定：{slot.get('displayName') or slot.get('ref', '')[:10]}。外部裝置沒有時，comma 會在停車時下載並上傳給它建置。"
+    return (f"Selected by comma: {slot.get('displayName') or slot.get('ref', '')[:10]}. "
+            + "If missing on the external device, comma downloads and uploads it for building while parked.")
 
   def _far_end_loaded(self) -> str:
     return self._far['loaded']
@@ -162,15 +165,15 @@ class JetlinkLayout(Widget):
   def _open_source_dialog(self):
     self._menu = jetlink_adapter.model_menu(ui_state.params)
     loaded, _ = jetlink_adapter.far_end_models()
-    follow_label = f"跟隨外部裝置（目前：{jetlink_adapter.model_name(loaded, ui_state.params) or '未知'}）"
+    follow_label = f"Follow External Device (current: {jetlink_adapter.model_name(loaded, ui_state.params) or 'Unknown'})"
     self._menu_labels = {follow_label: None}
     for row in self._menu:
-      notes = [n for n, on in (("已載入", row['loaded']), ("外部裝置已建置", row['built']), ("comma 已下載", row['downloaded'])) if on]
-      label = row['name'] + (f"（{'、'.join(notes)}）" if notes else "")
+      notes = [n for n, on in (("loaded", row['loaded']), ("built externally", row['built']), ("downloaded on comma", row['downloaded'])) if on]
+      label = row['name'] + (f" ({', '.join(notes)})" if notes else "")
       self._menu_labels[label] = row['ref']
     slot = ui_state.params.get(jetlink_adapter.KEYS.big_model)
     current = follow_label if self._following_now() else next((k for k, v in self._menu_labels.items() if v == (slot or {}).get('ref')), "")
-    dialog = MultiOptionDialog("選擇大模型", list(self._menu_labels.keys()), current,
+    dialog = MultiOptionDialog("Select Big Model", list(self._menu_labels.keys()), current,
                                callback=lambda result: self._on_source_selected(result, dialog))
     gui_app.push_widget(dialog)
 
@@ -186,14 +189,14 @@ class JetlinkLayout(Widget):
     if self._refreshing:
       return
     self._refreshing = True
-    self._refresh_result = "更新中…"
+    self._refresh_result = "Refreshing..."
 
     def work():
       try:
         n = jetlink_adapter.refresh_catalog(ui_state.params)
-        self._refresh_result = f"已更新：{n} 個大模型。"
+        self._refresh_result = f"Updated: {n} big models."
       except Exception as e:
-        self._refresh_result = f"更新失敗：{e}"
+        self._refresh_result = f"Refresh failed: {e}"
       finally:
         self._refreshing = False
 
@@ -227,7 +230,7 @@ class JetlinkLayout(Widget):
     status = jetlink_ui.link_status()
     description = f"{DESCRIPTION} {status}".strip()
     if j is None and not on:
-      description += " （此裝置上找不到 jetlink 套件）"
+      description += " (Jetlink package not found on this device)"
     if description != self._last_description:
       self._last_description = description
       self._link_item.set_description(description)

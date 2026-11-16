@@ -22,23 +22,23 @@ from dragonpilot.jetlink_adapter import KEYS, MODES
 
 LINK_MODES = MODES
 LINK_PARAM = KEYS.link
-LINK_MODE_TITLES = {"off": "關閉", "usb": "USB", "ios": "iOS"}
+LINK_MODE_TITLES = {"off": "Off", "usb": "USB", "ios": "iOS"}
 
 ICON_DIR = "../../dragonpilot/selfdrive/assets/icons"
 
 # the UI fonts are bitmaps holding ASCII, a few symbols and the characters of the
 # translation files: a character outside them (an em dash, a middle dot) draws as "?"
-NONE_TEXT = "無"
+NONE_TEXT = "None"
 
 # one short word per state, for the sidebar card and the onroad badge
 STATE_TEXT = {
-  JetlinkState.DISCONNECTED: "未連線",
-  JetlinkState.UNCOMPILED: "未就緒",
-  JetlinkState.READY: "就緒",
-  JetlinkState.LOADING: "連線中",
-  JetlinkState.ACTIVE: "大模型",
-  JetlinkState.FAILED: "失敗",
-  JetlinkState.WAITING: "待切換",
+  JetlinkState.DISCONNECTED: "Offline",
+  JetlinkState.UNCOMPILED: "Not ready",
+  JetlinkState.READY: "Ready",
+  JetlinkState.LOADING: "Connecting",
+  JetlinkState.ACTIVE: "Big model",
+  JetlinkState.FAILED: "Failed",
+  JetlinkState.WAITING: "Waiting",
 }
 
 GREEN = rl.Color(128, 216, 166, 255)
@@ -83,10 +83,10 @@ def link_status() -> str:
   if jetlink is None:
     return ""
   if jetlink.present:
-    return f"Jetlink 已連線：{jetlink.transport}。"
+    return f"Jetlink connected: {jetlink.transport}."
   if jetlink.port is None:
     return ""
-  return "USB 埠上沒有裝置。" if jetlink.port == "empty" else "USB 埠上有裝置（尚未回應 Jetlink）。"
+  return "No device on USB port." if jetlink.port == "empty" else "Device on USB port (no Jetlink response yet)."
 
 
 def progress() -> tuple[str, float, str] | None:
@@ -101,8 +101,8 @@ def progress() -> tuple[str, float, str] | None:
     return None
   msg = str(p.get('msg', ''))
   if drops := p.get('drops'):
-    hint = "請檢查線材或 App" if jetlink.mode == 'ios' else "請檢查線材"
-    msg = f"{msg}，{hint}（斷線 {drops} 次）"
+    hint = "check the cable or app" if jetlink.mode == 'ios' else "check the cable"
+    msg = f"{msg}, {hint} ({drops} disconnections)"
   return stage, float(p.get('frac', 0.0)), msg
 
 
@@ -120,23 +120,24 @@ def status_note(model_name: str | None = None) -> str:
   view = ui_state.jetlink_view
   if view is None:
     return ""
-  big_name = (model_name if model_name and model_name != NONE_TEXT else None) or view.model or "大模型"
+  big_name = (model_name if model_name and model_name != NONE_TEXT else None) or view.model or "Big model"
   state = ui_state.jetlink_state
   if state in (JetlinkState.FAILED, JetlinkState.UNCOMPILED):
     if view.reason:
-      return f"大模型無法使用：{view.reason}。由小模型駕駛。"
-    return "大模型無法使用，由小模型駕駛。"
+      return f"Big model unavailable: {view.reason}. Using the small model."
+    return "Big model unavailable. Using the small model."
   if state == JetlinkState.WAITING:
     if _alka_on():
-      return f"{big_name} 已就緒。ALKA 開啟中，取消巡航不會切換：關閉巡航主開關約 1 秒，或停車排入 P／N／R 檔即切換。"
-    return f"{big_name} 已就緒。取消巡航即切換，約 1 秒後再啟用。"
+      return (f"{big_name} is ready. With ALKA enabled, cancelling cruise will not switch models: "
+              + "turn the cruise main switch off for about 1 second, or stop and shift to P/N/R.")
+    return f"{big_name} is ready. Cancel cruise to switch, then re-engage after about 1 second."
   if state == JetlinkState.LOADING:
-    return "大模型就緒前由小模型駕駛。"
+    return "Using the small model until the big model is ready."
   if not view.ready:
     if view.standin:
-      return f"{view.standin} 先行駕駛，直到 {big_name} 準備完成。"
-    return f"Jetlink 就緒後將由 {big_name} 駕駛。"
-  return f"將由 {big_name} 駕駛；連線中斷時自動改用小模型，恢復後再切回。"
+      return f"Using {view.standin} until {big_name} is ready."
+    return f"{big_name} will be used when Jetlink is ready."
+  return f"Using {big_name}; automatically switching to the small model if disconnected, and back when the connection recovers."
 
 
 class JetlinkIcons:

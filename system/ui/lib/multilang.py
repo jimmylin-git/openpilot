@@ -176,7 +176,10 @@ class Multilang:
       self._plurals = {}
 
   def change_language(self, language_code: str) -> None:
-    self._params.put("LanguageSetting", language_code, block=True)
+    if language_code not in self.codes:
+      raise ValueError(f"Unsupported language: {language_code}")
+    if self._params is not None:
+      self._params.put("LanguageSetting", language_code, block=True)
     self._language = language_code
     self.setup()
 
@@ -200,6 +203,9 @@ class Multilang:
       lang = str(self._params.get("LanguageSetting")).removeprefix("main_")
       if lang in self.codes:
         self._language = lang
+      if lang != self._language:
+        cloudlog.info(f"Replacing unsupported UI language {lang!r} with {self._language}")
+        self._params.put("LanguageSetting", self._language, block=True)
 
 
 multilang = Multilang()

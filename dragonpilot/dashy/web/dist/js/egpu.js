@@ -6,8 +6,8 @@
   let connectionFailed = false;
   const dirty = new Set();
   const stages = {
-    idle: '待命', resolving: '解析模型', downloading: '下載中', compiling_warp: '編譯影像處理',
-    compiling: '編譯模型', done: '完成', failed: '失敗', cancelled: '已取消', waiting_egpu: '等待接上 eGPU',
+    idle: 'Idle', resolving: 'Resolving model', downloading: 'Downloading', compiling_warp: 'Compiling warp',
+    compiling: 'Compiling model', done: 'Done', failed: 'Failed', cancelled: 'Cancelled', waiting_egpu: 'Waiting for eGPU',
   };
 
   async function api(options) {
@@ -21,7 +21,7 @@
     const previous = dirty.has(id) ? select.value : selected;
     select.replaceChildren(new Option(emptyLabel, ''));
     rows.forEach(row => {
-      const suffix = row.compiled ? '（已編譯）' : row.downloaded ? '（已下載）' : '';
+      const suffix = row.compiled ? ' (compiled)' : row.downloaded ? ' (downloaded)' : '';
       select.add(new Option(row.name + suffix, row.ref));
     });
     select.value = [...select.options].some(option => option.value === previous) ? previous : '';
@@ -31,12 +31,12 @@
     const editable = !!state && state.offroad && !sending;
     document.querySelectorAll('button, select, input').forEach(element => { element.disabled = !editable; });
     if (!state) return;
-    $('notice').textContent = state.offroad ? 'Offroad：可以管理 eGPU' : 'Onroad：僅供查看，禁止變更';
+    $('notice').textContent = state.offroad ? 'Offroad: eGPU management available' : 'Onroad: read-only, changes disabled';
     if (sending) return;
     $('enabled').checked = state.enabled;
     $('enabled').disabled = !editable || (!state.enabled && state.jetlink_enabled);
-    fill('model', state.models, state.active.ref || '', '不使用大模型');
-    fill('delete-model', state.models.filter(row => row.compiled || row.downloaded), '', '選擇模型');
+    fill('model', state.models, state.active.ref || '', 'No big model');
+    fill('delete-model', state.models.filter(row => row.compiled || row.downloaded), '', 'Select model');
     $('select').disabled = !editable || state.busy;
     $('model').disabled = !editable || state.busy;
     $('cancel').disabled = !editable || !state.pending;
@@ -44,15 +44,15 @@
     $('clear').disabled = !editable || state.busy;
     const progress = state.progress;
     $('status').textContent = [
-      `eGPU：${state.present ? '已連接' : '未連接'} / ${state.enabled ? '啟用' : '停用'}`,
-      `本趟：${state.failed ? '失敗，退回小模型' : state.running ? '大模型執行中' : state.loading ? '載入中' : '未執行'}`,
-      `選定模型：${state.active.display_name || state.active.short_name || '無'}${state.ready ? '（已備妥）' : ''}`,
-      `處理：${stages[progress.state] || progress.state || '待命'}${state.pending ? ' / 有模型處理要求' : ''}`,
-      typeof progress.progress === 'number' ? `進度：${progress.progress}%` : '',
-      typeof progress.elapsed === 'number' ? `已用時間：${progress.elapsed} 秒` : '',
+      `eGPU: ${state.present ? 'Connected' : 'Disconnected'} / ${state.enabled ? 'Enabled' : 'Disabled'}`,
+      `This drive: ${state.failed ? 'Failed, using small model' : state.running ? 'Big model running' : state.loading ? 'Loading' : 'Not running'}`,
+      `Selected model: ${state.active.display_name || state.active.short_name || 'None'}${state.ready ? ' (ready)' : ''}`,
+      `Status: ${stages[progress.state] || progress.state || 'Idle'}${state.pending ? ' / Model request pending' : ''}`,
+      typeof progress.progress === 'number' ? `Progress: ${progress.progress}%` : '',
+      typeof progress.elapsed === 'number' ? `Elapsed: ${progress.elapsed} seconds` : '',
       progress.message || progress.detail || '',
-      progress.error ? `錯誤：${progress.error}` : '',
-      state.jetlink_enabled ? 'Jetlink 已開啟；請先在既有設定中關閉，再啟用 eGPU。' : '',
+      progress.error ? `Error: ${progress.error}` : '',
+      state.jetlink_enabled ? 'Jetlink is enabled. Disable it in settings before enabling eGPU.' : '',
     ].filter(Boolean).join('\n');
   }
 
@@ -66,7 +66,7 @@
       connectionFailed = true;
       state = null;
       render();
-      $('notice').textContent = '無法讀取裝置狀態，已停用操作';
+      $('notice').textContent = 'Unable to read device status. Controls disabled.';
       $('message').textContent = error.message;
     }
   }
@@ -80,7 +80,7 @@
       await api({method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action, value})});
       if (action === 'select') dirty.delete('model');
       if (action === 'delete') dirty.delete('delete-model');
-      $('message').textContent = '已送出要求；背景處理狀態會自動更新。';
+      $('message').textContent = 'Request sent. Background status updates automatically.';
     } catch (error) {
       $('message').textContent = error.message;
     } finally {
@@ -95,10 +95,10 @@
   $('cancel').addEventListener('click', () => act('cancel'));
   $('refresh').addEventListener('click', () => act('refresh'));
   $('delete').addEventListener('click', () => {
-    if (window.confirm('確定刪除選取模型的下載及編譯檔？')) act('delete', $('delete-model').value);
+    if (window.confirm('Delete downloaded and compiled files for the selected model?')) act('delete', $('delete-model').value);
   });
   $('clear').addEventListener('click', () => {
-    if (window.confirm('確定清除模型快取？目前使用中的模型會保留。')) act('clear');
+    if (window.confirm('Clear the model cache? The active model will be kept.')) act('clear');
   });
   async function loop() {
     await poll();

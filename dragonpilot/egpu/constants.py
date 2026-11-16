@@ -17,7 +17,7 @@ PC = not os.path.isfile('/TICI')
 # sunnypilot's own pkls are for other tinygrads and send whole frames over USB.
 # ---------------------------------------------------------------------------------------------
 JETLINK_CATALOG_PARAM = "JetlinkCatalog"          # jetlink_adapter KEYS.catalog, {bundles: [...], pointers: {ref: {oid, size}}}
-MODEL_SOURCE_LABEL = "與 Jetlink 共用"
+MODEL_SOURCE_LABEL = "Shared with Jetlink"
 
 MANIFEST_CACHE_TIMEOUT_S = 3600
 

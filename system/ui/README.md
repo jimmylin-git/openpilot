@@ -2,6 +2,14 @@
 
 The user interfaces here are built with [raylib](https://www.raylib.com/).
 
+## Device language
+
+This fork offers English only, including settings, driving alerts, Jetlink/eGPU
+status and the Dashy eGPU page. UI startup replaces unsupported saved
+`LanguageSetting` values (including `zh-CHT` and `main_zh-CHT`) with `en`.
+Existing translation catalogs remain in the source tree but are not selectable.
+Driving controls, alert severity and timing are unchanged.
+
 Quick start:
 * set `BIG=1` to run the comma 3X UI (comma four UI runs by default)
 * set `SHOW_FPS=1` to show the FPS
