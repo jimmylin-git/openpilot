@@ -6,6 +6,7 @@ import io
 from pathlib import Path
 import runpy
 import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -69,6 +70,25 @@ class DragonpilotCompatibilityTests(unittest.TestCase):
         self.assertEqual(target.longitudinal_m, 25.0)
         self.assertEqual(target.relative_speed_mps, -2.0)
         self.assertAlmostEqual(target.absolute_speed_kph, 28.8)
+
+    def test_lane_change_timing_through_model_and_car_state(self):
+        parser = RouteLogParser()
+        car_state = self.schema.Event.new_message(carState={
+            "vEgo": 10.0, "leftBlinker": True,
+            "cruiseState": {"enabled": True, "available": True},
+        }).carState
+        parser._update_lane_change_meta(SimpleNamespace(laneChangeState="preLaneChange", laneChangeDirection="left"), "modelV2")
+        frame_to_state(parser._frame_from_car_state(car_state, 10.0))
+        parser._update_lane_change_meta(SimpleNamespace(laneChangeState="laneChangeStarting", laneChangeDirection="left"), "modelV2")
+        first = frame_to_state(parser._frame_from_car_state(car_state, 10.5))
+        middle = frame_to_state(parser._frame_from_car_state(car_state, 12.8))
+        finished = frame_to_state(parser._frame_from_car_state(car_state, 14.21))
+        self.assertEqual(first.lane_change_phase, "preparing")
+        self.assertEqual(first.road_view_lane_position, 0.0)
+        self.assertAlmostEqual(middle.lane_change_progress, 0.5)
+        self.assertAlmostEqual(middle.road_view_lane_position, 0.5)
+        self.assertEqual(finished.lane_change_progress, 1.0)
+        self.assertEqual(finished.road_view_lane_position, 1.0)
 
     def test_destination_accelerator_schema(self):
         event = self.schema.Event.new_message(modelExt={"bigModel": True, "acceleratorState": "running"})

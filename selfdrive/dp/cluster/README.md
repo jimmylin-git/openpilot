@@ -62,13 +62,17 @@ with their centers and base elevation retained; TR-12.3, ego vehicles and lane
 geometry are unchanged.
 Surrounding-car markers on both panels are then narrowed by 20%; their length,
 height, center and base elevation are unchanged. The ego vehicle is unchanged.
-Live and route-replay lane transitions begin at the model's
-`laneChangeStarting` state, not after the maneuver finishes. The road grid
-slides with a smootherstep curve over 0.85 seconds while the ego car stays
-centered; preparing/blinker-only states do not start the slide. Completion
-does not play a second recenter animation. An interrupted slide returns
-smoothly to its original lane. This is display-only, shared by both TR panels,
-and does not change lane-change control or report physical maneuver progress.
+Live and route-replay lane transitions require a matching single turn signal
+and model lane-change confirmation. The first two 0.7-second cluster signal
+cycles do not move the road; from the third cycle the road grid slides with a
+smootherstep curve over 2.8 seconds while the ego car stays centered, reaching
+the target around the seventh flash. A later model confirmation starts the
+same 2.8-second slide later. Once confirmed, the slide continues to completion
+even if the model state or turn signal ends, including on an aborted maneuver;
+it can therefore depict a lane change that did not happen. The animation uses
+the cluster's simulated blink timing, not measured physical lamp flashes, and
+does not report physical maneuver progress. It is display-only, shared by both
+TR panels, and does not change lane-change control.
 The four fixed lane boundaries use dashed paint (5.2 m paint / 4.2 m gap).
 Both TR panels scroll the dashes toward the ego car at a fixed 18 m/s
 (15 times the ground grid's unchanged 1.2 m/s) whenever the vehicle is moving, independent of driving speed;

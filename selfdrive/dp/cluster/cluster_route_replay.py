@@ -23,6 +23,8 @@ from cluster_config import (
     BLUE,
     BLUE_SOFT,
     DEFAULT_LANE_WIDTH_M,
+    LANE_CHANGE_ANIMATION_SECONDS,
+    LANE_CHANGE_SIGNAL_WAIT_SECONDS,
     MAX_ACCEL_MPS2,
     MAX_SPEED_KPH,
     MAX_STEERING_ANGLE_DEG,
@@ -1014,6 +1016,8 @@ class RouteLogParser:
         self.lane_change_state = "off"
         self.lane_change_direction = "none"
         self.lane_change_started_t: float | None = None
+        self.lane_change_signal_direction: str | None = None
+        self.lane_change_signal_started_t: float | None = None
         self.active_lane_change_direction: str | None = None
         self.lane_change_last_progress = 0.0
         self.lane_change_recenter_direction: str | None = None
@@ -1927,7 +1931,7 @@ class RouteLogParser:
         observed_ego_lane_offset: float,
     ) -> tuple[str | None, str, float, float, bool]:
         if LANE_CHANGE_MODEL_DIRECT_ONLY:
-            return self._model_direct_lane_change_values(event_t)
+            return self._model_direct_lane_change_values(event_t, left_signal, right_signal)
 
         def remember(result: tuple[str | None, str, float, float, bool]) -> tuple[str | None, str, float, float, bool]:
             self.lane_change_previous_state = self.lane_change_state
@@ -2084,64 +2088,57 @@ class RouteLogParser:
             desire_progress = 0.0
         return clamp(max(fade_progress, timer_progress, desire_progress), 0.0, 0.78)
 
-    def _model_direct_lane_change_values(self, event_t: float) -> tuple[str | None, str, float, float, bool]:
+    def _model_direct_lane_change_values(
+        self, event_t: float, left_signal: bool, right_signal: bool,
+    ) -> tuple[str | None, str, float, float, bool]:
         self.lane_change_continuation_active = False
         previous_state = self.lane_change_previous_state
         self.lane_change_previous_state = self.lane_change_state
         self.lane_change_peak_directional_observed_offset = 0.0
+
+        signal_direction = "left" if left_signal and not right_signal else "right" if right_signal and not left_signal else None
+        if signal_direction != self.lane_change_signal_direction or (
+            self.lane_change_signal_started_t is not None and event_t < self.lane_change_signal_started_t
+        ):
+            self.lane_change_signal_direction = signal_direction
+            self.lane_change_signal_started_t = event_t if signal_direction is not None else None
 
         if not self.model_lane_change_seen:
             self._clear_model_direct_lane_change_state()
             return None, "idle", 0.0, 1.0, False
 
         direction = self.lane_change_direction if self.lane_change_direction in ("left", "right") else None
-        if direction is None or self.lane_change_state == "off":
-            recenter_values = self._model_direct_recenter_values(event_t)
-            if recenter_values is not None:
-                return recenter_values
+        if self.lane_change_state == "preLaneChange" and self.lane_change_started_t is None:
+            self._clear_model_direct_lane_change_state()
+            self.active_lane_change_direction = direction
+            return (direction, "preparing", 0.0, 1.0, False) if direction else (None, "idle", 0.0, 1.0, False)
+
+        model_changing = self.lane_change_state in ("laneChangeStarting", "laneChangeFinishing") and direction is not None
+        if model_changing and (
+            self.active_lane_change_direction != direction
+            or (previous_state in ("off", "preLaneChange", "laneChangeFinishing") and self.lane_change_state == "laneChangeStarting"
+                and self.lane_change_started_t is not None)
+        ):
+            self._clear_model_direct_lane_change_state()
+
+        if self.lane_change_started_t is None and model_changing:
+            if direction != self.lane_change_signal_direction or self.lane_change_signal_started_t is None:
+                return direction, "preparing", 0.0, 1.0, False
+            self.active_lane_change_direction = direction
+            self.lane_change_started_t = max(event_t, self.lane_change_signal_started_t + LANE_CHANGE_SIGNAL_WAIT_SECONDS)
+
+        if self.lane_change_started_t is None or self.active_lane_change_direction is None:
             self._clear_model_direct_lane_change_state()
             return None, "idle", 0.0, 1.0, False
 
-        self.lane_change_recenter_direction = None
-        self.lane_change_recenter_started_t = None
-        self.lane_change_recenter_start_progress = 1.0
-        if self.lane_change_state == "preLaneChange":
-            self.lane_change_started_t = None
-            self.active_lane_change_direction = direction
-            self.lane_change_last_progress = 0.0
+        direction = self.active_lane_change_direction
+        if event_t < self.lane_change_started_t:
             return direction, "preparing", 0.0, 1.0, False
-
-        if (
-            self.lane_change_started_t is None
-            or self.active_lane_change_direction != direction
-            or (previous_state == "laneChangeFinishing" and self.lane_change_state == "laneChangeStarting")
-        ):
-            self.lane_change_started_t = event_t
-        self.active_lane_change_direction = direction
-        progress = clamp(
-            (event_t - self.lane_change_started_t) / MODEL_DIRECT_LANE_RECENTER_SECONDS,
-            0.0,
-            1.0,
-        )
+        progress = clamp((event_t - self.lane_change_started_t) / LANE_CHANGE_ANIMATION_SECONDS, 0.0, 1.0)
         self.lane_change_last_progress = progress
+        if progress >= 1.0 and not model_changing:
+            self._clear_model_direct_lane_change_state()
         return direction, "changing", progress, 1.0, False
-
-    def _model_direct_recenter_values(self, event_t: float) -> tuple[str, str, float, float, bool] | None:
-        if (
-            self.lane_change_recenter_direction is None
-            and self.active_lane_change_direction is not None
-            and 0.0 < self.lane_change_last_progress < 1.0
-        ):
-            self.lane_change_recenter_direction = self.active_lane_change_direction
-            self.lane_change_recenter_started_t = event_t
-            self.lane_change_recenter_start_progress = clamp(self.lane_change_last_progress, 0.0, 1.0)
-            self.active_lane_change_direction = None
-            self.lane_change_last_progress = 0.0
-
-        recenter_values = self._lane_change_recenter_values(event_t)
-        if recenter_values is not None:
-            return recenter_values
-        return None
 
     def _clear_model_direct_lane_change_state(self) -> None:
         self.lane_change_started_t = None
