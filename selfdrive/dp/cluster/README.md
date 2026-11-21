@@ -67,9 +67,11 @@ and model lane-change confirmation. The first two 0.7-second cluster signal
 cycles do not move the road; from the third cycle the road grid slides with a
 smootherstep curve over 2.8 seconds while the ego car stays centered, reaching
 the target around the seventh flash. A later model confirmation starts the
-same 2.8-second slide later. Once confirmed, the slide continues to completion
-even if the model state or turn signal ends, including on an aborted maneuver;
-it can therefore depict a lane change that did not happen. The animation uses
+same 2.8-second slide later. If the matching turn signal ends or changes, or
+the model returns to preparation or ends the lane-change state, the slide stops
+immediately and the display returns to the current lane. A normal model
+completion can also end the animation before the seventh flash; the signals
+do not reliably distinguish completion from cancellation. The animation uses
 the cluster's simulated blink timing, not measured physical lamp flashes, and
 does not report physical maneuver progress. It is display-only, shared by both
 TR panels, and does not change lane-change control.

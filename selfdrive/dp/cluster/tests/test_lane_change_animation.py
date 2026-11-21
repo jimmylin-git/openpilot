@@ -67,23 +67,38 @@ def test_late_model_confirmation_keeps_full_animation_duration():
 def test_model_start_requires_matching_single_signal(signal):
     parser = RouteLogParser()
     state = advance(parser, 0.0, "laneChangeStarting", "left", signal)
-    assert state.lane_change_phase == "preparing"
+    assert state.lane_change_phase == "idle"
     assert advance(parser, 5.0, "laneChangeStarting", "left", signal).lane_change_progress == 0.0
     assert advance(parser, 6.0, "laneChangeStarting", "left", "left").lane_change_progress == 0.0
     assert advance(parser, 7.5, "laneChangeStarting", "left", "left").lane_change_progress > 0.0
 
 
 @pytest.mark.parametrize("end_time", [0.5, 2.0])
-@pytest.mark.parametrize("end_state", ["off", "preLaneChange"])
-def test_confirmed_animation_finishes_even_if_model_and_signal_end(end_time, end_state):
+@pytest.mark.parametrize("end_state,signal", [
+    ("off", "left"), ("preLaneChange", "left"),
+    ("laneChangeStarting", "none"), ("laneChangeFinishing", "right"),
+    ("laneChangeStarting", "both"),
+])
+def test_cancel_stops_animation_without_waiting_for_other_signals(end_time, end_state, signal):
     parser = RouteLogParser()
     advance(parser, 0.0, "laneChangeStarting")
-    before = advance(parser, end_time, "laneChangeStarting")
-    after = advance(parser, end_time, end_state, signal="none")
-    assert after.lane_change_progress == before.lane_change_progress
-    assert after.lane_change_phase == before.lane_change_phase
-    assert advance(parser, 4.21, "off", signal="none").lane_change_progress == 1.0
-    assert advance(parser, 4.3, "off", signal="none").lane_change_phase == "idle"
+    advance(parser, end_time, "laneChangeStarting")
+    after = advance(parser, end_time, end_state, signal=signal)
+    assert after.lane_change_phase == "idle"
+    assert after.lane_change_progress == 0.0
+    assert route_lane_animation_values(after, 0.0)[:3] == (0.0, 0.0, 0.0)
+    assert route_lane_animation_values(after, 0.2) == (0.2, 0.0, 0.0, None, False)
+    assert parser.lane_change_started_t is None
+
+
+def test_cancellation_does_not_resume_a_stale_animation():
+    parser = RouteLogParser()
+    advance(parser, 0.0, "laneChangeStarting")
+    advance(parser, 2.0, "laneChangeStarting")
+    advance(parser, 2.1, "laneChangeStarting", signal="none")
+    assert advance(parser, 2.2, "laneChangeStarting").lane_change_progress == 0.0
+    assert advance(parser, 3.5, "laneChangeStarting").lane_change_progress == 0.0
+    assert advance(parser, 3.7, "laneChangeStarting").lane_change_progress > 0.0
 
 
 def test_signal_reset_restarts_wait_and_second_change_gets_its_own_clock():

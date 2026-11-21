@@ -2108,22 +2108,28 @@ class RouteLogParser:
             return None, "idle", 0.0, 1.0, False
 
         direction = self.lane_change_direction if self.lane_change_direction in ("left", "right") else None
-        if self.lane_change_state == "preLaneChange" and self.lane_change_started_t is None:
+        if self.lane_change_state == "preLaneChange":
+            was_animating = self.lane_change_started_t is not None
             self._clear_model_direct_lane_change_state()
+            if was_animating or direction != signal_direction:
+                return None, "idle", 0.0, 1.0, False
             self.active_lane_change_direction = direction
             return (direction, "preparing", 0.0, 1.0, False) if direction else (None, "idle", 0.0, 1.0, False)
 
         model_changing = self.lane_change_state in ("laneChangeStarting", "laneChangeFinishing") and direction is not None
-        if model_changing and (
+        if not model_changing or direction != signal_direction:
+            self._clear_model_direct_lane_change_state()
+            return None, "idle", 0.0, 1.0, False
+
+        if (
             self.active_lane_change_direction != direction
             or (previous_state in ("off", "preLaneChange", "laneChangeFinishing") and self.lane_change_state == "laneChangeStarting"
                 and self.lane_change_started_t is not None)
         ):
             self._clear_model_direct_lane_change_state()
 
-        if self.lane_change_started_t is None and model_changing:
-            if direction != self.lane_change_signal_direction or self.lane_change_signal_started_t is None:
-                return direction, "preparing", 0.0, 1.0, False
+        if self.lane_change_started_t is None:
+            assert self.lane_change_signal_started_t is not None
             self.active_lane_change_direction = direction
             self.lane_change_started_t = max(event_t, self.lane_change_signal_started_t + LANE_CHANGE_SIGNAL_WAIT_SECONDS)
 
@@ -2136,8 +2142,6 @@ class RouteLogParser:
             return direction, "preparing", 0.0, 1.0, False
         progress = clamp((event_t - self.lane_change_started_t) / LANE_CHANGE_ANIMATION_SECONDS, 0.0, 1.0)
         self.lane_change_last_progress = progress
-        if progress >= 1.0 and not model_changing:
-            self._clear_model_direct_lane_change_state()
         return direction, "changing", progress, 1.0, False
 
     def _clear_model_direct_lane_change_state(self) -> None:
